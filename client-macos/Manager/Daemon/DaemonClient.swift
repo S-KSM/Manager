@@ -12,6 +12,15 @@ protocol DaemonClientProtocol: Sendable {
     func getMemory(workstreamID: String) async throws -> String
     func getEvents(workstreamID: String) async throws -> [Event]
     func streamEvents(workstreamID: String) -> AsyncStream<Event>
+    /// Submit a human-issued intervention (nudge / redirect / rollback) to
+    /// the daemon's per-workstream queue. The returned `Intervention` is the
+    /// persisted record (with `id` and `created_at` filled by the daemon).
+    /// `rollbackToDecisionID` is required when `kind == .rollback`, ignored
+    /// otherwise.
+    func postIntervention(workstreamID: String,
+                          kind: InterventionKind,
+                          message: String,
+                          rollbackToDecisionID: String?) async throws -> Intervention
     /// Returns `false` on connection error; never throws. Used by
     /// `DaemonResolver` to choose live vs mock at startup.
     func health() async -> Bool
@@ -40,6 +49,7 @@ enum DaemonError: Error, LocalizedError {
 ///   GET  /workstreams/{id}
 ///   GET  /workstreams/{id}/memory   (raw Markdown body)
 ///   GET  /workstreams/{id}/events   (JSON array of envelope events)
+///   POST /interventions             (queue a nudge/redirect/rollback)
 ///   GET  /health                    (200 OK)
 ///   WS   /workstreams/{id}/events/stream
 final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
@@ -48,6 +58,7 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
     private let baseURL: URL
     private let session: URLSession
     private let decoder: JSONDecoder
+    private let encoder: JSONEncoder
 
     init(baseURL: URL = LiveDaemonClient.defaultBaseURL,
                 session: URLSession = .shared) {
@@ -56,6 +67,9 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601WithFractionalSeconds
         self.decoder = d
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .iso8601
+        self.encoder = e
     }
 
     func health() async -> Bool {
@@ -88,6 +102,47 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
 
     func getEvents(workstreamID: String) async throws -> [Event] {
         try await getJSON(path: "workstreams/\(workstreamID)/events")
+    }
+
+    func postIntervention(workstreamID: String,
+                          kind: InterventionKind,
+                          message: String,
+                          rollbackToDecisionID: String?) async throws -> Intervention {
+        let url = baseURL.appendingPathComponent("interventions")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        // The wire body is `{workstream_id, kind, payload}`. We don't reuse
+        // `Intervention` here because the daemon owns id/created_at/delivered_at.
+        let body = InterventionRequestBody(
+            workstreamID: workstreamID,
+            kind: kind,
+            payload: InterventionPayload(
+                message: message.isEmpty ? nil : message,
+                rollbackToDecisionID: rollbackToDecisionID
+            )
+        )
+        do {
+            req.httpBody = try encoder.encode(body)
+        } catch {
+            throw DaemonError.decoding(error)
+        }
+
+        do {
+            let (data, response) = try await session.data(for: req)
+            try Self.assertOK(response)
+            do {
+                return try decoder.decode(Intervention.self, from: data)
+            } catch {
+                throw DaemonError.decoding(error)
+            }
+        } catch let e as DaemonError {
+            throw e
+        } catch {
+            throw DaemonError.transport(error)
+        }
     }
 
     func streamEvents(workstreamID: String) -> AsyncStream<Event> {
@@ -161,6 +216,21 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         guard (200..<300).contains(http.statusCode) else {
             throw DaemonError.badResponse(http.statusCode)
         }
+    }
+}
+
+/// Wire shape for `POST /interventions`. Intentionally separate from
+/// `Intervention` because the request omits server-owned fields
+/// (`id`, `created_at`, `delivered_at`).
+private struct InterventionRequestBody: Encodable {
+    let workstreamID: String
+    let kind: InterventionKind
+    let payload: InterventionPayload
+
+    enum CodingKeys: String, CodingKey {
+        case workstreamID = "workstream_id"
+        case kind
+        case payload
     }
 }
 

@@ -12,6 +12,11 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
     private let memoryByWorkstream: [String: String]
     private let simulatedLatency: Duration
 
+    /// In-memory store for interventions submitted via `postIntervention`.
+    /// Guarded by `interventionsLock` so concurrent UI taps stay safe.
+    private var _interventions: [Intervention] = []
+    private let interventionsLock = NSLock()
+
     init(
         workstreams: [Workstream] = MockData.workstreams,
         eventsByWorkstream: [String: [Event]] = MockData.eventsByWorkstream,
@@ -22,6 +27,14 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         self.eventsByWorkstream = eventsByWorkstream
         self.memoryByWorkstream = memoryByWorkstream
         self.simulatedLatency = simulatedLatency
+    }
+
+    /// Read-only snapshot of every intervention this mock has accepted, in
+    /// insertion order. Test-only helper; not part of the protocol.
+    var interventions: [Intervention] {
+        interventionsLock.lock()
+        defer { interventionsLock.unlock() }
+        return _interventions
     }
 
     func health() async -> Bool { true }
@@ -48,6 +61,32 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
     func getEvents(workstreamID: String) async throws -> [Event] {
         try? await Task.sleep(for: simulatedLatency)
         return eventsByWorkstream[workstreamID] ?? []
+    }
+
+    /// Always succeeds. Appends a synthetic `Intervention` (with a generated
+    /// `id` and `created_at = now`, `delivered_at = nil`) into the in-memory
+    /// store and returns it so the UI can roundtrip exactly like the live
+    /// daemon does.
+    func postIntervention(workstreamID: String,
+                          kind: InterventionKind,
+                          message: String,
+                          rollbackToDecisionID: String?) async throws -> Intervention {
+        try? await Task.sleep(for: simulatedLatency)
+        let intervention = Intervention(
+            id: "int_mock_\(UUID().uuidString.prefix(8))",
+            workstreamID: workstreamID,
+            kind: kind,
+            payload: InterventionPayload(
+                message: message.isEmpty ? nil : message,
+                rollbackToDecisionID: rollbackToDecisionID
+            ),
+            createdAt: Date(),
+            deliveredAt: nil
+        )
+        interventionsLock.lock()
+        _interventions.append(intervention)
+        interventionsLock.unlock()
+        return intervention
     }
 
     func streamEvents(workstreamID: String) -> AsyncStream<Event> {

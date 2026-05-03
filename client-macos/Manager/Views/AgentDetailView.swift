@@ -8,7 +8,8 @@ import SwiftUI
 ///     events. Decisions expand to show considered/choice/rationale/confidence.
 ///   - MemoryPaneView: the workstream's Markdown memory file, read-only in v0.
 ///
-/// No intervention controls — those land in v0.5.
+/// The header carries the v0.5 "Intervene" button which opens the
+/// `InterventionPanel` sheet (nudge / redirect / rollback).
 struct AgentDetailView: View {
     let workstream: Workstream
     let client: DaemonClientProtocol
@@ -17,6 +18,7 @@ struct AgentDetailView: View {
     @State private var memoryRaw: String = ""
     @State private var loadingEvents = true
     @State private var loadingMemory = true
+    @State private var showInterventionPanel = false
 
     var body: some View {
         HSplitView {
@@ -45,6 +47,14 @@ struct AgentDetailView: View {
         .task(id: workstream.id) {
             await reload()
         }
+        .sheet(isPresented: $showInterventionPanel) {
+            InterventionPanel(
+                workstream: workstream,
+                events: events,
+                client: client,
+                onSent: { await reload() }
+            )
+        }
     }
 
     private var header: some View {
@@ -63,6 +73,15 @@ struct AgentDetailView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.orange)
             }
+            Button {
+                showInterventionPanel = true
+            } label: {
+                Label("Intervene", systemImage: "wand.and.stars")
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.purple)
+            .controlSize(.small)
+            .help("Send a nudge, redirect, or rollback to this workstream.")
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)

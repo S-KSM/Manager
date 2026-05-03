@@ -22,6 +22,9 @@
 		A100000000000000000000AD /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000BD /* Preview Assets.xcassets */; };
 		A100000000000000000000AE /* EventCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000BE /* EventCodableTests.swift */; };
 		A100000000000000000000AF /* MockDaemonClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000BF /* MockDaemonClientTests.swift */; };
+		A100000000000000000001A1 /* Intervention.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000001B1 /* Intervention.swift */; };
+		A100000000000000000001A2 /* InterventionPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000001B2 /* InterventionPanel.swift */; };
+		A100000000000000000001A3 /* InterventionCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000001B3 /* InterventionCodableTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -50,6 +53,9 @@
 		A100000000000000000000BD /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		A100000000000000000000BE /* EventCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventCodableTests.swift; sourceTree = "<group>"; };
 		A100000000000000000000BF /* MockDaemonClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockDaemonClientTests.swift; sourceTree = "<group>"; };
+		A100000000000000000001B1 /* Intervention.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Intervention.swift; sourceTree = "<group>"; };
+		A100000000000000000001B2 /* InterventionPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterventionPanel.swift; sourceTree = "<group>"; };
+		A100000000000000000001B3 /* InterventionCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterventionCodableTests.swift; sourceTree = "<group>"; };
 		A100000000000000000000C0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A100000000000000000000C1 /* Manager.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Manager.entitlements; sourceTree = "<group>"; };
 		A100000000000000000000C2 /* Manager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Manager.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -103,6 +109,7 @@
 			children = (
 				A100000000000000000000BE /* EventCodableTests.swift */,
 				A100000000000000000000BF /* MockDaemonClientTests.swift */,
+				A100000000000000000001B3 /* InterventionCodableTests.swift */,
 			);
 			path = ManagerTests;
 			sourceTree = "<group>";
@@ -122,6 +129,7 @@
 				A100000000000000000000B3 /* Workstream.swift */,
 				A100000000000000000000B4 /* Event.swift */,
 				A100000000000000000000B5 /* Memory.swift */,
+				A100000000000000000001B1 /* Intervention.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -141,6 +149,7 @@
 			children = (
 				A100000000000000000000B9 /* HomeView.swift */,
 				A100000000000000000000BA /* AgentDetailView.swift */,
+				A100000000000000000001B2 /* InterventionPanel.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -268,11 +277,13 @@
 				A100000000000000000000A3 /* Workstream.swift in Sources */,
 				A100000000000000000000A4 /* Event.swift in Sources */,
 				A100000000000000000000A5 /* Memory.swift in Sources */,
+				A100000000000000000001A1 /* Intervention.swift in Sources */,
 				A100000000000000000000A6 /* DaemonClient.swift in Sources */,
 				A100000000000000000000A7 /* MockDaemonClient.swift in Sources */,
 				A100000000000000000000A8 /* DaemonResolver.swift in Sources */,
 				A100000000000000000000A9 /* HomeView.swift in Sources */,
 				A100000000000000000000AA /* AgentDetailView.swift in Sources */,
+				A100000000000000000001A2 /* InterventionPanel.swift in Sources */,
 				A100000000000000000000AB /* MockData.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -283,6 +294,7 @@
 			files = (
 				A100000000000000000000AE /* EventCodableTests.swift in Sources */,
 				A100000000000000000000AF /* MockDaemonClientTests.swift in Sources */,
+				A100000000000000000001A3 /* InterventionCodableTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -67,4 +67,36 @@ final class MockDaemonClientTests: XCTestCase {
         XCTAssertTrue(headings.contains("Current state"))
         XCTAssertTrue(headings.contains("Key decisions"))
     }
+
+    func testPostInterventionStoresAndReturnsRecord() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+
+        let nudge = try await client.postIntervention(
+            workstreamID: "frontend-refactor",
+            kind: .nudge,
+            message: "consider the offline-cache case",
+            rollbackToDecisionID: nil
+        )
+        XCTAssertEqual(nudge.workstreamID, "frontend-refactor")
+        XCTAssertEqual(nudge.kind, .nudge)
+        XCTAssertEqual(nudge.payload.message, "consider the offline-cache case")
+        XCTAssertNil(nudge.payload.rollbackToDecisionID)
+        XCTAssertNil(nudge.deliveredAt)
+        XCTAssertFalse(nudge.id.isEmpty)
+
+        let rollback = try await client.postIntervention(
+            workstreamID: "frontend-refactor",
+            kind: .rollback,
+            message: "",
+            rollbackToDecisionID: "dec_07"
+        )
+        XCTAssertEqual(rollback.kind, .rollback)
+        XCTAssertEqual(rollback.payload.rollbackToDecisionID, "dec_07")
+        XCTAssertNil(rollback.payload.message,
+                     "empty hint should encode as nil per the wire contract")
+
+        XCTAssertEqual(client.interventions.count, 2)
+        XCTAssertEqual(client.interventions.map(\.kind), [.nudge, .rollback])
+        XCTAssertNotEqual(client.interventions[0].id, client.interventions[1].id)
+    }
 }
