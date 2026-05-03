@@ -21,6 +21,9 @@ npm-debug.log*
 .vscode/
 .idea/
 
+# Claude Code project-local settings (per-machine)
+.claude/settings.local.json
+
 # Local dev event store / memory (per-machine, not in repo)
 events/
 memory/

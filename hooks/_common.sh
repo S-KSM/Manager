@@ -39,6 +39,8 @@ manager_post() {
 
   # Enrich the payload. Prefer jq for robust JSON merging; fall back to a
   # minimal shell construction that sends a wrapper object on parse failure.
+  # Claude Code's hook payload uses `session_id`; honor it first, then `session`,
+  # then MANAGER_SESSION_ID env var.
   enriched=""
   if command -v jq >/dev/null 2>&1; then
     enriched=$(printf '%s' "$payload" | jq -c \
@@ -47,7 +49,8 @@ manager_post() {
       --arg hook "$hook_name" \
       '. as $p | (if (type=="object") then $p else {raw: $p} end)
        | .workstream = (.workstream // $workstream)
-       | (if ($session|length) > 0 then .session = (.session // $session) else . end)
+       | (.session_id // .session // $session) as $sid
+       | (if ($sid|length) > 0 then .session = $sid else . end)
        | .hook = $hook' 2>/dev/null)
   fi
 
