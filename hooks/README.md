@@ -1,8 +1,10 @@
-# Manager Hooks
+# Dispatch Hooks
 
-POSIX shell hooks that Claude Code runs at session lifecycle events. Each one POSTs the hook payload to the running Manager daemon. They are **fail-soft**: if the daemon isn't running, they log to stderr and exit 0 — they never block the agent's loop.
+POSIX shell hooks that Claude Code runs at session lifecycle events. Each one POSTs the hook payload to the running Dispatch daemon. They are **fail-soft**: if the daemon isn't running, they log to stderr and exit 0 — they never block the agent's loop.
 
 See [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) for the event contract.
+
+> Codenamed **Manager** through v1.1.x; env vars remain `MANAGER_*` and the daemon URL still says `manager` until the v1.2 code-layer rename. Behavior is unchanged.
 
 ## What each hook captures
 

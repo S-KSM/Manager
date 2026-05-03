@@ -1,6 +1,19 @@
 # Architecture
 
-This document describes the components, data flow, and contracts that make Manager work. It is the source of truth for the v0 build.
+This document describes the components, data flow, and contracts that make **Dispatch** work. It is the source of truth for the wire contract.
+
+> Dispatch was codenamed Manager through v1.1.x; runtime artifacts (binary `manager`, env vars `MANAGER_*`, state dir `~/.claude/manager/`, launchd label `com.manager.daemon`, Xcode `Manager` project / Swift module) still use the original name. They get renamed in v1.2 — see [`ROADMAP.md`](ROADMAP.md). Internal contract identifiers below (event types, MCP tool names, SQLite columns) are stable and do not change with the rebrand.
+
+## Dispatch lexicon → contract terms
+
+| Dispatch term (user-facing) | Contract term (internal) |
+|---|---|
+| **The Radar** | home view: digest + workstream cards + live event ticker |
+| **The Trace** | methodology timeline rendered from `decision` / `subgoal_*` / `confidence` / `blocked` events |
+| **Intercept** | intervention (`kind ∈ {nudge, redirect, rollback}`); `intervention_delivered` event |
+| **The Protocol** | team handbook + `propose_skill` MCP tool + `skill_proposed` / `skill_promoted` events |
+| **The Dossier** | per-workstream Markdown memory file; `update_memory` / `read_memory` MCP tools; `memory_update` event |
+| Head Dispatcher | the human user of Dispatch |
 
 ## Design principles
 
@@ -54,7 +67,7 @@ graph LR
 
 ## Components
 
-### Manager Daemon
+### Dispatch Daemon
 
 Long-running local process. The only stateful component. Stack: **TypeScript / Node** — chosen for the official MCP SDK (most mature), cross-platform fit, and fast iteration. Rust remains a future option if footprint becomes a binding constraint.
 

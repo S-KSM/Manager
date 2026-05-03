@@ -1,12 +1,10 @@
-# Manager — macOS client (v0)
+# Dispatch — macOS client
 
-SwiftUI front-end for the Manager daemon. Renders the **three-zone home view**
-(digest rail, team floor, live ticker) and an **agent detail view** with a
-**methodology timeline** and **memory pane**.
+SwiftUI front-end for the Dispatch daemon. Renders **The Radar** — the three-zone home view (digest rail, team floor, live ticker) — and an **agent detail view** with **The Trace** (methodology timeline) + **Dossier** pane (workstream memory). Intercept controls (nudge / redirect / rollback) live on the agent-detail toolbar; Protocol promotion happens from the decision rows in the Trace.
 
-> Scope is observation only — no intervention controls in v0. Those land in v0.5.
-> The contract this client speaks to is documented in `docs/ARCHITECTURE.md` at
-> the repo root; treat that as the source of truth.
+> Codenamed **Manager** through v1.1.x. The Xcode project, Swift module, bundle identifier, `CFBundleDisplayName`, and app icon all still carry the old name — they get renamed in v1.2 alongside the daemon code-layer rename and a new brutalist "D" icon (see `docs/ROADMAP.md`).
+>
+> The contract this client speaks to is documented in [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) at the repo root; treat that as the source of truth.
 
 ## Stack
 

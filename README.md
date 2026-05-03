@@ -1,6 +1,10 @@
-# Manager
+# Dispatch
 
-Manage AI agents like employees. The human is VP of Engineering / CEO; the agents are the team.
+> **Mission Control for the Autonomous Workforce.**
+
+Air-traffic-control for AI agents. Agents are pilots; you're the head dispatcher. Watch the radar, trace methodology, intercept errors, broadcast new protocols across the fleet.
+
+> Originally codenamed **Manager**; rebranded to Dispatch in v1.1.x. Runtime paths (`~/.claude/manager/`, `MANAGER_*` env vars, the `manager` binary) still use the old name until a follow-up code-layer rename — fully working installs are unaffected.
 
 ## Quickstart (60 seconds)
 
@@ -13,25 +17,27 @@ bash ~/Code/Manager/bin/install.sh
 export ANTHROPIC_API_KEY=sk-ant-...
 # Or use a local model: brew install ollama && ollama serve && ollama pull qwen3:8b
 
-# 3. Use claude in any project — Manager picks up the workstream from the directory
+# 3. Use claude in any project — Dispatch picks up the workstream from the directory
 cd ~/Code/some-project
 claude
 ```
 
-A card for `some-project` appears in the Manager macOS app within seconds. Decision events emitted by the agent flow into the methodology timeline live. Send a nudge / redirect / rollback from the app to course-correct mid-flight.
+A card for `some-project` appears on the **Radar** within seconds. Decision events from the agent flow into **The Trace** live. Open an **Intercept** (nudge / redirect / rollback) from the app to course-correct mid-flight.
 
 To dry-run prereqs without installing: `bash bin/install.sh --check-only`.
 To uninstall: `bash bin/uninstall.sh`.
 
-## What you get
+## The Dispatch lexicon
 
-- **Live multi-agent monitoring** — glanceable home view: digest rail at the top, team floor of workstream cards, live ticker on the right.
-- **Methodology tracking** — agents emit structured decision events (`considered`, `choice`, `rationale`, `confidence`); the timeline shows the reasoning tree, not a raw transcript.
-- **Mid-flight intervention** — nudge (advisory), redirect (hard course-correct), or rollback (rewind to a decision point and re-run with a hint and the original context).
-- **Workstream lifecycle in the app** — create / pause / retire from the sidebar; no CLI ritual.
-- **Skill broadcast** — agent proposes a pattern via `propose_skill`; manager promotes it to the team handbook; every workstream's next session sees it.
-- **Weekly / monthly Updates** — generate audience-tuned summaries (executive, business partner, engineer peer, sponsor, or free-text) via Claude API or a local LLM (Ollama). On-demand or scheduled drafts.
-- **Persistent workstreams** — identity survives across many `claude` sessions via a per-workstream Markdown memory file the agent maintains.
+| Capability | Dispatch term | What it is |
+|---|---|---|
+| Live monitoring | **The Radar** | Glanceable home view — digest rail + team floor of agent cards + live ticker. |
+| Methodology tracking | **The Trace** | Forensic trail of *why* — structured decision events (`considered`, `choice`, `rationale`, `confidence`) rendered as a timeline, not a transcript. |
+| Mid-flight intervention | **Intercept** | Three modes — nudge (advisory), redirect (hard course-correct), rollback (rewind to a decision and replay with a hint and the original context). |
+| Skill broadcast | **The Protocol** | Agent proposes a pattern via `propose_skill`; you promote it to the team handbook; every workstream's next session adopts it. |
+| Persistent memory | **The Dossier** | Per-workstream Markdown the agent maintains across sessions — identity that survives `claude` restarts. |
+
+Plus: workstream lifecycle in the app (create / pause / retire from the sidebar) and **Updates** — LLM-generated weekly/monthly summaries (Claude API or local Ollama, audience-tuned, on-demand or scheduled).
 
 ## Why this exists
 
@@ -40,20 +46,20 @@ Today's tooling pushes you into one of two modes:
 - **Live single-agent supervision** (Cursor, Claude Code in a terminal) — high fidelity, but only one agent at a time.
 - **Outcome-based ticket tracking** (Linear, Jira) — scales to many, but you only see results, never *how* the agent got there.
 
-Real human managers do something neither covers: they track *methodology*, intervene mid-flight to course-correct, and propagate newly-learned skills across the team. Manager brings that experience to AI agent teams.
+> Jira tells you what happened yesterday. Claude Code tells you what one agent is doing right now. **Dispatch** gives you the high-fidelity oversight to manage an entire department of agents in real-time. Trace their methodology, intercept their errors, and broadcast new protocols across your team. **Don't just run agents. Dispatch them.**
 
 ## Shape at a glance
 
 ```
 Claude Code sessions  ─┐
-                       ├─→ Manager Daemon ─→ macOS Client (SwiftUI)
+                       ├─→ Dispatch Daemon ─→ macOS Client (SwiftUI)
 Lifecycle hooks    ────┘    │                ↑
                             │   long-running, HTTP/WebSocket on :9876
 MCP server (per session) ───┤
                             ├─ Event log (JSONL per workstream)
-                            ├─ Workstream memory (Markdown per workstream)
-                            ├─ Intervention queue (SQLite)
-                            ├─ Team handbook (Markdown)
+                            ├─ Workstream Dossier (Markdown per workstream)
+                            ├─ Intercept queue (SQLite)
+                            ├─ Team Protocol handbook (Markdown)
                             ├─ Saved reports + scheduler (SQLite + scheduler.json)
                             └─ Skill proposals (SQLite)
 ```
@@ -63,20 +69,20 @@ The daemon is the only stateful piece. Clients (macOS now, iOS / web later in v1
 ## How it plugs into Claude Code
 
 - **Lifecycle hooks** (zero-touch): `SessionStart`, `Stop`, `PreToolUse`, `PostToolUse`, `UserPromptSubmit` POST to the daemon — installed via the one-command installer into `~/.claude/settings.json`.
-- **MCP server** (per-session stdio): `manager mcp` exposes the high-fidelity tools — `emit_decision`, `emit_subgoal`, `emit_confidence`, `flag_blocked`, `update_memory`, `read_memory`, `propose_skill`. Wired automatically by the installer (`claude mcp add manager`).
-- **`SessionStart` system-prompt nudge**: tells the agent the manager tools exist and inlines the team handbook (capped at 8 KB) so promoted skills propagate to every session.
+- **MCP server** (per-session stdio): exposes the high-fidelity tools — `emit_decision`, `emit_subgoal`, `emit_confidence`, `flag_blocked`, `update_memory`, `read_memory`, `propose_skill`. Wired automatically by the installer.
+- **`SessionStart` system-prompt nudge**: tells the agent the Dispatch tools exist and inlines the team Protocol handbook (capped at 8 KB) so promoted skills propagate to every session.
 - **Auto-workstream**: if `MANAGER_WORKSTREAM` isn't set, the hook derives a workstream id from the project's git-root basename (or `pwd`). Slugified. Override with `MANAGER_WORKSTREAM=other-name claude`.
 
 ## Where state lives
 
-Everything local-only, under `~/.claude/manager/`:
+Everything local-only, under `~/.claude/manager/` (path renamed in a future code-layer pass):
 
 ```
 ~/.claude/manager/
-├── db.sqlite           # workstream registry, intervention queue, skill proposals, reports
+├── db.sqlite           # workstream registry, intercept queue, skill proposals, reports
 ├── events/<id>.jsonl   # append-only event log per workstream
-├── memory/<id>.md      # per-workstream Markdown memory (agent-curated)
-├── handbook.md         # team-wide promoted skills
+├── memory/<id>.md      # per-workstream Dossier (agent-curated Markdown)
+├── handbook.md         # team-wide promoted Protocols
 └── scheduler.json      # weekly / monthly report cron config
 ```
 

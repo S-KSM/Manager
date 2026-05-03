@@ -1,6 +1,8 @@
-# Manager Daemon
+# Dispatch Daemon
 
-Local long-running process: hosts the MCP server agents call into and the HTTP/WebSocket API clients (the macOS app today, mobile/web later) read from. All persistent state — events, memory, queues — lives here.
+Local long-running process: hosts the MCP server agents call into and the HTTP/WebSocket API clients (the macOS app today, mobile/web later) read from. All persistent state — events, Dossier (workstream memory), Intercept queue, Protocol handbook, reports — lives here.
+
+> Codenamed **Manager** through v1.1.x; the binary, package name, env vars, and state directory still use that name. Rename to `dispatch` is queued for v1.2 — see [`../docs/ROADMAP.md`](../docs/ROADMAP.md). The HTTP/WebSocket/MCP wire contracts are stable and unaffected by the rebrand.
 
 See [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) for the full data model and event schema.
 

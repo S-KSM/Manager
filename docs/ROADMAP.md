@@ -1,6 +1,6 @@
 # Roadmap
 
-Each milestone delivers an end-to-end usable slice. We ship the smallest thing that proves the next assumption, then extend.
+Each milestone delivers an end-to-end usable slice. We ship the smallest thing that proves the next assumption, then extend. Product brand: **Dispatch** (originally codenamed Manager — see [`../specs.md`](../specs.md) for the rebrand note).
 
 ## v0 — Observation only
 
@@ -46,6 +46,18 @@ Scope:
 - Workstream lifecycle: spawn, pause, retire from the UI (not just CLI).
 
 What this proves: solo→scale is a single design move (cards collapse to pods), not a rewrite; the skill loop accelerates the team in measurable ways.
+
+## v1.2 — Code-layer Dispatch rename + Kanban + Linear
+
+**Goal:** finish what v1.1.x's brand-layer rebrand started; tighten organization-at-scale; integrate the issue tracker the human is already using.
+
+Scope:
+
+- **Dispatch rename (code layer)**: rename daemon binary `manager` → `dispatch`; env vars `MANAGER_*` → `DISPATCH_*` (with one release of fallback aliases); state dir `~/.claude/manager/` → `~/.claude/dispatch/` via a one-shot migration in `bin/install.sh` on upgrade; launchd label `com.manager.daemon` → `com.dispatch.daemon`; Xcode project + Swift module + bundle identifier + `CFBundleDisplayName` from `Manager` to `Dispatch`; ship the new brutalist "D" app icon (heavy, glitchy, with a pixelated signal trail) into `Assets.xcassets/AppIcon.appiconset`. Internal contract identifiers (event types, MCP tool names, SQLite columns) stay unchanged — they're already neutral.
+- **Kanban board**: replace the team-floor grid with a 4-column board (Backlog / Active / Paused / Retired) + drag-and-drop status changes. Pod auto-grouping moves into the Active column when card count exceeds the threshold.
+- **Linear.app integration**: `workstream_links` SQLite table + GraphQL client. Link a workstream to a Linear issue from the agent-detail header. Status changes flow Linear ↔ Dispatch; high-confidence decisions optionally land as comments on the linked issue.
+
+What this proves: the rebrand can land cleanly without breaking installed copies; the daemon-as-brain split makes external integrations (Linear) cheap to add.
 
 ## v1.5 — Remote / mobile
 
