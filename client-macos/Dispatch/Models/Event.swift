@@ -146,14 +146,81 @@ enum EventPayload: Hashable, Sendable {
         }
     }
 
+    /// `tool_use` event payload. The wire shape comes from Claude Code's
+    /// hook payload (PreToolUse / PostToolUse) where the keys are
+    /// `tool_name`, `tool_input`, `hook`, etc. — not the legacy
+    /// `tool` / `phase` / `summary` we used in v0 fixtures. Custom decode
+    /// resolves the tool name from either shape and synthesizes a
+    /// humanized one-line summary from common `tool_input` keys
+    /// (command, file_path, path, pattern, url) so timeline rows
+    /// always have something to show.
     struct ToolUse: Codable, Hashable, Sendable {
         let tool: String
-        let phase: String?         // "pre" | "post"
+        let phase: String?
         let summary: String?
+
         init(tool: String, phase: String? = nil, summary: String? = nil) {
             self.tool = tool
             self.phase = phase
             self.summary = summary
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case tool, phase, summary, hook
+            case toolName = "tool_name"
+            case toolInput = "tool_input"
+        }
+
+        enum InputKeys: String, CodingKey {
+            case command, pattern, url
+            case filePath = "file_path"
+            case path
+            case description
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.tool = (try? c.decode(String.self, forKey: .tool))
+                     ?? (try? c.decode(String.self, forKey: .toolName))
+                     ?? "Unknown"
+            self.phase = (try? c.decode(String.self, forKey: .phase))
+                      ?? (try? c.decode(String.self, forKey: .hook))
+            if let summary = try? c.decode(String.self, forKey: .summary) {
+                self.summary = summary
+            } else if let input = try? c.nestedContainer(keyedBy: InputKeys.self, forKey: .toolInput) {
+                self.summary = Self.humanize(from: input)
+            } else {
+                self.summary = nil
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(tool, forKey: .tool)
+            try c.encodeIfPresent(phase, forKey: .phase)
+            try c.encodeIfPresent(summary, forKey: .summary)
+        }
+
+        private static func humanize(from input: KeyedDecodingContainer<InputKeys>) -> String? {
+            if let cmd = try? input.decode(String.self, forKey: .command) {
+                return cmd
+            }
+            if let p = try? input.decode(String.self, forKey: .filePath) {
+                return p
+            }
+            if let p = try? input.decode(String.self, forKey: .path) {
+                return p
+            }
+            if let p = try? input.decode(String.self, forKey: .pattern) {
+                return p
+            }
+            if let u = try? input.decode(String.self, forKey: .url) {
+                return u
+            }
+            if let d = try? input.decode(String.self, forKey: .description) {
+                return d
+            }
+            return nil
         }
     }
 

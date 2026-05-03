@@ -148,7 +148,20 @@ struct AgentDetailView: View {
             RobotMascot(workstream: workstream, size: 56)
             VStack(alignment: .leading, spacing: 2) {
                 Text(workstream.title).font(.title2.weight(.semibold))
-                Text(workstream.id).font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text(workstream.id).font(.caption).foregroundStyle(.secondary)
+                    if let activity = currentActivityLine {
+                        Text("·").foregroundStyle(.tertiary)
+                        Image(systemName: "hammer")
+                            .imageScale(.small)
+                            .foregroundStyle(.secondary)
+                        Text(activity)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
             }
             Spacer()
             HStack(spacing: 6) {
@@ -187,6 +200,17 @@ struct AgentDetailView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(.thinMaterial)
+    }
+
+    /// Header status line: prefer the in-progress todo's activeForm if a
+    /// TodoWrite has been seen, else the daemon's humanized last tool_use.
+    private var currentActivityLine: String? {
+        if let todos = workstream.todos {
+            if let active = todos.first(where: { $0.status == .inProgress }) {
+                return active.activeForm ?? active.content
+            }
+        }
+        return workstream.latestActivity
     }
 
     private func reload() async {
@@ -408,7 +432,13 @@ private struct TimelineRow: View {
         case .confidence(let c):
             return "Confidence \(Int((c.value * 100).rounded()))%"
         case .toolUse(let t):
-            return "Tool: \(t.tool)"
+            let verb: String
+            switch t.phase {
+            case "post-tool-use", "post":           verb = "ran"
+            case "user-prompt-submit":              verb = "received prompt for"
+            default:                                verb = "uses"
+            }
+            return "\(verb) \(t.tool)"
         case .blocked(let b):
             return "Blocked: \(b.reason)"
         case .memoryUpdate(let m):

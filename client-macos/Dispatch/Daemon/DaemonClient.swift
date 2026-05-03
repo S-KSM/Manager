@@ -181,7 +181,12 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
     }
 
     func getEvents(workstreamID: String) async throws -> [Event] {
-        try await getJSON(path: "workstreams/\(workstreamID)/events")
+        // Lossy decode: skip rows whose payload doesn't fit the Swift
+        // event model rather than failing the whole array. Schema drift
+        // (e.g. a hook payload key the client hasn't seen yet) shouldn't
+        // empty the timeline.
+        let arr: [FailableEvent] = try await getJSON(path: "workstreams/\(workstreamID)/events")
+        return arr.compactMap(\.event)
     }
 
     func postIntervention(workstreamID: String,
@@ -559,6 +564,16 @@ private struct AppendSkillResponse: Decodable {
 
 /// Empty JSON body (`{}`) used for promote/dismiss POSTs that take no params.
 private struct EmptyBody: Encodable {}
+
+/// Wrapper that decodes an `Event` if possible and stores `nil` otherwise.
+/// Used when the daemon returns an array of events: a single bad row
+/// shouldn't blank out the entire timeline.
+private struct FailableEvent: Decodable {
+    let event: Event?
+    init(from decoder: Decoder) throws {
+        self.event = try? Event(from: decoder)
+    }
+}
 
 extension JSONDecoder.DateDecodingStrategy {
     /// ISO-8601 with optional fractional seconds, matching the daemon's
