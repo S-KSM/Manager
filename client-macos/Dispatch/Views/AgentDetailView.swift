@@ -21,6 +21,9 @@ struct AgentDetailView: View {
     @State private var loadingMemory = true
     @State private var showInterventionPanel = false
     @State private var promoteTarget: PromoteTarget?
+    /// v1.4.4 — pending approval-required interventions polled from the daemon.
+    /// Drives the Approve/Deny strip below the header.
+    @State private var pendingApprovals: [Intervention] = []
 
     /// Live copy of the workstream record. Seeded from the parent's snapshot
     /// at view-task time; refreshed on every WS event arrival so daemon-side
@@ -47,6 +50,15 @@ struct AgentDetailView: View {
         HSplitView {
             VStack(alignment: .leading, spacing: 0) {
                 header
+                if !pendingApprovals.isEmpty {
+                    Divider()
+                    ApprovalStrip(
+                        pending: pendingApprovals,
+                        onDecide: { intv, approved in
+                            Task { await decide(intv: intv, approved: approved) }
+                        }
+                    )
+                }
                 Divider()
                 MethodologyTimelineView(
                     events: events,
@@ -93,6 +105,7 @@ struct AgentDetailView: View {
             // Initial historical fetch (events + memory + workstream record).
             liveWorkstream = workstream
             await reload()
+            await refreshPendingApprovals()
             // Then live-subscribe to new events for this workstream until
             // `.task(id:)` cancels us (workstream change or view disappear).
             // Cancellation propagates into the AsyncStream, which calls
@@ -107,6 +120,9 @@ struct AgentDetailView: View {
                 if let refreshed = try? await client.getWorkstream(id: workstream.id) {
                     liveWorkstream = refreshed
                 }
+                // Cheap to re-poll on every event; queue is single-digit
+                // rows and the request is local-loopback.
+                await refreshPendingApprovals()
             }
             // If we get here, the stream ended (transport failure or
             // cancellation). Reconnect is a v1 deliverable.
@@ -202,9 +218,14 @@ struct AgentDetailView: View {
         .background(.thinMaterial)
     }
 
-    /// Header status line: prefer the in-progress todo's activeForm if a
-    /// TodoWrite has been seen, else the daemon's humanized last tool_use.
+    /// Header status line, in priority order:
+    ///  1. LLM-generated `activityHeadline` from the daemon (best — full sentence).
+    ///  2. The in-progress todo's `activeForm` if a TodoWrite has been seen.
+    ///  3. Daemon's deterministic humanized last `tool_use` (`latestActivity`).
     private var currentActivityLine: String? {
+        if let headline = workstream.activityHeadline, !headline.isEmpty {
+            return headline
+        }
         if let todos = workstream.todos {
             if let active = todos.first(where: { $0.status == .inProgress }) {
                 return active.activeForm ?? active.content
@@ -233,6 +254,65 @@ struct AgentDetailView: View {
         next.append(event)
         next.sort { $0.ts < $1.ts }
         events = next
+    }
+
+    private func refreshPendingApprovals() async {
+        let all = (try? await client.listPendingInterventions(workstreamID: workstream.id)) ?? []
+        pendingApprovals = all.filter { $0.kind == .approvalRequired }
+    }
+
+    private func decide(intv: Intervention, approved: Bool) async {
+        _ = try? await client.decideApproval(
+            workstreamID: workstream.id,
+            interventionID: intv.id,
+            approved: approved
+        )
+        await refreshPendingApprovals()
+    }
+}
+
+// MARK: - v1.4.4 Approval strip
+
+/// Banner rendered between the AgentDetail header and the methodology
+/// timeline whenever the workstream has one or more pending
+/// `approval_required` interventions. Each row carries its own Approve /
+/// Deny pair so a single ack only resolves that specific request.
+struct ApprovalStrip: View {
+    let pending: [Intervention]
+    var onDecide: (Intervention, Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(pending) { intv in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: "hand.raised.fill")
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(intv.payload.approvalRequest?.summary
+                             ?? intv.payload.message
+                             ?? "Agent is asking for permission")
+                            .font(.body.weight(.semibold))
+                        if let detail = intv.payload.approvalRequest?.detail, !detail.isEmpty {
+                            Text(detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                    Spacer()
+                    Button("Deny") { onDecide(intv, false) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    Button("Approve") { onDecide(intv, true) }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.orange.opacity(0.08))
     }
 }
 

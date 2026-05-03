@@ -69,6 +69,37 @@ Scope:
 - **`/dispatcher <ws>` Claude Code slash command + URL scheme**: register `dispatch://workstream/<id>` in the macOS app; ship `~/.claude/commands/dispatcher.md` so a session can `open dispatch://workstream/...` to surface the matching card in the app.
 - **Remove `MANAGER_*` env-var fallbacks** introduced in v1.2 (the deprecation breadcrumb has fired for one release; old installs will have migrated by now).
 
+## v1.4 — Autonomous dispatch (adopt OpenAI Symphony orchestration) ✅
+
+**Status: shipped substeps 0–4.** See [`TODO.md`](../TODO.md) for which items inside each substep landed and which are deferred.
+
+**Goal:** Dispatch picks work and spawns agents, in addition to observing them. Lives up to "Mission Control for the Autonomous Workforce" — humans manage work, not agents.
+
+The architecture comes from OpenAI's [Symphony](https://github.com/openai/symphony) ([SPEC.md](https://github.com/openai/symphony/blob/main/SPEC.md)) — a long-running daemon that polls a tracker (Linear), spawns a coding agent per ticket inside an isolated workspace, retries on failure, reconciles on tracker-state change. We adopt the orchestration layer; we keep our presentation + intervention layer (Radar/Trace/Intercept). Net effect: Dispatch supports two modes that share the same telemetry path:
+
+1. **Observation mode** (today, unchanged) — human launches `claude`, hooks/MCP feed events.
+2. **Autonomous mode** (new) — orchestrator picks tickets, spawns `claude` in a workspace, *same* hooks/MCP feed events.
+
+Scope (substeps independently shippable):
+
+- ✅ **v1.4.0 — Orchestrator core** — Symphony §7 state machine (Unclaimed/Claimed/Running/RetryQueued/Released), §8 candidate selection, §8.4 backoff. `daemon/src/orchestrator.ts` + `daemon/src/trackers/{index,mock}.ts` + `GET /orchestrator/state` snapshot. Dry-run mode via `--dry-run`.
+- ✅ **v1.4.1 — Workspace Manager** — Symphony §9. `daemon/src/workspaces.ts`. Per-issue dir under `workspace.root` (sanitized key, `[A-Za-z0-9._-]` only). Safety invariants. Hooks via `bash -lc` with `hooks.timeout_ms`.
+- ✅ **v1.4.2 — Claude Code agent runner** — `daemon/src/agent-runner.ts`. Spawn `claude` in the workspace per turn (option A). Existing hooks/MCP keep emitting telemetry — no parallel event path.
+- ✅ **v1.4.3 — Linear adapter + `WORKFLOW.md` loader** — `daemon/src/trackers/linear.ts` (Symphony §11 GraphQL) + `daemon/src/workflow-loader.ts` (Symphony §5, YAML front matter, env indirection, dynamic reload via `fs.watch`). CLI flag `--workflow <path>` enables full autonomous mode.
+- ✅ **v1.4.4 — Approval bridge** — `approval_required` intervention kind + `POST /workstreams/:id/interventions/:intId/decide` + macOS `ApprovalStrip` between AgentDetailView header and timeline. Manager taps Approve/Deny → daemon emits `intervention_delivered` with `approved: bool`. Agent-side trigger (MCP tool that enqueues) deferred to v1.4.5.
+
+What we **explicitly do not adopt** from Symphony:
+- No-UI posture (we have one; we use it).
+- Codex-only runtime (default is Claude Code; Codex becomes a v2+ runtime adapter).
+- Linear-only tracker (interface — `linear` first, then `kanban` once v1.2 ships, then `github_issues`).
+- `linear_graphql` client-side tool extension (Claude Code already has Linear MCP).
+
+What this proves: the daemon-as-brain split makes the leap from "observer" to "orchestrator" additive — observation mode keeps working untouched. Adopting an external spec end-to-end without rewriting our presentation layer validates the architectural bet.
+
+Risks: shell-injection via `WORKFLOW.md` hooks (mirror Symphony's "trusted environments" disclaimer + per-repo allow-list); Linear schema drift (isolate query construction); workspace disk growth (reuse-across-runs policy + `dispatch workspaces gc` CLI).
+
+Detailed design: [`/Users/shobeir/.claude/plans/read-specs-md-and-try-refactored-key.md`](../../../.claude/plans/read-specs-md-and-try-refactored-key.md). Project task list (substep-level): [`TODO.md`](../TODO.md).
+
 ## v1.5 — Remote / mobile
 
 **Goal:** check on the team from your phone.

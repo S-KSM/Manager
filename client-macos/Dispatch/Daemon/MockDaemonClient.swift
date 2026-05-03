@@ -121,6 +121,45 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         return intervention
     }
 
+    func listPendingInterventions(workstreamID: String) async throws -> [Intervention] {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        defer { lock.unlock() }
+        return _interventions.filter {
+            $0.workstreamID == workstreamID && $0.deliveredAt == nil
+        }
+    }
+
+    func decideApproval(workstreamID: String,
+                        interventionID: String,
+                        approved: Bool) async throws -> Intervention {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        defer { lock.unlock() }
+        guard let idx = _interventions.firstIndex(where: { $0.id == interventionID }),
+              _interventions[idx].kind == .approvalRequired,
+              _interventions[idx].deliveredAt == nil
+        else {
+            throw DaemonError.transport(NSError(domain: "MockDaemon", code: 404))
+        }
+        let prior = _interventions[idx]
+        let updated = Intervention(
+            id: prior.id,
+            workstreamID: prior.workstreamID,
+            kind: prior.kind,
+            payload: InterventionPayload(
+                message: prior.payload.message,
+                rollbackToDecisionID: prior.payload.rollbackToDecisionID,
+                approvalRequest: prior.payload.approvalRequest,
+                approvalDecision: ApprovalDecision(approved: approved)
+            ),
+            createdAt: prior.createdAt,
+            deliveredAt: Date()
+        )
+        _interventions[idx] = updated
+        return updated
+    }
+
     // MARK: - v1: lifecycle
 
     func createWorkstream(id: String, title: String) async throws -> Workstream {

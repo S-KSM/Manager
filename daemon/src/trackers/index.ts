@@ -1,0 +1,75 @@
+/**
+ * Tracker abstraction adopted from OpenAI Symphony SPEC.md §11.1.
+ *
+ * A tracker is the source of work that drives the orchestrator. The first
+ * shipped adapter is `mock` (SQLite-backed, used for tests + local dev). The
+ * second is `linear` (v1.4.3). Future: `kanban` (in-app board), `github_issues`.
+ *
+ * Implementations MUST be pure data adapters — no orchestration, no spawn, no
+ * intervention logic. They normalize tracker-specific shapes into Symphony's
+ * `Issue` (§4.1.1) and surface error categories the orchestrator can reason
+ * about (§11.4).
+ */
+
+/** Symphony §4.1.1 — normalized issue used by orchestrator + prompt rendering. */
+export interface Issue {
+  id: string;
+  identifier: string;
+  title: string;
+  description: string | null;
+  /** Lower numbers are higher priority in dispatch sorting. null sorts last. */
+  priority: number | null;
+  state: string;
+  branch_name: string | null;
+  url: string | null;
+  /** Lowercased. */
+  labels: string[];
+  blocked_by: BlockerRef[];
+  /** ISO-8601 or null. */
+  created_at: string | null;
+  /** ISO-8601 or null. */
+  updated_at: string | null;
+}
+
+export interface BlockerRef {
+  id: string | null;
+  identifier: string | null;
+  state: string | null;
+}
+
+/** Symphony §11.1 — REQUIRED tracker operations. */
+export interface Tracker {
+  readonly kind: string;
+  /** Issues whose state is in the configured `active_states`. */
+  fetchCandidateIssues(activeStates: string[]): Promise<Issue[]>;
+  /** Used by §8.6 startup terminal cleanup. */
+  fetchIssuesByStates(stateNames: string[]): Promise<Issue[]>;
+  /** Used by §8.5 active-run reconciliation. Map keyed by issue.id. */
+  fetchIssueStatesByIds(issueIds: string[]): Promise<Map<string, string>>;
+}
+
+/**
+ * Symphony §11.4 normalized error categories. Wrapped exceptions carry one of
+ * these so the orchestrator can decide whether to skip-this-tick (transient) or
+ * fail-startup (config).
+ */
+export type TrackerErrorCode =
+  | 'unsupported_tracker_kind'
+  | 'missing_tracker_api_key'
+  | 'missing_tracker_project_slug'
+  | 'linear_api_request'
+  | 'linear_api_status'
+  | 'linear_graphql_errors'
+  | 'linear_unknown_payload'
+  | 'linear_missing_end_cursor'
+  | 'mock_source_missing'
+  | 'mock_source_invalid';
+
+export class TrackerError extends Error {
+  readonly code: TrackerErrorCode;
+  constructor(code: TrackerErrorCode, message: string) {
+    super(message);
+    this.name = 'TrackerError';
+    this.code = code;
+  }
+}

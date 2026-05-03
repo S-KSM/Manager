@@ -591,11 +591,15 @@ struct WorkstreamCard: View {
     let workstream: Workstream
 
     /// What to render in the "Currently:" line. Resolution order:
-    ///  1. The in-progress todo from TodoWrite (Feature B). Prefers
+    ///  1. LLM-generated `activityHeadline` from the daemon (best — full sentence).
+    ///  2. The in-progress todo from TodoWrite (Feature B). Prefers
     ///     `activeForm` ("Migrating billing queries") over `content`.
-    ///  2. Else `latestActivity` (Feature A — humanized last tool_use).
-    ///  3. Else nil (no row rendered).
+    ///  3. Else `latestActivity` (Feature A — humanized last tool_use).
+    ///  4. Else nil (no row rendered).
     private var currentActivityLine: String? {
+        if let headline = workstream.activityHeadline, !headline.isEmpty {
+            return headline
+        }
         if let todos = workstream.todos, !todos.isEmpty,
            let active = todos.first(where: { $0.status == .inProgress }) {
             return active.activeForm ?? active.content

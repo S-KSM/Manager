@@ -5,7 +5,16 @@ import { Command } from 'commander';
 import { getConfig } from './config.js';
 import { EventStore } from './event-store.js';
 import { HandbookStore } from './handbook-store.js';
+import { HeadlineStore } from './headline-store.js';
+import { Headliner } from './headliner.js';
 import { buildHttpServer } from './http-server.js';
+import { Orchestrator, type DispatchOutcome } from './orchestrator.js';
+import { MockTracker } from './trackers/mock.js';
+import { LinearTracker } from './trackers/linear.js';
+import type { Tracker } from './trackers/index.js';
+import { loadWorkflow, watchWorkflow, WorkflowError } from './workflow-loader.js';
+import { WorkspaceManager } from './workspaces.js';
+import { AgentRunner } from './agent-runner.js';
 import { InterventionQueue } from './intervention-queue.js';
 import { buildMcpServer, startMcpStdio } from './mcp-server.js';
 import { MemoryStore } from './memory-store.js';
@@ -40,9 +49,33 @@ export function buildCli(): Command {
       MCP_STDIO_FLAG,
       'Bind the MCP server to stdio (testing only — production uses `dispatch mcp`).',
     )
-    .action(async (opts: { mcpStdio?: boolean }) => {
-      await runStart({ mcpStdio: !!opts.mcpStdio });
-    });
+    .option(
+      '--mock-tracker <path>',
+      'v1.4.0 dev: enable orchestrator with a MockTracker reading <path>. Useful with --dry-run.',
+    )
+    .option(
+      '--workflow <path>',
+      'v1.4.3: load WORKFLOW.md from <path> and enable the orchestrator + agent runner.',
+    )
+    .option(
+      '--dry-run',
+      'v1.4.x: orchestrator logs "would dispatch" instead of spawning an agent.',
+    )
+    .action(
+      async (opts: {
+        mcpStdio?: boolean;
+        mockTracker?: string;
+        workflow?: string;
+        dryRun?: boolean;
+      }) => {
+        await runStart({
+          mcpStdio: !!opts.mcpStdio,
+          mockTracker: opts.mockTracker,
+          workflow: opts.workflow,
+          dryRun: !!opts.dryRun,
+        });
+      },
+    );
 
   program
     .command('mcp')
@@ -143,7 +176,12 @@ function resolveRepoRoot(): string {
   }
 }
 
-async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
+async function runStart(opts: {
+  mcpStdio: boolean;
+  mockTracker?: string;
+  workflow?: string;
+  dryRun?: boolean;
+}): Promise<void> {
   const cfg = getConfig();
   await Promise.all([
     mkdir(cfg.eventsDir, { recursive: true }),
@@ -158,6 +196,11 @@ async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
   const skillProposalsStore = new SkillProposalsStore(cfg.dbPath);
   const reportStore = new ReportStore(cfg.dbPath);
   const scheduler = new Scheduler({ registry, eventStore, memoryStore, reportStore });
+  const headlineStore = new HeadlineStore();
+  const headliner = new Headliner({ registry, eventStore, store: headlineStore });
+  // Orchestrator is built below if --mock-tracker was passed; we late-bind it
+  // into the HTTP server via a closure-captured holder so the route can find it.
+  const orchestratorHolder: { current: Orchestrator | null } = { current: null };
   const http = buildHttpServer({
     eventStore,
     memoryStore,
@@ -167,13 +210,149 @@ async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
     skillProposalsStore,
     reportStore,
     scheduler,
-  });
+    headlineStore,
+    get orchestrator() {
+      return orchestratorHolder.current ?? undefined;
+    },
+  } as Parameters<typeof buildHttpServer>[0]);
   const port = await http.listen(cfg.httpPort);
   // stderr so JSON-over-stdout MCP traffic stays clean.
   process.stderr.write(`[dispatch] HTTP/WS listening on http://127.0.0.1:${port}\n`);
   process.stderr.write(`[dispatch] state at ${cfg.home}\n`);
   await scheduler.start();
   process.stderr.write('[dispatch] scheduler started\n');
+  if (process.env['DISPATCH_HEADLINE_ENABLED'] !== '0') {
+    headliner.start();
+    process.stderr.write('[dispatch] headliner started\n');
+  }
+
+  // v1.4.x: optional orchestrator. Built from either --workflow (full path) or
+  // --mock-tracker (dev shortcut). When neither is present, observation mode
+  // continues exactly as today.
+  let orchestrator: Orchestrator | null = null;
+  let workflowWatcher: { close: () => void } | null = null;
+  if (opts.workflow || opts.mockTracker) {
+    const dryRun = !!opts.dryRun;
+
+    let tracker: Tracker;
+    let workspaceMgr: WorkspaceManager;
+    let agentRunner: AgentRunner;
+    let activeStates = ['Todo', 'In Progress'];
+    let terminalStates = ['Done', 'Closed', 'Cancelled', 'Canceled', 'Duplicate'];
+    let pollIntervalMs = 5_000;
+    let maxConcurrent = 5;
+
+    if (opts.workflow) {
+      let wf;
+      try {
+        wf = await loadWorkflow(opts.workflow);
+      } catch (err) {
+        if (err instanceof WorkflowError) {
+          process.stderr.write(`[dispatch] workflow load failed: ${err.code} ${err.message}\n`);
+          return;
+        }
+        throw err;
+      }
+      const cfg = wf.config;
+      activeStates = cfg.tracker.active_states;
+      terminalStates = cfg.tracker.terminal_states;
+      pollIntervalMs = cfg.polling.interval_ms;
+      maxConcurrent = cfg.agent.max_concurrent_agents;
+      workspaceMgr = new WorkspaceManager({
+        ...(cfg.workspace.root ? { root: cfg.workspace.root } : {}),
+        hooks: cfg.hooks,
+      });
+      if (cfg.tracker.kind === 'linear') {
+        if (!cfg.tracker.api_key || !cfg.tracker.project_slug) {
+          process.stderr.write(
+            '[dispatch] linear tracker requires tracker.api_key and tracker.project_slug\n',
+          );
+          return;
+        }
+        tracker = new LinearTracker({
+          apiKey: cfg.tracker.api_key,
+          projectSlug: cfg.tracker.project_slug,
+          ...(cfg.tracker.endpoint ? { endpoint: cfg.tracker.endpoint } : {}),
+        });
+      } else {
+        if (!cfg.tracker.source) {
+          process.stderr.write('[dispatch] mock tracker requires tracker.source\n');
+          return;
+        }
+        tracker = new MockTracker(cfg.tracker.source);
+      }
+      agentRunner = new AgentRunner(workspaceMgr);
+    } else {
+      // --mock-tracker shortcut path.
+      tracker = new MockTracker(opts.mockTracker as string);
+      workspaceMgr = new WorkspaceManager();
+      agentRunner = new AgentRunner(workspaceMgr);
+    }
+
+    orchestrator = new Orchestrator({
+      tracker,
+      activeStates,
+      terminalStates,
+      pollIntervalMs,
+      maxConcurrentAgents: maxConcurrent,
+      dispatchOne: async (issue, attempt) => {
+        if (dryRun) {
+          process.stderr.write(
+            `[dispatch] orchestrator would dispatch ${issue.identifier} — ${issue.title}\n`,
+          );
+          return { ok: true } as DispatchOutcome;
+        }
+        try {
+          const ws = await workspaceMgr.prepare(issue.identifier);
+          const result = await agentRunner.runTurn({
+            workspacePath: ws.path,
+            issue,
+            attempt,
+            prompt: renderPrompt(issue, attempt),
+            workstreamId: ws.workspace_key.toLowerCase(),
+            log: (m, c) =>
+              process.stderr.write(`[dispatch] ${m}${c ? ' ' + JSON.stringify(c) : ''}\n`),
+          });
+          return result.ok
+            ? ({ ok: true } as DispatchOutcome)
+            : ({ ok: false, error: result.error ?? 'turn_failed' } as DispatchOutcome);
+        } catch (err) {
+          return {
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          } as DispatchOutcome;
+        }
+      },
+      log: (msg, ctx) =>
+        process.stderr.write(`[dispatch] ${msg}${ctx ? ' ' + JSON.stringify(ctx) : ''}\n`),
+    });
+    await orchestrator.start();
+    orchestratorHolder.current = orchestrator;
+    process.stderr.write(
+      `[dispatch] orchestrator started (workflow=${opts.workflow ?? 'mock'}, dry-run=${dryRun})\n`,
+    );
+
+    if (opts.workflow) {
+      workflowWatcher = watchWorkflow(opts.workflow, (next) => {
+        if (next instanceof WorkflowError) {
+          process.stderr.write(`[dispatch] workflow reload failed: ${next.code} ${next.message}\n`);
+          return;
+        }
+        const cfg = next.config;
+        orchestrator?.applyConfig({
+          activeStates: cfg.tracker.active_states,
+          terminalStates: cfg.tracker.terminal_states,
+          pollIntervalMs: cfg.polling.interval_ms,
+          maxConcurrentAgents: cfg.agent.max_concurrent_agents,
+        });
+        workspaceMgr.applyConfig({
+          ...(cfg.workspace.root ? { root: cfg.workspace.root } : {}),
+          hooks: cfg.hooks,
+        });
+        process.stderr.write('[dispatch] workflow reloaded\n');
+      });
+    }
+  }
 
   let mcpRunning = false;
   if (opts.mcpStdio) {
@@ -186,6 +365,9 @@ async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
   const shutdown = async (): Promise<void> => {
     process.stderr.write('[dispatch] shutting down\n');
     try {
+      workflowWatcher?.close();
+      orchestrator?.stop();
+      headliner.stop();
       scheduler.stop();
       await http.close();
       registry.close();
@@ -243,6 +425,33 @@ async function runMcp(): Promise<void> {
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());
   // The stdio transport keeps the loop alive on its own.
+}
+
+/**
+ * v1.4.3 minimal prompt renderer. Symphony §5.4 specifies strict-template
+ * Liquid-compatible semantics; we ship a focused subset until v1.4.4 promotes
+ * to the real engine: `{{ issue.<field> }}` interpolation +
+ * `{% if attempt %}…{% endif %}` continuation block. No filters yet, no
+ * arbitrary expressions.
+ */
+function renderPrompt(
+  issue: { identifier: string; title: string; description: string | null; state: string; url: string | null; labels: string[] },
+  attempt: number | null,
+): string {
+  const head = [
+    `You are working on issue ${issue.identifier}: ${issue.title}.`,
+    `State: ${issue.state}`,
+    issue.url ? `URL: ${issue.url}` : '',
+    issue.labels.length > 0 ? `Labels: ${issue.labels.join(', ')}` : '',
+    issue.description ? `\nDescription:\n${issue.description}` : '',
+  ]
+    .filter((l) => l.length > 0)
+    .join('\n');
+  const continuation =
+    attempt && attempt > 0
+      ? `\n\nThis is continuation attempt #${attempt}. Resume from current workspace state. Don't re-do work that already landed.`
+      : '';
+  return `${head}${continuation}\n`;
 }
 
 function pad(s: string, w: number): string {

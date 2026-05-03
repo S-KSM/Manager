@@ -6,6 +6,7 @@ import { readEnvWithLegacy } from './config.js';
 import { buildDigest } from './digest.js';
 import type { EventStore, ManagerEvent, ManagerEventType } from './event-store.js';
 import type { HandbookStore, SkillSource } from './handbook-store.js';
+import type { HeadlineStore } from './headline-store.js';
 import type {
   InterventionKind,
   InterventionPayload,
@@ -19,6 +20,7 @@ import {
   getProvider as defaultGetProvider,
 } from './llm/index.js';
 import type { MemoryStore } from './memory-store.js';
+import type { Orchestrator } from './orchestrator.js';
 import { projectFromEvents } from './projections.js';
 import { assembleReport } from './report-engine.js';
 import { renderUserPrompt } from './report-prompt.js';
@@ -42,6 +44,10 @@ interface BuildOptions {
   skillProposalsStore: SkillProposalsStore;
   reportStore: ReportStore;
   scheduler: Scheduler;
+  /** Optional in-memory store of LLM-generated activity headlines. */
+  headlineStore?: HeadlineStore;
+  /** Optional orchestrator (v1.4+). When absent, /orchestrator/state returns 404. */
+  orchestrator?: Orchestrator;
   /** Override the LLM provider factory; used by tests to inject mocks. */
   getProvider?: (name: LLMProviderName) => LLMProvider;
 }
@@ -58,6 +64,7 @@ const INTERVENTION_KINDS: ReadonlySet<InterventionKind> = new Set([
   'nudge',
   'redirect',
   'rollback',
+  'approval_required',
 ]);
 
 /**
@@ -99,6 +106,8 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     skillProposalsStore,
     reportStore,
     scheduler,
+    headlineStore,
+    orchestrator,
   } = opts;
   const getProvider = opts.getProvider ?? defaultGetProvider;
   const app = express();
@@ -125,6 +134,7 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     const lastEventAt = await eventStore.lastActivityAt(ws.id);
     const { events } = await eventStore.readEvents(ws.id);
     const projections = projectFromEvents(events);
+    const headline = headlineStore?.get(ws.id) ?? null;
     return {
       workstream_id: ws.id,
       title: ws.title,
@@ -137,6 +147,8 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
       needs_attention: projections.needs_attention,
       todos: projections.todos,
       latest_activity: projections.latest_activity,
+      activity_headline: headline?.text ?? null,
+      activity_headline_at: headline?.generatedAt ?? null,
       last_event_at: lastEventAt,
     };
   }
@@ -145,6 +157,20 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
 
   app.get('/health', (_req: Request, res: Response) => {
     res.json({ ok: true });
+  });
+
+  // ---- Orchestrator (v1.4+) ------------------------------------------------
+
+  /**
+   * Symphony §13.7.2 snapshot. Returns 404 with `{ error: "orchestrator not enabled" }`
+   * when the daemon was started without `--mock-tracker` / a workflow file.
+   */
+  app.get('/orchestrator/state', (_req: Request, res: Response) => {
+    if (!orchestrator) {
+      res.status(404).json({ error: 'orchestrator not enabled' });
+      return;
+    }
+    res.json(orchestrator.snapshot());
   });
 
   // ---- Workstreams ---------------------------------------------------------
@@ -377,7 +403,9 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
       return;
     }
     if (!INTERVENTION_KINDS.has(kind as InterventionKind)) {
-      res.status(400).json({ error: 'kind must be one of nudge, redirect, rollback' });
+      res.status(400).json({
+        error: 'kind must be one of nudge, redirect, rollback, approval_required',
+      });
       return;
     }
     if (!registry.get(workstreamId)) {
@@ -404,6 +432,48 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     }
     res.json(interventionQueue.listPending(id));
   });
+
+  /**
+   * v1.4.4 — record manager's Approve/Deny decision on an `approval_required`
+   * intervention. Body: `{ approved: bool }`. Returns the updated wire row.
+   * Marks delivered in the same transaction (no separate ack needed).
+   */
+  app.post(
+    '/workstreams/:id/interventions/:intId/decide',
+    async (req: Request, res: Response) => {
+      const id = String(req.params['id']);
+      const intId = String(req.params['intId']);
+      if (!registry.get(id)) {
+        res.status(404).json({ error: 'workstream not found' });
+        return;
+      }
+      const body = (req.body ?? {}) as { approved?: unknown };
+      if (typeof body.approved !== 'boolean') {
+        res.status(400).json({ error: 'approved must be a boolean' });
+        return;
+      }
+      const updated = interventionQueue.decideApproval(intId, body.approved);
+      if (!updated) {
+        res.status(404).json({
+          error: 'intervention not found, already delivered, or not approval_required',
+        });
+        return;
+      }
+      const event: ManagerEvent = {
+        ts: updated.delivered_at ?? new Date().toISOString(),
+        workstream_id: updated.workstream_id,
+        type: 'intervention_delivered',
+        id: `intd_${randomUUID().slice(0, 8)}`,
+        payload: {
+          intervention_id: updated.id,
+          kind: updated.kind,
+          approved: body.approved,
+        },
+      };
+      await eventStore.appendEvent(updated.workstream_id, event);
+      res.json(updated);
+    },
+  );
 
   app.post('/workstreams/:id/interventions/ack', async (req: Request, res: Response) => {
     const id = String(req.params['id']);

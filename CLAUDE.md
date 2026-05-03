@@ -17,7 +17,9 @@ Read first:
 
 v1.2 code-layer rename shipped. Daemon binary is `dispatch`, env vars are `DISPATCH_*` (with one-release `MANAGER_*` fallback + deprecation breadcrumb, removed in v1.3), state dir is `~/.claude/dispatch/` (one-shot migration in `bin/install.sh` from `~/.claude/manager/`), launchd label `com.dispatch.daemon`, Xcode project `Dispatch.xcodeproj`, bundle id `com.dispatch.app`, app file `/Applications/Dispatch.app`, custom logo shipped. Swift module name is `DispatchApp` (not `Dispatch`) to avoid colliding with system libdispatch.
 
-Kanban + Linear (the other v1.2 deliverables) and MLX-backed local LLM (queued for v1.3) are not yet shipped.
+**v1.4 Symphony orchestration shipped (substeps 0–4):** orchestrator state machine + retry/reconciliation, workspace manager + hooks, Claude Code agent runner (option A — spawn per turn), `WORKFLOW.md` loader + Linear adapter + dynamic reload, approval-required intervention kind + `/workstreams/:id/interventions/:intId/decide` endpoint + macOS Approve/Deny strip in `AgentDetailView`. Observation mode unchanged when no `--workflow` is passed. See `TODO.md` for deferred items (workstream_links SQLite join, gc CLI, MCP tool that emits approval requests).
+
+Kanban + Linear-link UI (the v1.2 deliverables) and MLX-backed local LLM (v1.3) are not yet shipped — but the v1.4 Linear adapter implements the same GraphQL surface, so the v1.2 link UI is now mostly a presentation-layer task.
 
 ## Locked architectural decisions
 
@@ -28,6 +30,7 @@ These are decided. Do not relitigate without a reason; do propose changes if you
 - **Daemon-as-brain, client-as-thin-view.** All persistent state (events, memory, queues) lives in the daemon. This is the single design move that makes mobile/remote viable later without a rewrite.
 - **Workstream is the unit of identity, not session.** A workstream spans many Claude Code sessions and persists context via a Markdown memory file.
 - **Tap, not interrupt.** Observation never blocks the agent. Append-only event log; manager reads projections.
+- **Two operational modes share one telemetry path** (v1.4+): *Observation* (human runs `claude`, daemon collects via hooks/MCP) and *Autonomous* (orchestrator picks tickets via Symphony-shaped tracker + spawns `claude` in a per-issue workspace). Autonomous mode requires a `WORKFLOW.md`; without it, the daemon stays purely observational. Hooks/MCP don't care who launched the session — same event store, same Radar, same Intercept.
 - **Three Intercept modes:** nudge (advisory), redirect (hard course-correct), rollback (replay-with-hint, not session-state restoration).
 - **Telemetry channels:** lifecycle hooks (zero-touch, low-fidelity) + MCP tools (`emit_decision`, `emit_subgoal`, `emit_confidence`, `flag_blocked`, `update_memory`, `read_memory`) for high-fidelity structured events.
 - **Daemon language: TypeScript / Node.** Chosen for the official MCP SDK and fastest iteration; a Rust port is a future option only if footprint matters.

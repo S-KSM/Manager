@@ -21,6 +21,16 @@ protocol DaemonClientProtocol: Sendable {
                           kind: InterventionKind,
                           message: String,
                           rollbackToDecisionID: String?) async throws -> Intervention
+    /// v1.4.4 — pending interventions for a workstream (oldest first).
+    /// Powers the approval-required strip in AgentDetailView.
+    func listPendingInterventions(workstreamID: String) async throws -> [Intervention]
+    /// v1.4.4 — record manager's Approve/Deny on an `approval_required`
+    /// intervention. Server merges `payload.approval_decision = {approved}`
+    /// and marks delivered atomically; emits an `intervention_delivered`
+    /// event so the methodology timeline shows the decision.
+    func decideApproval(workstreamID: String,
+                        interventionID: String,
+                        approved: Bool) async throws -> Intervention
 
     // MARK: - v1: workstream lifecycle
 
@@ -228,6 +238,20 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         } catch {
             throw DaemonError.transport(error)
         }
+    }
+
+    func listPendingInterventions(workstreamID: String) async throws -> [Intervention] {
+        return try await getJSON(
+            path: "workstreams/\(workstreamID)/interventions/pending"
+        )
+    }
+
+    func decideApproval(workstreamID: String,
+                        interventionID: String,
+                        approved: Bool) async throws -> Intervention {
+        struct Body: Encodable { let approved: Bool }
+        let path = "workstreams/\(workstreamID)/interventions/\(interventionID)/decide"
+        return try await sendJSON(method: "POST", path: path, body: Body(approved: approved))
     }
 
     // MARK: - v1: lifecycle

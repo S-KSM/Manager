@@ -37,6 +37,22 @@ describe('InterventionQueue', () => {
     expect(queue.listPending('demo')).toHaveLength(0);
   });
 
+  it('decideApproval merges decision + marks delivered (only for approval_required)', () => {
+    const intv = queue.enqueue('demo', 'approval_required', {
+      approval_request: { summary: 'rm -rf old/' },
+    });
+    const updated = queue.decideApproval(intv.id, true);
+    expect(updated).not.toBeNull();
+    expect(updated!.delivered_at).not.toBeNull();
+    expect(updated!.payload.approval_decision?.approved).toBe(true);
+    expect(updated!.payload.approval_request?.summary).toBe('rm -rf old/');
+    // Second call returns null (already delivered).
+    expect(queue.decideApproval(intv.id, false)).toBeNull();
+    // Wrong kind returns null.
+    const nudge = queue.enqueue('demo', 'nudge', { message: 'hi' });
+    expect(queue.decideApproval(nudge.id, true)).toBeNull();
+  });
+
   it('preserves enqueue order in listPending', async () => {
     const a = queue.enqueue('demo', 'nudge', { message: 'first' });
     // Avoid identical-millisecond timestamps for ordering check.

@@ -113,12 +113,12 @@ final class InterventionCodableTests: XCTestCase {
 
     func testInterventionKindDecodesAllThreeValues() throws {
         let decoder = JSONDecoder()
-        for raw in ["nudge", "redirect", "rollback"] {
+        for raw in ["nudge", "redirect", "rollback", "approval_required"] {
             let data = Data("\"\(raw)\"".utf8)
             let kind = try decoder.decode(InterventionKind.self, from: data)
             XCTAssertEqual(kind.rawValue, raw)
         }
-        XCTAssertEqual(InterventionKind.allCases.count, 3)
+        XCTAssertEqual(InterventionKind.allCases.count, 4)
     }
 
     func testRedirectPayloadOmitsRollbackField() throws {

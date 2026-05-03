@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import Database, { type Database as DatabaseType } from 'better-sqlite3';
 import { getConfig } from './config.js';
 
-export type InterventionKind = 'nudge' | 'redirect' | 'rollback';
+export type InterventionKind = 'nudge' | 'redirect' | 'rollback' | 'approval_required';
 
 /**
  * Wire-format Intervention as documented in docs/ARCHITECTURE.md
@@ -23,6 +23,23 @@ export interface Intervention {
 export interface InterventionPayload {
   message?: string;
   rollback_to_decision_id?: string;
+  /**
+   * v1.4.4 (`approval_required` only) — what the agent is asking permission to
+   * do. Free-form for now; future schema lands when the MCP tool that emits
+   * these is built.
+   */
+  approval_request?: {
+    summary?: string;
+    tool?: string;
+    detail?: string;
+  };
+  /**
+   * v1.4.4 (`approval_required` only) — set by the manager via the ACK call:
+   * `{ approved: true }` lets the run proceed; `{ approved: false }` is the
+   * Deny path. Round-trip: agent enqueues with `approval_request`, manager
+   * acks with the decision attached.
+   */
+  approval_decision?: { approved: boolean };
 }
 
 interface InterventionRow {
@@ -64,7 +81,7 @@ export class InterventionQueue {
       CREATE TABLE IF NOT EXISTS interventions (
         id            TEXT PRIMARY KEY,
         workstream_id TEXT NOT NULL,
-        kind          TEXT NOT NULL CHECK (kind IN ('nudge','redirect','rollback')),
+        kind          TEXT NOT NULL,
         payload_json  TEXT NOT NULL,
         created_at    TEXT NOT NULL,
         delivered_at  TEXT
@@ -140,6 +157,32 @@ export class InterventionQueue {
     });
     txn(ids);
     return updated;
+  }
+
+  /**
+   * v1.4.4 — record an approval decision and mark the intervention delivered
+   * in one shot. The decision is merged into `payload.approval_decision`
+   * (preserving any existing `approval_request`). Returns the updated row, or
+   * null if the intervention id is unknown / already delivered.
+   */
+  decideApproval(id: string, approved: boolean): Intervention | null {
+    const selectStmt = this.db.prepare(
+      'SELECT id, workstream_id, kind, payload_json, created_at, delivered_at FROM interventions WHERE id = ?',
+    );
+    const row = selectStmt.get(id) as InterventionRow | undefined;
+    if (!row) return null;
+    if (row.delivered_at !== null) return null;
+    if (row.kind !== 'approval_required') return null;
+    const payload = this.parsePayload(row.payload_json);
+    payload.approval_decision = { approved };
+    const nowTs = new Date().toISOString();
+    this.db
+      .prepare(
+        'UPDATE interventions SET payload_json = ?, delivered_at = ? WHERE id = ? AND delivered_at IS NULL',
+      )
+      .run(JSON.stringify(payload), nowTs, id);
+    const updated = selectStmt.get(id) as InterventionRow;
+    return this.rowToWire(updated);
   }
 
   /** Test/UI helper: every intervention for a workstream, oldest first. */

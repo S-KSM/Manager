@@ -11,6 +11,9 @@ enum InterventionKind: String, Codable, CaseIterable, Sendable {
     case nudge
     case redirect
     case rollback
+    /// v1.4.4 — agent (or runtime) is asking for permission to do something.
+    /// The manager must ack with `payload.approval_decision = { approved: bool }`.
+    case approvalRequired = "approval_required"
 }
 
 struct Intervention: Codable, Identifiable, Sendable, Hashable {
@@ -50,14 +53,37 @@ struct Intervention: Codable, Identifiable, Sendable, Hashable {
 struct InterventionPayload: Codable, Sendable, Hashable {
     let message: String?
     let rollbackToDecisionID: String?
+    /// v1.4.4 (`approval_required` only) — what the agent wants permission for.
+    let approvalRequest: ApprovalRequest?
+    /// v1.4.4 (`approval_required` only) — manager's decision attached on ack.
+    let approvalDecision: ApprovalDecision?
 
-    init(message: String? = nil, rollbackToDecisionID: String? = nil) {
+    init(
+        message: String? = nil,
+        rollbackToDecisionID: String? = nil,
+        approvalRequest: ApprovalRequest? = nil,
+        approvalDecision: ApprovalDecision? = nil
+    ) {
         self.message = message
         self.rollbackToDecisionID = rollbackToDecisionID
+        self.approvalRequest = approvalRequest
+        self.approvalDecision = approvalDecision
     }
 
     enum CodingKeys: String, CodingKey {
         case message
         case rollbackToDecisionID = "rollback_to_decision_id"
+        case approvalRequest      = "approval_request"
+        case approvalDecision     = "approval_decision"
     }
+}
+
+struct ApprovalRequest: Codable, Sendable, Hashable {
+    let summary: String?
+    let tool: String?
+    let detail: String?
+}
+
+struct ApprovalDecision: Codable, Sendable, Hashable {
+    let approved: Bool
 }
