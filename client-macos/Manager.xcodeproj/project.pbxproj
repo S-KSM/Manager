@@ -1,0 +1,543 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A100000000000000000000A1 /* ManagerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000B1 /* ManagerApp.swift */; };
+		A100000000000000000000A2 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000B2 /* ContentView.swift */; };
+		A100000000000000000000A3 /* Workstream.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000B3 /* Workstream.swift */; };
+		A100000000000000000000A4 /* Event.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000B4 /* Event.swift */; };
+		A100000000000000000000A5 /* Memory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000B5 /* Memory.swift */; };
+		A100000000000000000000A6 /* DaemonClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000B6 /* DaemonClient.swift */; };
+		A100000000000000000000A7 /* MockDaemonClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000B7 /* MockDaemonClient.swift */; };
+		A100000000000000000000A8 /* DaemonResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000B8 /* DaemonResolver.swift */; };
+		A100000000000000000000A9 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000B9 /* HomeView.swift */; };
+		A100000000000000000000AA /* AgentDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000BA /* AgentDetailView.swift */; };
+		A100000000000000000000AB /* MockData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000BB /* MockData.swift */; };
+		A100000000000000000000AC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000BC /* Assets.xcassets */; };
+		A100000000000000000000AD /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000BD /* Preview Assets.xcassets */; };
+		A100000000000000000000AE /* EventCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000BE /* EventCodableTests.swift */; };
+		A100000000000000000000AF /* MockDaemonClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000BF /* MockDaemonClientTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A1000000000000000000C001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A1000000000000000000F001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A1000000000000000000D001;
+			remoteInfo = Manager;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		A100000000000000000000B1 /* ManagerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagerApp.swift; sourceTree = "<group>"; };
+		A100000000000000000000B2 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A100000000000000000000B3 /* Workstream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Workstream.swift; sourceTree = "<group>"; };
+		A100000000000000000000B4 /* Event.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Event.swift; sourceTree = "<group>"; };
+		A100000000000000000000B5 /* Memory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Memory.swift; sourceTree = "<group>"; };
+		A100000000000000000000B6 /* DaemonClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonClient.swift; sourceTree = "<group>"; };
+		A100000000000000000000B7 /* MockDaemonClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockDaemonClient.swift; sourceTree = "<group>"; };
+		A100000000000000000000B8 /* DaemonResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonResolver.swift; sourceTree = "<group>"; };
+		A100000000000000000000B9 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		A100000000000000000000BA /* AgentDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDetailView.swift; sourceTree = "<group>"; };
+		A100000000000000000000BB /* MockData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockData.swift; sourceTree = "<group>"; };
+		A100000000000000000000BC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A100000000000000000000BD /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
+		A100000000000000000000BE /* EventCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventCodableTests.swift; sourceTree = "<group>"; };
+		A100000000000000000000BF /* MockDaemonClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockDaemonClientTests.swift; sourceTree = "<group>"; };
+		A100000000000000000000C0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A100000000000000000000C1 /* Manager.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Manager.entitlements; sourceTree = "<group>"; };
+		A100000000000000000000C2 /* Manager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Manager.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A100000000000000000000C3 /* ManagerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ManagerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A1000000000000000000E001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1000000000000000000E002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A1000000000000000000G001 /* (root) */ = {
+			isa = PBXGroup;
+			children = (
+				A1000000000000000000G002 /* Manager */,
+				A1000000000000000000G003 /* ManagerTests */,
+				A1000000000000000000G004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A1000000000000000000G002 /* Manager */ = {
+			isa = PBXGroup;
+			children = (
+				A100000000000000000000B1 /* ManagerApp.swift */,
+				A100000000000000000000B2 /* ContentView.swift */,
+				A1000000000000000000G005 /* Models */,
+				A1000000000000000000G006 /* Daemon */,
+				A1000000000000000000G007 /* Views */,
+				A1000000000000000000G008 /* Mock */,
+				A1000000000000000000G009 /* Resources */,
+				A1000000000000000000G00A /* Preview Content */,
+			);
+			path = Manager;
+			sourceTree = "<group>";
+		};
+		A1000000000000000000G003 /* ManagerTests */ = {
+			isa = PBXGroup;
+			children = (
+				A100000000000000000000BE /* EventCodableTests.swift */,
+				A100000000000000000000BF /* MockDaemonClientTests.swift */,
+			);
+			path = ManagerTests;
+			sourceTree = "<group>";
+		};
+		A1000000000000000000G004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A100000000000000000000C2 /* Manager.app */,
+				A100000000000000000000C3 /* ManagerTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A1000000000000000000G005 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				A100000000000000000000B3 /* Workstream.swift */,
+				A100000000000000000000B4 /* Event.swift */,
+				A100000000000000000000B5 /* Memory.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A1000000000000000000G006 /* Daemon */ = {
+			isa = PBXGroup;
+			children = (
+				A100000000000000000000B6 /* DaemonClient.swift */,
+				A100000000000000000000B7 /* MockDaemonClient.swift */,
+				A100000000000000000000B8 /* DaemonResolver.swift */,
+			);
+			path = Daemon;
+			sourceTree = "<group>";
+		};
+		A1000000000000000000G007 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A100000000000000000000B9 /* HomeView.swift */,
+				A100000000000000000000BA /* AgentDetailView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		A1000000000000000000G008 /* Mock */ = {
+			isa = PBXGroup;
+			children = (
+				A100000000000000000000BB /* MockData.swift */,
+			);
+			path = Mock;
+			sourceTree = "<group>";
+		};
+		A1000000000000000000G009 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				A100000000000000000000BC /* Assets.xcassets */,
+				A100000000000000000000C0 /* Info.plist */,
+				A100000000000000000000C1 /* Manager.entitlements */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		A1000000000000000000G00A /* Preview Content */ = {
+			isa = PBXGroup;
+			children = (
+				A100000000000000000000BD /* Preview Assets.xcassets */,
+			);
+			path = "Preview Content";
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A1000000000000000000D001 /* Manager */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1000000000000000000D101 /* Build configuration list for PBXNativeTarget "Manager" */;
+			buildPhases = (
+				A1000000000000000000D201 /* Sources */,
+				A1000000000000000000E001 /* Frameworks */,
+				A1000000000000000000D301 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Manager;
+			productName = Manager;
+			productReference = A100000000000000000000C2 /* Manager.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A1000000000000000000D002 /* ManagerTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1000000000000000000D102 /* Build configuration list for PBXNativeTarget "ManagerTests" */;
+			buildPhases = (
+				A1000000000000000000D202 /* Sources */,
+				A1000000000000000000E002 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A1000000000000000000D401 /* PBXTargetDependency */,
+			);
+			name = ManagerTests;
+			productName = ManagerTests;
+			productReference = A100000000000000000000C3 /* ManagerTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A1000000000000000000F001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					A1000000000000000000D001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					A1000000000000000000D002 = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = A1000000000000000000D001;
+					};
+				};
+			};
+			buildConfigurationList = A1000000000000000000F101 /* Build configuration list for PBXProject "Manager" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A1000000000000000000G001;
+			productRefGroup = A1000000000000000000G004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A1000000000000000000D001 /* Manager */,
+				A1000000000000000000D002 /* ManagerTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A1000000000000000000D301 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A100000000000000000000AC /* Assets.xcassets in Resources */,
+				A100000000000000000000AD /* Preview Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A1000000000000000000D201 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A100000000000000000000A1 /* ManagerApp.swift in Sources */,
+				A100000000000000000000A2 /* ContentView.swift in Sources */,
+				A100000000000000000000A3 /* Workstream.swift in Sources */,
+				A100000000000000000000A4 /* Event.swift in Sources */,
+				A100000000000000000000A5 /* Memory.swift in Sources */,
+				A100000000000000000000A6 /* DaemonClient.swift in Sources */,
+				A100000000000000000000A7 /* MockDaemonClient.swift in Sources */,
+				A100000000000000000000A8 /* DaemonResolver.swift in Sources */,
+				A100000000000000000000A9 /* HomeView.swift in Sources */,
+				A100000000000000000000AA /* AgentDetailView.swift in Sources */,
+				A100000000000000000000AB /* MockData.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1000000000000000000D202 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A100000000000000000000AE /* EventCodableTests.swift in Sources */,
+				A100000000000000000000AF /* MockDaemonClientTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A1000000000000000000D401 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A1000000000000000000D001 /* Manager */;
+			targetProxy = A1000000000000000000C001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		A1000000000000000000F201 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A1000000000000000000F202 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		A1000000000000000000F301 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Manager/Resources/Manager.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"Manager/Preview Content\"";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Manager/Resources/Info.plist;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.manager.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A1000000000000000000F302 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Manager/Resources/Manager.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"Manager/Preview Content\"";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Manager/Resources/Info.plist;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.manager.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		A1000000000000000000F401 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.manager.app.ManagerTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Manager.app/Contents/MacOS/Manager";
+			};
+			name = Debug;
+		};
+		A1000000000000000000F402 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.manager.app.ManagerTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Manager.app/Contents/MacOS/Manager";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A1000000000000000000F101 /* Build configuration list for PBXProject "Manager" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000F201 /* Debug */,
+				A1000000000000000000F202 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1000000000000000000D101 /* Build configuration list for PBXNativeTarget "Manager" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000F301 /* Debug */,
+				A1000000000000000000F302 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1000000000000000000D102 /* Build configuration list for PBXNativeTarget "ManagerTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000F401 /* Debug */,
+				A1000000000000000000F402 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A1000000000000000000F001 /* Project object */;
+}
