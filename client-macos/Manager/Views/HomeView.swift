@@ -3,13 +3,23 @@ import SwiftUI
 /// Three-zone home view (see docs/ARCHITECTURE.md > "Three-zone home view"):
 ///
 ///   ┌──────────────────────────────────────────────────────────────┐
+///   │ MockModeBanner  — only when running on mock data             │
+///   ├──────────────────────────────────────────────────────────────┤
 ///   │ DigestRailView  — aggregate summary across the team          │
 ///   ├────────────────────────────────────────────┬─────────────────┤
 ///   │                                            │                 │
 ///   │ TeamFloorView — grid of WorkstreamCard     │ LiveTickerView  │
-///   │                                            │ (right rail)    │
+///   │ or RadarEmptyStateView when no workstreams │ (right rail)    │
 ///   │                                            │                 │
 ///   └────────────────────────────────────────────┴─────────────────┘
+///
+/// First-launch behaviour:
+/// - Live daemon up + has workstreams → standard grid.
+/// - Live daemon up + zero workstreams → `RadarEmptyStateView` ("Radar is
+///   clear" onboarding card with the `claude` instructions).
+/// - Live daemon unreachable → mock client serves demo data, but a
+///   `MockModeBanner` strip across the top makes it obvious we're not
+///   showing the user's real workstreams.
 struct HomeView: View {
     let workstreams: [Workstream]
     let client: DaemonClientProtocol
@@ -19,6 +29,13 @@ struct HomeView: View {
     /// (Pause / Resume / Retire / Edit title…). Wired by `ContentView`.
     let onLifecycleAction: (Workstream, LifecycleAction) -> Void
 
+    /// Resolver is read from the environment (injected by `ManagerApp`) so
+    /// HomeView can render the mock-mode banner and the live-empty onboarding
+    /// state without ContentView having to thread mode info through. When the
+    /// view is hosted somewhere without an environment object (older
+    /// previews) the banner just stays hidden — the empty state still works.
+    @EnvironmentObject private var resolver: DaemonResolver
+
     enum LifecycleAction: Hashable {
         case pause
         case resume
@@ -26,8 +43,34 @@ struct HomeView: View {
         case editTitle
     }
 
+    /// True when we have nothing to render on the team floor and the live
+    /// daemon is the source of truth — i.e. the user genuinely has zero
+    /// active/paused workstreams yet, not "we couldn't reach the daemon
+    /// so there's nothing here." TeamFloorView already filters retired
+    /// out so we use the same predicate here. In mock fallback mode we
+    /// still show the demo cards (with a banner explaining what they
+    /// are) rather than a misleading empty state.
+    private var showLiveEmptyState: Bool {
+        guard resolver.mode == .live else { return false }
+        return !workstreams.contains(where: { $0.status != .retired })
+    }
+
+    /// True when the user is currently looking at mock data — either
+    /// because the daemon is unreachable, an env var forced it, or they
+    /// flipped the toggle. Worth a banner in all three cases so the
+    /// "Mock data" toolbar dot isn't the only signal.
+    private var showMockBanner: Bool {
+        resolver.mode == .mock
+    }
+
     var body: some View {
         VStack(spacing: 0) {
+            if showMockBanner {
+                MockModeBanner(reason: resolver.modeReason) {
+                    Task { await resolver.retryConnection() }
+                }
+            }
+
             DigestRailView(
                 client: client,
                 workstreams: workstreams,
@@ -40,11 +83,17 @@ struct HomeView: View {
             Divider()
 
             HStack(alignment: .top, spacing: 0) {
-                TeamFloorView(
-                    workstreams: workstreams,
-                    onSelect: onSelect,
-                    onLifecycleAction: onLifecycleAction
-                )
+                Group {
+                    if showLiveEmptyState {
+                        RadarEmptyStateView()
+                    } else {
+                        TeamFloorView(
+                            workstreams: workstreams,
+                            onSelect: onSelect,
+                            onLifecycleAction: onLifecycleAction
+                        )
+                    }
+                }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 Divider()
@@ -54,6 +103,230 @@ struct HomeView: View {
             }
         }
         .navigationTitle("Manager")
+    }
+}
+
+// MARK: - Mock-mode banner
+
+/// Thin strip across the top of HomeView when the app is running on the
+/// mock client. Reason-aware copy + a Retry button (when it makes sense)
+/// so first-launch users immediately understand "what they see is fake"
+/// and have a one-click path back to live data once the daemon is up.
+private struct MockModeBanner: View {
+    let reason: DaemonResolver.ModeReason
+    let onRetry: () -> Void
+
+    @State private var retrying: Bool = false
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: iconName)
+                .foregroundStyle(.yellow)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(headline)
+                    .font(.callout.weight(.semibold))
+                Text(subhead)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 12)
+            if showsRetry {
+                Button {
+                    retrying = true
+                    Task {
+                        onRetry()
+                        // The retry call is async-fire-and-forget from the
+                        // view's perspective; we just want to debounce the
+                        // button briefly so it can't be hammered.
+                        try? await Task.sleep(for: .milliseconds(800))
+                        retrying = false
+                    }
+                } label: {
+                    if retrying {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Retry connection", systemImage: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(retrying)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.yellow.opacity(0.10))
+        .overlay(
+            Rectangle()
+                .frame(height: 1)
+                .foregroundStyle(Color.yellow.opacity(0.35)),
+            alignment: .bottom
+        )
+    }
+
+    private var iconName: String {
+        switch reason {
+        case .liveUnreachable: return "antenna.radiowaves.left.and.right.slash"
+        case .envOverride:     return "wrench.and.screwdriver.fill"
+        case .userToggled:     return "hand.tap.fill"
+        case .forced:          return "eyeglasses"
+        case .liveHealthy, .unknown:
+            // Shouldn't render in these states (banner is mock-only) but
+            // we still need a fallback glyph for the type checker.
+            return "exclamationmark.bubble.fill"
+        }
+    }
+
+    private var headline: String {
+        switch reason {
+        case .liveUnreachable: return "Showing demo data — daemon is offline."
+        case .envOverride:     return "Mock mode forced via MANAGER_DAEMON env var."
+        case .userToggled:     return "Mock mode — toggled manually."
+        case .forced, .liveHealthy, .unknown:
+            return "Showing demo data."
+        }
+    }
+
+    private var subhead: String {
+        switch reason {
+        case .liveUnreachable:
+            return "These workstreams aren't real. Start the daemon (`launchctl kickstart -k gui/$UID/com.manager.daemon`) and click Retry."
+        case .envOverride:
+            return "Unset MANAGER_DAEMON in your scheme to use the live daemon."
+        case .userToggled:
+            return "Press ⌘⇧M or click Retry to switch back to the live daemon."
+        case .forced, .liveHealthy, .unknown:
+            return "These workstreams aren't real."
+        }
+    }
+
+    /// Only show Retry when flipping back to live mode is sensible — i.e.
+    /// not when the env var or constructor explicitly locked us into mock.
+    private var showsRetry: Bool {
+        switch reason {
+        case .liveUnreachable, .userToggled: return true
+        case .envOverride, .forced, .liveHealthy, .unknown: return false
+        }
+    }
+}
+
+// MARK: - Empty Radar onboarding
+
+/// Centered onboarding card shown on the team floor when the live daemon
+/// is reachable but reports zero workstreams. First-launch users land here
+/// instead of staring at a blank window.
+///
+/// Copy uses the Dispatch lexicon ("Radar") per CLAUDE.md. The code block
+/// is selectable and has a copy-to-clipboard affordance so the user can
+/// grab the snippet in one click.
+private struct RadarEmptyStateView: View {
+    @State private var copied: Bool = false
+
+    private static let snippet = "cd ~/Code/your-project\nclaude"
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                Spacer(minLength: 40)
+                card
+                    .frame(maxWidth: 520)
+                    .padding(.horizontal, 32)
+                Spacer(minLength: 40)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 10) {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .imageScale(.large)
+                    .foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Radar is clear")
+                        .font(.title2.weight(.semibold))
+                    Text("No workstreams yet — let's get one on screen.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("How to start a workstream")
+                    .font(.headline)
+                Text("`cd` into any project directory and run `claude`. Dispatch's hooks register the session automatically and a card will appear here within a few seconds.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            codeBlock
+
+            HStack(spacing: 6) {
+                Image(systemName: "info.circle")
+                    .imageScale(.small)
+                    .foregroundStyle(.tertiary)
+                Text("See `docs/TUTORIAL.md` for the full walk-through.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(24)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.gray.opacity(0.25), lineWidth: 1)
+        )
+    }
+
+    private var codeBlock: some View {
+        ZStack(alignment: .topTrailing) {
+            Text(Self.snippet)
+                .font(.system(.callout, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .padding(.trailing, 64) // leave room for the copy button
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.black.opacity(0.06))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.gray.opacity(0.18), lineWidth: 1)
+                )
+
+            Button {
+                copyToClipboard()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    Text(copied ? "Copied" : "Copy")
+                }
+                .font(.caption.weight(.medium))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .padding(8)
+        }
+    }
+
+    private func copyToClipboard() {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(Self.snippet, forType: .string)
+        copied = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            copied = false
+        }
     }
 }
 
@@ -592,5 +865,18 @@ struct LiveTickerView: View {
         onSelect: { _ in },
         onLifecycleAction: { _, _ in }
     )
+    .environmentObject(DaemonResolver(forcedMode: .mock))
+    .frame(width: 1200, height: 760)
+}
+
+#Preview("HomeView (live, empty)") {
+    // Empty live daemon — exercises the RadarEmptyStateView onboarding.
+    HomeView(
+        workstreams: [],
+        client: MockDaemonClient(workstreams: []),
+        onSelect: { _ in },
+        onLifecycleAction: { _, _ in }
+    )
+    .environmentObject(DaemonResolver(forcedMode: .live))
     .frame(width: 1200, height: 760)
 }

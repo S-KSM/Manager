@@ -41,6 +41,7 @@ struct ContentView: View {
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
+                .help("Reload the radar from the daemon")
             }
         }
         .sheet(isPresented: $showNewWorkstreamSheet) {
@@ -123,7 +124,7 @@ struct ContentView: View {
                         Image(systemName: "plus.circle.fill")
                     }
                     .buttonStyle(.borderless)
-                    .help("New workstream")
+                    .help("Create a new workstream so the radar starts tracking it")
                 }
             }
 

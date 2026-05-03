@@ -237,11 +237,13 @@ private struct ProposalRow: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .help("Reject this proposal — it will not be added to the team handbook")
                     Button("Promote") {
                         Task { await onPromote() }
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
+                    .help("Add this skill to the team handbook so every agent sees it at SessionStart (Protocol broadcast)")
                 }
             }
         }
@@ -367,6 +369,7 @@ struct PromoteSkillSheet: View {
                 Button("Cancel", role: .cancel) { onDismiss() }
                     .keyboardShortcut(.cancelAction)
                     .disabled(savedMessage != nil)
+                    .help("Discard this skill draft and close the panel")
                 Button {
                     Task { await save() }
                 } label: {
@@ -379,10 +382,11 @@ struct PromoteSkillSheet: View {
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
                 .disabled(!canSubmit)
+                .help("Append this skill to the team handbook so every agent picks it up at SessionStart")
             }
         }
         .padding(20)
-        .frame(minWidth: 480, idealWidth: 540, minHeight: 360)
+        .frame(minWidth: 480, idealWidth: 540, maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
     }
 
     private func save() async {

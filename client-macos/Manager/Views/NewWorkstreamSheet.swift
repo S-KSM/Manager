@@ -83,6 +83,7 @@ struct NewWorkstreamSheet: View {
                 Spacer()
                 Button("Cancel", role: .cancel) { onDismiss() }
                     .keyboardShortcut(.cancelAction)
+                    .help("Discard this workstream draft and close the sheet")
                 Button {
                     Task { await create() }
                 } label: {
@@ -95,10 +96,11 @@ struct NewWorkstreamSheet: View {
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
                 .disabled(!canSubmit)
+                .help("Create this workstream so the agent radar starts tracking it")
             }
         }
         .padding(20)
-        .frame(minWidth: 420, idealWidth: 480, minHeight: 240)
+        .frame(minWidth: 420, idealWidth: 480, maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)
     }
 
     private func create() async {

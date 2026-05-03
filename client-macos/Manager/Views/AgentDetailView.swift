@@ -47,7 +47,7 @@ struct AgentDetailView: View {
                     }
                 )
             }
-            .frame(minWidth: 460)
+            .frame(minWidth: 360, idealWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
 
             VStack(alignment: .leading, spacing: 0) {
                 memoryHeader
@@ -60,8 +60,9 @@ struct AgentDetailView: View {
                     isLoading: loadingMemory
                 )
             }
-            .frame(minWidth: 360)
+            .frame(minWidth: 280, idealWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle(workstream.title)
         .navigationSubtitle(workstream.id)
         .task(id: workstream.id) {

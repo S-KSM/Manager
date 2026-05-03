@@ -26,6 +26,7 @@ struct SchedulerSettings: View {
                     Button("Done", action: onDismiss)
                         .keyboardShortcut(.cancelAction)
                         .controlSize(.small)
+                        .help("Close the scheduler settings")
                 }
                 Text("The daemon generates a draft on each fire and drops it into the Drafts inbox for you to review. Both jobs are off by default.")
                     .font(.caption)
@@ -53,7 +54,7 @@ struct SchedulerSettings: View {
             }
             .padding(20)
         }
-        .frame(minWidth: 520, idealWidth: 580, minHeight: 360)
+        .frame(minWidth: 520, idealWidth: 580, maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
         .task {
             await reload()
         }
@@ -131,6 +132,7 @@ private struct JobRow: View {
             }
             .labelsHidden()
             .toggleStyle(.switch)
+            .help("Enable or disable this scheduled draft job")
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(label)
@@ -148,6 +150,7 @@ private struct JobRow: View {
             Button("Configure…", action: onConfigure)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .help("Edit cron schedule, audience, and provider for this job")
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -250,6 +253,7 @@ private struct JobEditor: View {
                 Button("Cancel", role: .cancel, action: onDismiss)
                     .keyboardShortcut(.cancelAction)
                     .disabled(saving)
+                    .help("Discard changes and close the editor")
                 Button {
                     Task {
                         saving = true
@@ -274,10 +278,11 @@ private struct JobEditor: View {
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
                 .disabled(saving)
+                .help("Persist these scheduler settings")
             }
         }
         .padding(20)
-        .frame(minWidth: 460, idealWidth: 520, minHeight: 380)
+        .frame(minWidth: 460, idealWidth: 520, maxWidth: .infinity, minHeight: 380, maxHeight: .infinity)
     }
 }
 

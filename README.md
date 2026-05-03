@@ -24,6 +24,8 @@ claude
 
 A card for `some-project` appears on the **Radar** within seconds. Decision events from the agent flow into **The Trace** live. Open an **Intercept** (nudge / redirect / rollback) from the app to course-correct mid-flight.
 
+New here? See [`docs/TUTORIAL.md`](docs/TUTORIAL.md) for a 30-minute walk-through, or [`docs/LOCAL_MODELS.md`](docs/LOCAL_MODELS.md) for local-LLM setup.
+
 To dry-run prereqs without installing: `bash bin/install.sh --check-only`.
 To uninstall: `bash bin/uninstall.sh`.
 

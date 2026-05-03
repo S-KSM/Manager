@@ -73,7 +73,7 @@ struct ReportViewer: View {
                     .padding(.vertical, 6)
             }
         }
-        .frame(minWidth: 640, idealWidth: 760, minHeight: 520)
+        .frame(minWidth: 560, idealWidth: 760, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
         .onDisappear {
             actionTask?.cancel()
         }
@@ -110,6 +110,7 @@ struct ReportViewer: View {
                 Button("Done", action: onDismiss)
                     .keyboardShortcut(.cancelAction)
                     .controlSize(.small)
+                    .help("Close this update")
             }
             HStack(spacing: 8) {
                 AudienceBadge(report: localReport)
@@ -166,6 +167,7 @@ struct ReportViewer: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(pendingAction != nil)
+                .help("Discard your edits and return to the read view")
 
                 Button {
                     actionTask = Task { await saveEdits() }
@@ -179,6 +181,7 @@ struct ReportViewer: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .disabled(pendingAction != nil)
+                .help("Persist your edits to this update")
             } else {
                 Button {
                     editing = true
@@ -190,6 +193,7 @@ struct ReportViewer: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(pendingAction != nil)
+                .help("Edit the title and body of this update")
 
                 Button {
                     actionTask = Task { await markSaved() }
@@ -203,6 +207,7 @@ struct ReportViewer: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .disabled(pendingAction != nil || localReport.status == .saved)
+                .help("Promote this draft into the Saved reports list")
 
                 Button {
                     copyMarkdown()
@@ -212,6 +217,7 @@ struct ReportViewer: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(pendingAction != nil)
+                .help("Copy the Markdown body to the clipboard")
 
                 Spacer(minLength: 0)
 
@@ -227,6 +233,7 @@ struct ReportViewer: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(pendingAction != nil)
+                .help("Archive this update — it stops appearing in Drafts and Saved")
             }
         }
     }

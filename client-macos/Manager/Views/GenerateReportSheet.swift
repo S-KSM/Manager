@@ -101,7 +101,9 @@ struct GenerateReportSheet: View {
         .frame(
             minWidth: generatedReport == nil ? 540 : 720,
             idealWidth: generatedReport == nil ? 600 : 800,
-            minHeight: generatedReport == nil ? 520 : 620
+            maxWidth: .infinity,
+            minHeight: generatedReport == nil ? 520 : 620,
+            maxHeight: .infinity
         )
         .task {
             await loadPresets()
@@ -207,6 +209,9 @@ struct GenerateReportSheet: View {
                         .foregroundStyle(active ? Color.accentColor : Color.primary)
                     }
                     .buttonStyle(.plain)
+                    .help(active
+                          ? "Exclude \(ws.title) from this update"
+                          : "Include \(ws.title) in this update")
                 }
             }
         }
@@ -236,6 +241,9 @@ struct GenerateReportSheet: View {
         }
         .buttonStyle(.borderless)
         .controlSize(.small)
+        .help(showFreetext
+              ? "Hide the free-text audience override"
+              : "Override the audience preset with free-text instructions")
 
         if showFreetext {
             ZStack(alignment: .topLeading) {
@@ -322,6 +330,7 @@ struct GenerateReportSheet: View {
             }
             .keyboardShortcut(.cancelAction)
             .disabled(generating || savePending)
+            .help("Discard this update and close the sheet")
 
             if let report = generatedReport {
                 Button {
@@ -335,6 +344,7 @@ struct GenerateReportSheet: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(savePending)
+                .help("Keep this update in the Drafts inbox for later review")
 
                 Button {
                     saveTask = Task { await persist(generated: report, save: true) }
@@ -348,6 +358,7 @@ struct GenerateReportSheet: View {
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(savePending)
+                .help("Save this update to the Saved reports list")
             } else {
                 Button {
                     generateTask = Task { await generate() }
@@ -361,6 +372,7 @@ struct GenerateReportSheet: View {
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
                 .disabled(generating || selectedWorkstreamIDs.isEmpty)
+                .help("Run the LLM to generate a draft summary across the selected workstreams")
             }
         }
     }

@@ -126,6 +126,7 @@ struct UpdatesView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
+            .help("Generate a fresh update across the workstreams you pick")
         }
     }
 
@@ -158,6 +159,7 @@ struct UpdatesView: View {
                             ReportRow(report: report)
                         }
                         .buttonStyle(.plain)
+                        .help("Open this update to read, edit, save, or delete it")
                     }
                 }
             }

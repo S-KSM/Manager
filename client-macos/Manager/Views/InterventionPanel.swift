@@ -51,26 +51,29 @@ struct InterventionPanel: View {
                     title: "Nudge",
                     systemImage: "bubble.left",
                     tint: .blue,
-                    help: "Advisory note. Agent may or may not change course."
+                    help: "Advisory note. Agent may or may not change course.",
+                    tooltip: "Send an advisory message to the agent on its next turn (non-blocking)"
                 )
                 modeButton(
                     mode: .redirect,
                     title: "Redirect",
                     systemImage: "arrow.uturn.right",
                     tint: .orange,
-                    help: "Hard course-correct. Agent must respond."
+                    help: "Hard course-correct. Agent must respond.",
+                    tooltip: "Force the agent to change course on its next turn"
                 )
                 modeButton(
                     mode: .rollback,
                     title: "Rollback",
                     systemImage: "arrow.uturn.backward.circle",
                     tint: .pink,
-                    help: "Re-decide from a prior decision branch."
+                    help: "Re-decide from a prior decision branch.",
+                    tooltip: "Replay from a chosen decision with a hint — agent re-considers from that point"
                 )
             }
         }
         .padding(20)
-        .frame(minWidth: 460)
+        .frame(minWidth: 460, idealWidth: 540, maxWidth: .infinity)
         .sheet(item: $activeMode) { mode in
             switch mode {
             case .nudge:
@@ -117,7 +120,8 @@ struct InterventionPanel: View {
         title: String,
         systemImage: String,
         tint: Color,
-        help: String
+        help: String,
+        tooltip: String
     ) -> some View {
         Button {
             activeMode = mode
@@ -145,6 +149,7 @@ struct InterventionPanel: View {
             )
         }
         .buttonStyle(.plain)
+        .help(tooltip)
     }
 }
 
@@ -212,6 +217,7 @@ private struct MessageInterventionSheet: View {
                 Button("Cancel", role: .cancel) { onDismiss() }
                     .keyboardShortcut(.cancelAction)
                     .disabled(sentMessage != nil)
+                    .help("Discard this intervention and close the panel")
                 Button {
                     Task { await send() }
                 } label: {
@@ -226,10 +232,13 @@ private struct MessageInterventionSheet: View {
                 .disabled(sending
                           || sentMessage != nil
                           || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .help(kind == .nudge
+                      ? "Queue this nudge — the agent will see it on its next turn"
+                      : "Queue this redirect — the agent must address it before continuing")
             }
         }
         .padding(20)
-        .frame(minWidth: 460, idealWidth: 520, minHeight: 260)
+        .frame(minWidth: 460, idealWidth: 520, maxWidth: .infinity, minHeight: 260, maxHeight: .infinity)
     }
 
     private func send() async {
@@ -340,6 +349,7 @@ private struct RollbackInterventionSheet: View {
                 Button("Cancel", role: .cancel) { onDismiss() }
                     .keyboardShortcut(.cancelAction)
                     .disabled(sentMessage != nil)
+                    .help("Discard this rollback and close the panel")
                 Button {
                     Task { await send() }
                 } label: {
@@ -355,10 +365,11 @@ private struct RollbackInterventionSheet: View {
                           || sentMessage != nil
                           || pickedDecisionID == nil
                           || decisions.isEmpty)
+                .help("Replay from the selected decision with the optional hint — agent reconsiders from that point")
             }
         }
         .padding(20)
-        .frame(minWidth: 520, idealWidth: 600, minHeight: 440)
+        .frame(minWidth: 520, idealWidth: 600, maxWidth: .infinity, minHeight: 440, maxHeight: .infinity)
     }
 
     @ViewBuilder
