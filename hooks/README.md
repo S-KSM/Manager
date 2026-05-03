@@ -12,7 +12,7 @@ See [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) for the event contract.
 | `stop.sh` | `Stop` | `session_end` | Marks session ended in SQLite. |
 | `pre-tool-use.sh` | `PreToolUse` | `tool_use` | Tool name + inputs (low-fidelity activity). |
 | `post-tool-use.sh` | `PostToolUse` | `tool_use` | Tool name + outputs/result. |
-| `user-prompt-submit.sh` | `UserPromptSubmit` | `tool_use` (v0); `intervention_delivered` (v0.5) | v0: just records the event. v0.5: also drains the intervention queue (see below). |
+| `user-prompt-submit.sh` | `UserPromptSubmit` | `tool_use` (v0); `intervention_delivered` (v0.5) | v0: just records the event. v0.5: also drains the intervention queue (see below). v0.5.1: rollbacks inline the original decision context. |
 
 ## Install
 
@@ -73,6 +73,8 @@ On every user prompt, after notifying the daemon, `user-prompt-submit.sh` also d
 
 When nothing is pending, when the daemon is unreachable, or when the body isn't a non-empty JSON array, the hook prints nothing on stdout and still exits 0.
 
+In v0.5.1 the rollback block grows additional H3 subsections when the decision lookup hits — see "Enriched rollback frame" below.
+
 **Per-kind block format:**
 
 - `nudge` / `redirect`:
@@ -80,7 +82,7 @@ When nothing is pending, when the daemon is unreachable, or when the body isn't 
   ## Manager intervention (<kind>)
   <payload.message>
   ```
-- `rollback`:
+- `rollback` (v0.5 thin frame — also used in v0.5.1 when the decision lookup misses):
   ```
   ## Manager intervention (rollback)
   We are returning to decision `<payload.rollback_to_decision_id>` and reconsidering from there.
@@ -88,6 +90,53 @@ When nothing is pending, when the daemon is unreachable, or when the body isn't 
   ```
 
 Blocks are concatenated with a blank line between them and the whole thing becomes the `additionalContext` string.
+
+## v0.5.1 — enriched rollback frame
+
+When a `rollback` intervention is in the pending list, `user-prompt-submit.sh` now does an extra fail-soft GET against:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/workstreams/<MANAGER_WORKSTREAM>/decisions/<rollback_to_decision_id>` | Returns the full decision event envelope (`{ts, workstream_id, session_id, type, id, parent_id, payload: {considered, choice, rationale, confidence}}`). |
+
+Uses `manager_get` from `_common.sh` (same `curl -s --max-time 1` discipline as everything else). On lookup hit, the rollback block expands from the v0.5 thin form to:
+
+```
+## Manager intervention (rollback)
+We are returning to decision `dec_07` and reconsidering from there.
+
+### Originally considered
+- option A
+- option B (chosen)
+- option C
+
+### Original rationale
+because Y
+
+### Original confidence
+72%
+
+### Hint from the manager
+try the SWR path
+```
+
+Section rules:
+
+- The `(chosen)` marker is appended to whichever `considered` entry equals `payload.choice` (string match).
+- Confidence is rendered as `round(value * 100)%`. Section is omitted entirely when confidence is null/missing.
+- `### Originally considered` is omitted when `considered` is missing or empty (older decision events).
+- `### Original rationale` is omitted when rationale is empty/missing.
+- `### Hint from the manager` is omitted when the rollback intervention's `payload.message` is empty.
+
+**Lookup miss / failure.** If the GET fails for any reason — transport error, 404, or a body that doesn't look like a decision envelope — the hook falls back to the v0.5 thin frame for that one rollback (other interventions in the same pending array are unaffected). Failure is silent on stdout; transport errors land on stderr only.
+
+**Before / after.** Same pending row `{kind:"rollback", payload:{rollback_to_decision_id:"dec_07", message:"try the SWR path"}}`:
+
+- v0.5: 3 lines (`##` header, framing line, `Hint from the manager: …`).
+- v0.5.1 with lookup hit: 4 H3 subsections inlined between framing and hint, hint promoted to its own `### Hint from the manager` H3.
+- v0.5.1 with lookup miss: identical to v0.5.
+
+Nudge and redirect frames are unchanged in v0.5.1.
 
 **Duplicate context risk.** Pending-list and ack are separate calls. If the GET succeeds but the ack POST fails (rare — daemon flapping mid-turn), the same intervention will be re-emitted on the next turn. We accept this in v0.5: better duplicated context than silently dropped guidance. v1 may add a per-turn idempotency token if it shows up in practice.
 
