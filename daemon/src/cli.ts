@@ -4,10 +4,12 @@ import { dirname, resolve } from 'node:path';
 import { Command } from 'commander';
 import { getConfig } from './config.js';
 import { EventStore } from './event-store.js';
+import { HandbookStore } from './handbook-store.js';
 import { buildHttpServer } from './http-server.js';
 import { InterventionQueue } from './intervention-queue.js';
 import { buildMcpServer, startMcpStdio } from './mcp-server.js';
 import { MemoryStore } from './memory-store.js';
+import { SkillProposalsStore } from './skill-proposals.js';
 import { WorkstreamRegistry } from './workstream.js';
 
 /**
@@ -150,7 +152,16 @@ async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
   const eventStore = new EventStore(cfg.eventsDir);
   const memoryStore = new MemoryStore(cfg.memoryDir);
   const interventionQueue = new InterventionQueue(cfg.dbPath);
-  const http = buildHttpServer({ eventStore, memoryStore, registry, interventionQueue });
+  const handbookStore = new HandbookStore();
+  const skillProposalsStore = new SkillProposalsStore(cfg.dbPath);
+  const http = buildHttpServer({
+    eventStore,
+    memoryStore,
+    registry,
+    interventionQueue,
+    handbookStore,
+    skillProposalsStore,
+  });
   const port = await http.listen(cfg.httpPort);
   // stderr so JSON-over-stdout MCP traffic stays clean.
   process.stderr.write(`[manager] HTTP/WS listening on http://127.0.0.1:${port}\n`);
@@ -158,7 +169,7 @@ async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
 
   let mcpRunning = false;
   if (opts.mcpStdio) {
-    const mcp = buildMcpServer({ eventStore, memoryStore, registry });
+    const mcp = buildMcpServer({ eventStore, memoryStore, registry, skillProposalsStore });
     await startMcpStdio(mcp);
     mcpRunning = true;
     process.stderr.write('[manager] MCP server bound to stdio\n');
@@ -170,6 +181,7 @@ async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
       await http.close();
       registry.close();
       interventionQueue.close();
+      skillProposalsStore.close();
     } catch (e) {
       process.stderr.write(`[manager] shutdown error: ${(e as Error).message}\n`);
     }
@@ -202,7 +214,8 @@ async function runMcp(): Promise<void> {
   const eventStore = new EventStore(cfg.eventsDir);
   const memoryStore = new MemoryStore(cfg.memoryDir);
   const interventionQueue = new InterventionQueue(cfg.dbPath);
-  const mcp = buildMcpServer({ eventStore, memoryStore, registry });
+  const skillProposalsStore = new SkillProposalsStore(cfg.dbPath);
+  const mcp = buildMcpServer({ eventStore, memoryStore, registry, skillProposalsStore });
   await startMcpStdio(mcp);
   process.stderr.write(`[manager] MCP stdio bound; state at ${cfg.home}\n`);
 
@@ -211,6 +224,7 @@ async function runMcp(): Promise<void> {
     try {
       registry.close();
       interventionQueue.close();
+      skillProposalsStore.close();
     } catch (e) {
       process.stderr.write(`[manager] shutdown error: ${(e as Error).message}\n`);
     }

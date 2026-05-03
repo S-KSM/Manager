@@ -66,7 +66,7 @@ Responsibilities:
 - Own the **workstream memory** — one Markdown file per workstream, owned by the agent (via `update_memory`) and editable by the human.
 - Own the **intervention queue** — per-workstream FIFO. Pre-turn hook on the agent side drains it.
 
-State location: `~/.claude/manager/` (events/, memory/, db.sqlite, queues/).
+State location: `~/.claude/manager/` (events/, memory/, db.sqlite, queues/, handbook.md).
 
 #### Two-process model
 
@@ -91,6 +91,8 @@ Localhost-only in v0/v0.5/v1; auth + remote binding land in v1.5. Default port 9
 | `GET` | `/workstreams` | Array of Workstream wire objects. |
 | `POST` | `/workstreams` | Body `{id, title}` → 201 with the new Workstream wire object. |
 | `GET` | `/workstreams/:id` | Workstream wire object (with `sessions[]` populated). 404 if unknown. |
+| `PATCH` | `/workstreams/:id` | Body `{status?, title?}`. Validates `status` ∈ {active, paused, retired}. Updates the registry, appends a single `workstream_updated` event with `{changes, prev}`, returns the updated Workstream wire object. 404 if unknown. |
+| `DELETE` | `/workstreams/:id` | Soft-delete: sets status to `retired` and appends `workstream_updated`. Returns 200 + the updated Workstream wire object (not 204) so clients can refresh local state without a follow-up GET. |
 | `GET` | `/workstreams/:id/memory` | Raw Markdown body (`text/markdown`). |
 | `GET` | `/workstreams/:id/events` | Array of Event JSON objects. Optional `?since=<byteOffset>`. |
 | `GET` | `/workstreams/:id/decisions/:decisionId` | Full event envelope of the named `decision` event (`ts`, `workstream_id`, `session_id`, `parent_id`, `payload`). 404 if workstream or decision unknown. |
@@ -99,6 +101,12 @@ Localhost-only in v0/v0.5/v1; auth + remote binding land in v1.5. Default port 9
 | `POST` | `/interventions` | Body `{workstream_id, kind, payload}`. Persists into the per-workstream queue. Returns 201 with the persisted Intervention. (Accepts legacy `workstreamId` for one release.) |
 | `GET` | `/workstreams/:id/interventions/pending` | Pending interventions (not yet delivered to the agent). |
 | `POST` | `/workstreams/:id/interventions/ack` | Body `{ids: string[]}`. Marks delivered, appends `intervention_delivered` events. |
+| `GET` | `/digest` | Aggregated rollup across all workstreams since `?since=<iso8601>` (default: 24 h ago). Returns `{since, totals: {shipped, blocked, needs_attention, active}, highlights: DigestHighlight[]}`. |
+| `GET` | `/handbook` | Raw Markdown body of the team handbook (`text/markdown`). Empty body if the handbook has not been written yet. |
+| `POST` | `/handbook/skills` | Body `{title, body, source?}`. Appends a `## <title>` block to the handbook with an optional source footer. Returns 201 + `{title}`. |
+| `GET` | `/skills/proposed` | Array of skill proposals with `status='proposed'`, oldest first. |
+| `POST` | `/skills/proposed/:id/promote` | Appends the proposal to `handbook.md`, marks `status='promoted'`, appends a `skill_promoted` event to the originating workstream's JSONL. 409 if already promoted/dismissed. |
+| `POST` | `/skills/proposed/:id/dismiss` | Marks `status='dismissed'` without writing to the handbook. 409 if already promoted/dismissed. |
 
 ### Agent-side instrumentation (Claude Code, v0)
 
@@ -123,6 +131,7 @@ Two channels feed the daemon:
 | `flag_blocked(reason)` | escalate — sets the "needs you" flag in the UI |
 | `update_memory(section, content)` | write into the workstream memory MD |
 | `read_memory(section?)` | read it back |
+| `propose_skill(title, body, source_decision_id?)` | propose a pattern for promotion to the team handbook (manager reviews and promotes via the macOS app) |
 
 Agent prompt (system message added at workstream start) instructs the agent to call `emit_decision` at each non-trivial fork and `update_memory` whenever it learns something a future session of this workstream should know.
 
@@ -179,7 +188,7 @@ In v0.5.1 these are recomputed by re-reading the per-workstream events file on e
 }
 ```
 
-Event types: `session_start`, `session_end`, `decision`, `subgoal_push`, `subgoal_pop`, `confidence`, `tool_use`, `blocked`, `memory_update`, `intervention_delivered`.
+Event types: `session_start`, `session_end`, `decision`, `subgoal_push`, `subgoal_pop`, `confidence`, `tool_use`, `blocked`, `memory_update`, `intervention_delivered`, `workstream_updated`, `skill_proposed`, `skill_promoted`.
 
 ### Workstream memory (Markdown)
 
@@ -288,6 +297,17 @@ graph LR
 ```
 
 **Rollback is implemented as replay-with-hint, not session-state restoration.** The daemon constructs a message that frames the rollback ("we are returning to decision dec_05; here is what was considered then; here is the new hint") and queues it. The agent treats it as a strong redirect. This keeps v0 simple — no checkpoint or KV-state plumbing. v1+ may add true session-state checkpoints if the replay-with-hint approach proves insufficient.
+
+## Skill broadcast
+
+A team handbook (`~/.claude/manager/handbook.md`) is the shared knowledge surface for every workstream's agent. The propose → promote → adopt loop:
+
+1. **Agent proposes.** Mid-session, an agent calls the `propose_skill(title, body, source_decision_id?)` MCP tool when it discovers a pattern other workstreams should reuse. The daemon persists the proposal into the SQLite-backed `SkillProposalsStore` (`status='proposed'`) and appends a `skill_proposed` event to the originating workstream's JSONL log.
+2. **Manager reviews.** The macOS app polls `GET /skills/proposed` and renders pending proposals. The human clicks **Promote** or **Dismiss**.
+3. **Daemon promotes.** `POST /skills/proposed/:id/promote` calls `HandbookStore.appendSkill(title, body, {workstream_id, decision_id})`, which appends a `## <title>` block to `handbook.md` with a source footer (`_(from workstream … / decision …)_`). The proposal row flips to `status='promoted'`. A `skill_promoted` event is appended to the originating workstream's JSONL.
+4. **Agents adopt.** On the next `SessionStart` for any workstream, the lifecycle hook fetches `GET /handbook` and inlines the contents as `additionalContext`. From then on, every session has the new pattern in its working context (until the inlined snippet is evicted by Claude Code's context window).
+
+The handbook is a single Markdown file, not one file per skill — keeps inlining cheap, keeps merging simple. Single writer (the manager via the macOS app); agents are read-only on the handbook itself, write-only into the proposal queue.
 
 ## Open architectural questions
 

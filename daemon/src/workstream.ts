@@ -104,6 +104,10 @@ export class WorkstreamRegistry {
     this.db.prepare('UPDATE workstreams SET status = ? WHERE id = ?').run(status, id);
   }
 
+  setTitle(id: string, title: string): void {
+    this.db.prepare('UPDATE workstreams SET title = ? WHERE id = ?').run(title, id);
+  }
+
   delete(id: string): void {
     this.db.prepare('DELETE FROM sessions WHERE workstream_id = ?').run(id);
     this.db.prepare('DELETE FROM workstreams WHERE id = ?').run(id);

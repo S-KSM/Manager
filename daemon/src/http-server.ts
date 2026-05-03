@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { createServer, type Server as HttpServer, type IncomingMessage } from 'node:http';
 import express, { type Express, type Request, type Response } from 'express';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { buildDigest } from './digest.js';
 import type { EventStore, ManagerEvent, ManagerEventType } from './event-store.js';
+import type { HandbookStore, SkillSource } from './handbook-store.js';
 import type {
   InterventionKind,
   InterventionPayload,
@@ -10,14 +12,26 @@ import type {
 } from './intervention-queue.js';
 import type { MemoryStore } from './memory-store.js';
 import { projectFromEvents } from './projections.js';
-import type { Workstream, WorkstreamRegistry, WorkstreamWithSessions } from './workstream.js';
+import type { SkillProposalsStore } from './skill-proposals.js';
+import type {
+  Workstream,
+  WorkstreamRegistry,
+  WorkstreamStatus,
+  WorkstreamWithSessions,
+} from './workstream.js';
 
 interface BuildOptions {
   eventStore: EventStore;
   memoryStore: MemoryStore;
   registry: WorkstreamRegistry;
   interventionQueue: InterventionQueue;
+  handbookStore: HandbookStore;
+  skillProposalsStore: SkillProposalsStore;
 }
+
+const WORKSTREAM_STATUSES: ReadonlySet<WorkstreamStatus> = new Set(['active', 'paused', 'retired']);
+
+const DIGEST_DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const INTERVENTION_KINDS: ReadonlySet<InterventionKind> = new Set([
   'nudge',
@@ -55,7 +69,14 @@ export interface HttpServerHandle {
 }
 
 export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
-  const { eventStore, memoryStore, registry, interventionQueue } = opts;
+  const {
+    eventStore,
+    memoryStore,
+    registry,
+    interventionQueue,
+    handbookStore,
+    skillProposalsStore,
+  } = opts;
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
@@ -129,6 +150,100 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
       return;
     }
     res.json(await serializeWorkstream(detail));
+  });
+
+  /**
+   * Lifecycle update: status and/or title. Body is `{status?, title?}`. Emits
+   * one `workstream_updated` event per call (with `prev` and `changes` so the
+   * timeline can render a single row that captures the transition).
+   */
+  app.patch('/workstreams/:id', async (req: Request, res: Response) => {
+    const id = String(req.params['id']);
+    const existing = registry.get(id);
+    if (!existing) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const body = (req.body ?? {}) as { status?: unknown; title?: unknown };
+    const changes: { status?: WorkstreamStatus; title?: string } = {};
+    const prev: { status?: WorkstreamStatus; title?: string } = {};
+
+    if (body.status !== undefined) {
+      if (
+        typeof body.status !== 'string' ||
+        !WORKSTREAM_STATUSES.has(body.status as WorkstreamStatus)
+      ) {
+        res.status(400).json({ error: 'status must be one of active, paused, retired' });
+        return;
+      }
+      const nextStatus = body.status as WorkstreamStatus;
+      if (nextStatus !== existing.status) {
+        changes.status = nextStatus;
+        prev.status = existing.status;
+      }
+    }
+    if (body.title !== undefined) {
+      if (typeof body.title !== 'string' || body.title.length === 0) {
+        res.status(400).json({ error: 'title must be a non-empty string' });
+        return;
+      }
+      if (body.title !== existing.title) {
+        changes.title = body.title;
+        prev.title = existing.title;
+      }
+    }
+
+    if (Object.keys(changes).length === 0) {
+      // Nothing to do — return current wire object, no event.
+      const detail = registry.detail(id);
+      res.json(await serializeWorkstream(detail ?? existing));
+      return;
+    }
+
+    if (changes.status !== undefined) registry.setStatus(id, changes.status);
+    if (changes.title !== undefined) registry.setTitle(id, changes.title);
+
+    const event: ManagerEvent = {
+      ts: new Date().toISOString(),
+      workstream_id: id,
+      type: 'workstream_updated',
+      id: `wsu_${randomUUID().slice(0, 8)}`,
+      payload: { changes, prev },
+    };
+    await eventStore.appendEvent(id, event);
+
+    const detail = registry.detail(id);
+    res.json(await serializeWorkstream(detail ?? existing));
+  });
+
+  /**
+   * Soft-delete: sets status to retired. We return the updated wire object
+   * (200) for symmetry with PATCH, not 204, so clients don't need a separate
+   * GET to refresh local state.
+   */
+  app.delete('/workstreams/:id', async (req: Request, res: Response) => {
+    const id = String(req.params['id']);
+    const existing = registry.get(id);
+    if (!existing) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    if (existing.status !== 'retired') {
+      registry.setStatus(id, 'retired');
+      const event: ManagerEvent = {
+        ts: new Date().toISOString(),
+        workstream_id: id,
+        type: 'workstream_updated',
+        id: `wsu_${randomUUID().slice(0, 8)}`,
+        payload: {
+          changes: { status: 'retired' },
+          prev: { status: existing.status },
+        },
+      };
+      await eventStore.appendEvent(id, event);
+    }
+    const detail = registry.detail(id);
+    res.json(await serializeWorkstream(detail ?? existing));
   });
 
   app.get('/workstreams/:id/memory', async (req: Request, res: Response) => {
@@ -297,6 +412,101 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     res.json(updated);
   });
 
+  // ---- Digest --------------------------------------------------------------
+
+  app.get('/digest', async (req: Request, res: Response) => {
+    const sinceRaw = req.query['since'];
+    let since: Date;
+    if (typeof sinceRaw === 'string' && sinceRaw.length > 0) {
+      const parsed = new Date(sinceRaw);
+      if (Number.isNaN(parsed.getTime())) {
+        res.status(400).json({ error: 'since must be an ISO-8601 timestamp' });
+        return;
+      }
+      since = parsed;
+    } else {
+      since = new Date(Date.now() - DIGEST_DEFAULT_WINDOW_MS);
+    }
+    const digest = await buildDigest({ registry, eventStore }, since);
+    res.json(digest);
+  });
+
+  // ---- Team handbook + skill broadcast ------------------------------------
+
+  app.get('/handbook', async (_req: Request, res: Response) => {
+    const md = await handbookStore.read();
+    res.type('text/markdown').send(md);
+  });
+
+  app.post('/handbook/skills', async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as {
+      title?: unknown;
+      body?: unknown;
+      source?: unknown;
+    };
+    if (typeof body.title !== 'string' || body.title.length === 0) {
+      res.status(400).json({ error: 'title required' });
+      return;
+    }
+    if (typeof body.body !== 'string' || body.body.length === 0) {
+      res.status(400).json({ error: 'body required' });
+      return;
+    }
+    const source = parseSkillSource(body.source);
+    await handbookStore.appendSkill(body.title, body.body, source);
+    res.status(201).json({ title: body.title });
+  });
+
+  app.get('/skills/proposed', (_req: Request, res: Response) => {
+    res.json(skillProposalsStore.listProposed());
+  });
+
+  app.post('/skills/proposed/:id/promote', async (req: Request, res: Response) => {
+    const id = String(req.params['id']);
+    const proposal = skillProposalsStore.get(id);
+    if (!proposal) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    if (proposal.status !== 'proposed') {
+      res.status(409).json({ error: `already ${proposal.status}` });
+      return;
+    }
+    const source: SkillSource = { workstream_id: proposal.workstream_id };
+    if (proposal.source_decision_id) source.decision_id = proposal.source_decision_id;
+    await handbookStore.appendSkill(proposal.title, proposal.body, source);
+    const updated = skillProposalsStore.markPromoted(id);
+    if (registry.get(proposal.workstream_id)) {
+      const event: ManagerEvent = {
+        ts: new Date().toISOString(),
+        workstream_id: proposal.workstream_id,
+        type: 'skill_promoted',
+        id: `skp_${randomUUID().slice(0, 8)}`,
+        payload: {
+          proposal_id: proposal.id,
+          title: proposal.title,
+        },
+      };
+      await eventStore.appendEvent(proposal.workstream_id, event);
+    }
+    res.json(updated);
+  });
+
+  app.post('/skills/proposed/:id/dismiss', (req: Request, res: Response) => {
+    const id = String(req.params['id']);
+    const proposal = skillProposalsStore.get(id);
+    if (!proposal) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    if (proposal.status !== 'proposed') {
+      res.status(409).json({ error: `already ${proposal.status}` });
+      return;
+    }
+    const updated = skillProposalsStore.markDismissed(id);
+    res.json(updated);
+  });
+
   // ---- WebSocket: live event stream ---------------------------------------
 
   const httpServer = createServer(app);
@@ -348,6 +558,19 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
         });
       }),
   };
+}
+
+function parseSkillSource(raw: unknown): SkillSource | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as { workstream_id?: unknown; decision_id?: unknown };
+  const out: SkillSource = {};
+  if (typeof r.workstream_id === 'string' && r.workstream_id.length > 0) {
+    out.workstream_id = r.workstream_id;
+  }
+  if (typeof r.decision_id === 'string' && r.decision_id.length > 0) {
+    out.decision_id = r.decision_id;
+  }
+  return Object.keys(out).length === 0 ? undefined : out;
 }
 
 async function streamEvents(

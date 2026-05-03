@@ -8,6 +8,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import type { EventStore, ManagerEvent, ManagerEventType } from './event-store.js';
 import type { MemoryStore } from './memory-store.js';
+import type { SkillProposalsStore } from './skill-proposals.js';
 import type { WorkstreamRegistry } from './workstream.js';
 
 /**
@@ -27,6 +28,7 @@ interface BuildOptions {
   eventStore: EventStore;
   memoryStore: MemoryStore;
   registry: WorkstreamRegistry;
+  skillProposalsStore: SkillProposalsStore;
 }
 
 /**
@@ -120,10 +122,24 @@ const TOOLS: Tool[] = [
       },
     },
   },
+  {
+    name: 'propose_skill',
+    description:
+      'Propose a skill/pattern that should be promoted to the team handbook for all agents to read.',
+    inputSchema: {
+      type: 'object',
+      required: ['title', 'body'],
+      properties: {
+        title: { type: 'string' },
+        body: { type: 'string' },
+        source_decision_id: { type: 'string' },
+      },
+    },
+  },
 ];
 
 export function buildMcpServer(opts: BuildOptions): Server {
-  const { eventStore, memoryStore, registry } = opts;
+  const { eventStore, memoryStore, registry, skillProposalsStore } = opts;
   const server = new Server(
     {
       name: 'manager-daemon',
@@ -208,6 +224,31 @@ export function buildMcpServer(opts: BuildOptions): Server {
         }
         const md = await memoryStore.read(workstreamId);
         return textResult(md);
+      }
+      case 'propose_skill': {
+        const title = String(args['title'] ?? '');
+        const body = String(args['body'] ?? '');
+        if (!title) return errorResult('title is required');
+        if (!body) return errorResult('body is required');
+        const sourceDecisionId =
+          typeof args['source_decision_id'] === 'string' && args['source_decision_id'].length > 0
+            ? (args['source_decision_id'] as string)
+            : undefined;
+        const proposeArgs: {
+          workstream_id: string;
+          title: string;
+          body: string;
+          source_decision_id?: string;
+        } = { workstream_id: workstreamId, title, body };
+        if (sourceDecisionId) proposeArgs.source_decision_id = sourceDecisionId;
+        const proposal = skillProposalsStore.propose(proposeArgs);
+        const eventPayload: Record<string, unknown> = {
+          proposal_id: proposal.id,
+          title: proposal.title,
+        };
+        if (sourceDecisionId) eventPayload['source_decision_id'] = sourceDecisionId;
+        await append('skill_proposed', eventPayload);
+        return textResult(`skill proposed: ${proposal.id}`);
       }
       default:
         return errorResult(`unknown tool: ${name}`);

@@ -29,7 +29,10 @@ export type ManagerEventType =
   | 'tool_use'
   | 'blocked'
   | 'memory_update'
-  | 'intervention_delivered';
+  | 'intervention_delivered'
+  | 'workstream_updated'
+  | 'skill_proposed'
+  | 'skill_promoted';
 
 export interface ReadResult {
   events: ManagerEvent[];
