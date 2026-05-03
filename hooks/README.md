@@ -51,12 +51,13 @@ The hooks pick these up on every invocation. No reinstall needed.
 
 ## SessionStart system-prompt nudge
 
-`session-start.sh` does two things:
+`session-start.sh` does three things:
 
 1. POSTs the SessionStart hook payload to the daemon (v0 behavior — registers the session under the workstream).
-2. v0.5.2 — emits Claude Code's `hookSpecificOutput.additionalContext` JSON on stdout. The `additionalContext` is a short paragraph telling the agent it has the manager MCP tools (`emit_decision`, `emit_subgoal`, `emit_confidence`, `flag_blocked`, `update_memory`, `read_memory`) and when to use them. This is what turns the MCP wiring from "available" into "actually used" — without this nudge the agent never thinks to call the tools.
+2. v0.5.2 — emits Claude Code's `hookSpecificOutput.additionalContext` JSON on stdout. The first part of the additionalContext advertises the manager MCP tools (`emit_decision`, `emit_subgoal`, `emit_confidence`, `flag_blocked`, `update_memory`, `read_memory`, `propose_skill`) and when to use them — turns the MCP wiring from "available" into "actually used".
+3. v1 — also fetches the team handbook (`GET /handbook`) and inlines it as a second section of the additionalContext, so promoted skills propagate to every agent on its next session_start. The handbook body is capped at **8 KB**; longer handbooks are truncated with a footer pointing the agent at `read_memory` / `GET /handbook` for the full text.
 
-**When it fires:** every SessionStart that has `MANAGER_WORKSTREAM` set in the environment AND `jq` available. Without either, the hook silently degrades to v0 behavior (notify-only). Always exits 0.
+**When it fires:** every SessionStart that has `MANAGER_WORKSTREAM` set in the environment AND `jq` available. Without either, the hook silently degrades to v0 behavior (notify-only). The handbook section is omitted automatically if the daemon is unreachable or the handbook is empty. Always exits 0.
 
 **Output shape on success** (canonical Claude Code 4.x form):
 
@@ -64,12 +65,12 @@ The hooks pick these up on every invocation. No reinstall needed.
 {
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
-    "additionalContext": "You are running inside a Manager-supervised session.\n\nYou have manager MCP tools available:\n..."
+    "additionalContext": "You are running inside a Manager-supervised session.\n\nYou have manager MCP tools available:\n...\n\n---\n\n# Team handbook (promoted skills shared across all workstreams)\n\n# Team handbook\n\n## react-query mutation pattern\n..."
   }
 }
 ```
 
-The full additionalContext text lives in `session-start.sh`. Edit it there if you want to change the phrasing the agent sees.
+The full text of the tools advertisement and the handbook formatting live in `session-start.sh`. The 8 KB cap is `HANDBOOK_MAX_BYTES` at the top of the script.
 
 ## v0.5 — UserPromptSubmit intervention drain
 
