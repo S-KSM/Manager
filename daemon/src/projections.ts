@@ -3,7 +3,7 @@ import type { ManagerEvent } from './event-store.js';
 /**
  * Home-view projections derived from a workstream's event log.
  *
- * These three fields are documented in `docs/ARCHITECTURE.md` under
+ * These five fields are documented in `docs/ARCHITECTURE.md` under
  * "Workstream" and feed the macOS app's home cards. The projection is a
  * pure function of the events array; the caller is responsible for I/O
  * (reading events) and for any caching. v1 will index these in SQLite;
@@ -13,7 +13,34 @@ export interface WorkstreamProjections {
   current_subgoal: string | null;
   latest_confidence: number | null;
   needs_attention: boolean;
+  /**
+   * Latest TodoWrite tool_use's todo array, last write wins. `null` when no
+   * `tool_use` event with `payload.tool_name === 'TodoWrite'` (or the legacy
+   * `payload.tool === 'TodoWrite'`) has been seen yet. Permissive parse:
+   * extra keys allowed, unknown statuses skipped, malformed items ignored.
+   */
+  todos: Todo[] | null;
+  /**
+   * One-line humanized summary of the most recent `tool_use` event, suitable
+   * for a "Currently:" line in the workstream card. Truncated to 80 chars.
+   * `null` when no `tool_use` event has ever fired for the workstream.
+   *
+   * This is a pure heuristic — fine if it's not perfect. The card prefers
+   * `todos` (the agent's actual plan) when present; this is the fallback.
+   */
+  latest_activity: string | null;
 }
+
+/** Mirrors Claude Code's TodoWrite item shape; permissive on extras. */
+export interface Todo {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  activeForm?: string;
+}
+
+const TODO_STATUSES = new Set(['pending', 'in_progress', 'completed']);
+
+const ACTIVITY_LINE_MAX = 80;
 
 /**
  * Compute home-view projections from a chronological event array.
@@ -37,12 +64,29 @@ export interface WorkstreamProjections {
  *   event has no `session_id`, any later `session_end` (regardless of
  *   session) is treated as the resolver.
  *
+ * - `todos`: latest `tool_use` event whose payload identifies the tool as
+ *   `TodoWrite`. The todo array is read from `payload.tool_input.todos`
+ *   (the Claude Code hook-payload shape), `payload.input.todos` (the
+ *   official Anthropic API shape some agents may forward), or
+ *   `payload.todos` as a last-ditch fallback. `null` if no TodoWrite
+ *   call has been seen.
+ *
+ * - `latest_activity`: humanized one-liner derived from the most recent
+ *   `tool_use` event, truncated to 80 chars. `null` if no `tool_use`
+ *   has been seen.
+ *
  * The events array is assumed to be in chronological/file order — the
  * order returned by `EventStore.readEvents`.
  */
 export function projectFromEvents(events: ManagerEvent[]): WorkstreamProjections {
   if (!Array.isArray(events) || events.length === 0) {
-    return { current_subgoal: null, latest_confidence: null, needs_attention: false };
+    return {
+      current_subgoal: null,
+      latest_confidence: null,
+      needs_attention: false,
+      todos: null,
+      latest_activity: null,
+    };
   }
 
   // current_subgoal: stack from subgoal_push / subgoal_pop in chronological order.
@@ -56,6 +100,14 @@ export function projectFromEvents(events: ManagerEvent[]): WorkstreamProjections
   let latestBlocked: ManagerEvent | null = null;
   const latestSessionEndBySession = new Map<string, string>();
   let latestSessionEndAny: string | null = null;
+
+  // todos: latest TodoWrite tool_use's parsed todo array (last write wins).
+  let latestTodos: Todo[] | null = null;
+  let latestTodosTs: string | null = null;
+
+  // latest_activity: humanized last tool_use string.
+  let latestActivity: string | null = null;
+  let latestActivityTs: string | null = null;
 
   for (const ev of events) {
     if (!ev || typeof ev !== 'object') continue;
@@ -111,6 +163,26 @@ export function projectFromEvents(events: ManagerEvent[]): WorkstreamProjections
           latestSessionEndAny = ts;
         }
       }
+    } else if (type === 'tool_use') {
+      // Update humanized "Currently:" projection on every tool_use, not just
+      // TodoWrite — most calls are Edit/Read/Bash etc.
+      const summary = humanizeToolUse(payload);
+      if (summary !== null) {
+        if (latestActivityTs === null || (ts !== null && ts >= latestActivityTs)) {
+          latestActivity = truncate(summary, ACTIVITY_LINE_MAX);
+          latestActivityTs = ts;
+        }
+      }
+      // TodoWrite gets its own special-case: parse the todo array.
+      if (isTodoWritePayload(payload)) {
+        const parsed = parseTodos(payload);
+        if (parsed !== null) {
+          if (latestTodosTs === null || (ts !== null && ts >= latestTodosTs)) {
+            latestTodos = parsed;
+            latestTodosTs = ts;
+          }
+        }
+      }
     }
   }
 
@@ -142,5 +214,144 @@ export function projectFromEvents(events: ManagerEvent[]): WorkstreamProjections
     current_subgoal: currentSubgoal,
     latest_confidence: latestConfidence,
     needs_attention: needsAttention,
+    todos: latestTodos,
+    latest_activity: latestActivity,
   };
+}
+
+// ---- helpers ---------------------------------------------------------------
+
+/**
+ * Read the tool name from a `tool_use` payload. Claude Code's hook payload
+ * uses `tool_name`; some MCP-emitted shapes use `tool`. Accept either.
+ */
+function readToolName(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const p = payload as { tool_name?: unknown; tool?: unknown };
+  if (typeof p.tool_name === 'string' && p.tool_name.length > 0) return p.tool_name;
+  if (typeof p.tool === 'string' && p.tool.length > 0) return p.tool;
+  return null;
+}
+
+/**
+ * Read the tool's input record from a `tool_use` payload. Tries the Claude
+ * Code hook shape (`tool_input`) first, then the Anthropic API shape
+ * (`input`).
+ */
+function readToolInput(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const p = payload as { tool_input?: unknown; input?: unknown };
+  if (p.tool_input && typeof p.tool_input === 'object') {
+    return p.tool_input as Record<string, unknown>;
+  }
+  if (p.input && typeof p.input === 'object') {
+    return p.input as Record<string, unknown>;
+  }
+  return null;
+}
+
+function isTodoWritePayload(payload: unknown): boolean {
+  return readToolName(payload) === 'TodoWrite';
+}
+
+/**
+ * Pull the todo array out of a TodoWrite tool_use payload. The Claude Code
+ * hook delivers it at `payload.tool_input.todos`; the API SDK shape would be
+ * `payload.input.todos`; we also accept a top-level `payload.todos` as a
+ * permissive last resort. Returns `null` on any structural error so the
+ * projection caller falls back to the previous value.
+ */
+function parseTodos(payload: unknown): Todo[] | null {
+  const input = readToolInput(payload);
+  let raw: unknown =
+    input && typeof input === 'object' ? (input as { todos?: unknown }).todos : undefined;
+  if (raw === undefined && payload && typeof payload === 'object') {
+    raw = (payload as { todos?: unknown }).todos;
+  }
+  if (!Array.isArray(raw)) return null;
+  const out: Todo[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const it = item as { content?: unknown; status?: unknown; activeForm?: unknown };
+    const content = typeof it.content === 'string' ? it.content : null;
+    const status = typeof it.status === 'string' ? it.status : null;
+    if (content === null || status === null) continue;
+    if (!TODO_STATUSES.has(status)) continue;
+    const todo: Todo = {
+      content,
+      status: status as Todo['status'],
+    };
+    if (typeof it.activeForm === 'string' && it.activeForm.length > 0) {
+      todo.activeForm = it.activeForm;
+    }
+    out.push(todo);
+  }
+  // Even an empty array is a valid TodoWrite (the agent cleared its plan), so
+  // don't coerce to null here — only return null when we couldn't parse at all.
+  return out;
+}
+
+/**
+ * Build a "Currently: …"-style line from a tool_use payload. Returns `null`
+ * when no tool name can be read (the projection then sticks with the prior
+ * value rather than blanking the field).
+ *
+ * Mapping (per the feature spec table):
+ *   Edit   (path)    → "Editing <path>"
+ *   Write  (path)    → "Writing <path>"
+ *   Read   (path)    → "Reading <path>"
+ *   Bash   (cmd)     → "Running: <first 60 chars of cmd>"
+ *   Glob   (pattern) → "Searching for <pattern>"
+ *   Grep   (pattern) → "Searching for <pattern>"
+ *   WebFetch         → "Browsing the web"
+ *   WebSearch        → "Browsing the web"
+ *   <other>          → "Using <tool>"
+ */
+function humanizeToolUse(payload: unknown): string | null {
+  const tool = readToolName(payload);
+  if (tool === null) return null;
+  const input = readToolInput(payload) ?? {};
+
+  const path = stringOrNull(input['file_path']) ?? stringOrNull(input['path']);
+  const command = stringOrNull(input['command']);
+  const pattern = stringOrNull(input['pattern']) ?? stringOrNull(input['query']);
+
+  switch (tool) {
+    case 'Edit':
+    case 'MultiEdit':
+      return path ? `Editing ${path}` : `Using ${tool}`;
+    case 'Write':
+      return path ? `Writing ${path}` : `Using ${tool}`;
+    case 'Read':
+      return path ? `Reading ${path}` : `Using ${tool}`;
+    case 'Bash':
+      if (command) {
+        const first = command.length > 60 ? `${command.slice(0, 60)}…` : command;
+        return `Running: ${first}`;
+      }
+      return `Using ${tool}`;
+    case 'Glob':
+    case 'Grep':
+      return pattern ? `Searching for ${pattern}` : `Using ${tool}`;
+    case 'WebFetch':
+    case 'WebSearch':
+      return 'Browsing the web';
+    case 'TodoWrite':
+      // The TodoWrite line is uninteresting on its own; the card surfaces
+      // the parsed list. Keep a placeholder for the activity fallback so
+      // downstream callers always have a string.
+      return 'Updating plan';
+    default:
+      return `Using ${tool}`;
+  }
+}
+
+function stringOrNull(v: unknown): string | null {
+  return typeof v === 'string' && v.length > 0 ? v : null;
+}
+
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  if (max <= 1) return s.slice(0, max);
+  return `${s.slice(0, max - 1)}…`;
 }

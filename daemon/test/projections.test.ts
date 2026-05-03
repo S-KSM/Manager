@@ -21,6 +21,8 @@ describe('projectFromEvents', () => {
       current_subgoal: null,
       latest_confidence: null,
       needs_attention: false,
+      todos: null,
+      latest_activity: null,
     });
   });
 
@@ -158,6 +160,204 @@ describe('projectFromEvents', () => {
         ev('session_end', '2026-05-02T11:00:00Z', { id: 'se_1', session_id: 's1' }),
       ];
       expect(projectFromEvents(events).needs_attention).toBe(false);
+    });
+  });
+
+  describe('todos (Feature B — TodoWrite mirror)', () => {
+    it('one TodoWrite call → todos reflects parsed array', () => {
+      const events: ManagerEvent[] = [
+        ev('tool_use', '2026-05-02T10:00:00Z', {
+          id: 'tu_1',
+          payload: {
+            hook: 'post-tool-use',
+            tool_name: 'TodoWrite',
+            tool_input: {
+              todos: [
+                { content: 'Read the spec', status: 'completed', activeForm: 'Reading the spec' },
+                {
+                  content: 'Implement projection',
+                  status: 'in_progress',
+                  activeForm: 'Implementing projection',
+                },
+                { content: 'Run tests', status: 'pending', activeForm: 'Running tests' },
+              ],
+            },
+          },
+        }),
+      ];
+      const result = projectFromEvents(events);
+      expect(result.todos).not.toBeNull();
+      expect(result.todos).toHaveLength(3);
+      expect(result.todos?.[0]).toEqual({
+        content: 'Read the spec',
+        status: 'completed',
+        activeForm: 'Reading the spec',
+      });
+      expect(result.todos?.[1]?.status).toBe('in_progress');
+    });
+
+    it('two TodoWrite calls → todos reflects only the latest (last write wins)', () => {
+      const events: ManagerEvent[] = [
+        ev('tool_use', '2026-05-02T10:00:00Z', {
+          id: 'tu_1',
+          payload: {
+            hook: 'post-tool-use',
+            tool_name: 'TodoWrite',
+            tool_input: {
+              todos: [{ content: 'Step 1 (old)', status: 'in_progress' }],
+            },
+          },
+        }),
+        ev('tool_use', '2026-05-02T10:05:00Z', {
+          id: 'tu_2',
+          payload: {
+            hook: 'post-tool-use',
+            tool_name: 'TodoWrite',
+            tool_input: {
+              todos: [
+                { content: 'Step 1 (done)', status: 'completed' },
+                { content: 'Step 2 (now)', status: 'in_progress' },
+              ],
+            },
+          },
+        }),
+      ];
+      const result = projectFromEvents(events);
+      expect(result.todos).toHaveLength(2);
+      expect(result.todos?.[0]?.content).toBe('Step 1 (done)');
+      expect(result.todos?.[1]?.content).toBe('Step 2 (now)');
+    });
+
+    it('no TodoWrite but other tool_use events → todos null, latest_activity humanized', () => {
+      const events: ManagerEvent[] = [
+        ev('tool_use', '2026-05-02T10:00:00Z', {
+          id: 'tu_1',
+          payload: {
+            hook: 'pre-tool-use',
+            tool_name: 'Read',
+            tool_input: { file_path: '/Users/shobeir/Code/foo/bar.ts' },
+          },
+        }),
+        ev('tool_use', '2026-05-02T10:01:00Z', {
+          id: 'tu_2',
+          payload: {
+            hook: 'pre-tool-use',
+            tool_name: 'Bash',
+            tool_input: { command: 'npm test -- --run' },
+          },
+        }),
+        ev('tool_use', '2026-05-02T10:02:00Z', {
+          id: 'tu_3',
+          payload: {
+            hook: 'pre-tool-use',
+            tool_name: 'Edit',
+            tool_input: { file_path: 'src/projections.ts' },
+          },
+        }),
+      ];
+      const result = projectFromEvents(events);
+      expect(result.todos).toBeNull();
+      expect(result.latest_activity).toBe('Editing src/projections.ts');
+    });
+
+    it('humanizes Bash with cmd truncated to 60 chars', () => {
+      const longCmd = 'find . -name "*.ts" -not -path "*/node_modules/*" | xargs wc -l';
+      const events: ManagerEvent[] = [
+        ev('tool_use', '2026-05-02T10:00:00Z', {
+          id: 'tu_1',
+          payload: { tool_name: 'Bash', tool_input: { command: longCmd } },
+        }),
+      ];
+      const result = projectFromEvents(events);
+      // Running: + first 60 chars + truncation marker
+      expect(result.latest_activity).toBe(`Running: ${longCmd.slice(0, 60)}…`);
+    });
+
+    it('humanizes Glob/Grep with pattern, WebFetch as "Browsing the web"', () => {
+      const events: ManagerEvent[] = [
+        ev('tool_use', '2026-05-02T10:00:00Z', {
+          id: 'tu_1',
+          payload: { tool_name: 'Glob', tool_input: { pattern: '**/*.swift' } },
+        }),
+      ];
+      expect(projectFromEvents(events).latest_activity).toBe('Searching for **/*.swift');
+
+      const webEvents: ManagerEvent[] = [
+        ev('tool_use', '2026-05-02T10:00:00Z', {
+          id: 'tu_w',
+          payload: { tool_name: 'WebFetch', tool_input: { url: 'https://example.com' } },
+        }),
+      ];
+      expect(projectFromEvents(webEvents).latest_activity).toBe('Browsing the web');
+    });
+
+    it('truncates the activity line to 80 chars total', () => {
+      const veryLongPath = `/very/long/path/${'a'.repeat(200)}.ts`;
+      const events: ManagerEvent[] = [
+        ev('tool_use', '2026-05-02T10:00:00Z', {
+          id: 'tu_1',
+          payload: { tool_name: 'Read', tool_input: { file_path: veryLongPath } },
+        }),
+      ];
+      const result = projectFromEvents(events);
+      expect(result.latest_activity?.length).toBe(80);
+      expect(result.latest_activity?.endsWith('…')).toBe(true);
+    });
+
+    it('unknown tool falls back to "Using <tool>"', () => {
+      const events: ManagerEvent[] = [
+        ev('tool_use', '2026-05-02T10:00:00Z', {
+          id: 'tu_1',
+          payload: { tool_name: 'mcp__custom__do_thing', tool_input: { x: 1 } },
+        }),
+      ];
+      expect(projectFromEvents(events).latest_activity).toBe('Using mcp__custom__do_thing');
+    });
+
+    it('TodoWrite with malformed items skips bad rows but keeps the rest', () => {
+      const events: ManagerEvent[] = [
+        ev('tool_use', '2026-05-02T10:00:00Z', {
+          id: 'tu_1',
+          payload: {
+            tool_name: 'TodoWrite',
+            tool_input: {
+              todos: [
+                { content: 'Good one', status: 'pending' },
+                { content: 42, status: 'pending' }, // bad content type
+                { content: 'No status' }, // missing status
+                { content: 'Bad status', status: 'finished' }, // unknown status
+                {
+                  content: 'Active',
+                  status: 'in_progress',
+                  activeForm: 'Doing the thing',
+                  extraKey: 'permitted', // extras tolerated
+                },
+              ],
+            },
+          },
+        }),
+      ];
+      const result = projectFromEvents(events);
+      expect(result.todos).toHaveLength(2);
+      expect(result.todos?.map((t) => t.content)).toEqual(['Good one', 'Active']);
+      expect(result.todos?.[1]?.activeForm).toBe('Doing the thing');
+    });
+
+    it('accepts payload.input.todos (Anthropic SDK shape) as a fallback', () => {
+      const events: ManagerEvent[] = [
+        ev('tool_use', '2026-05-02T10:00:00Z', {
+          id: 'tu_1',
+          payload: {
+            tool_name: 'TodoWrite',
+            input: {
+              todos: [{ content: 'Via input field', status: 'pending' }],
+            },
+          },
+        }),
+      ];
+      const result = projectFromEvents(events);
+      expect(result.todos).toHaveLength(1);
+      expect(result.todos?.[0]?.content).toBe('Via input field');
     });
   });
 

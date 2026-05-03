@@ -22,6 +22,18 @@ struct AgentDetailView: View {
     @State private var showInterventionPanel = false
     @State private var promoteTarget: PromoteTarget?
 
+    /// Live copy of the workstream record. Seeded from the parent's snapshot
+    /// at view-task time; refreshed on every WS event arrival so daemon-side
+    /// projections (todos, latest_activity) flow into the Plan section
+    /// without waiting for the user to navigate back to the home view.
+    @State private var liveWorkstream: Workstream?
+
+    /// The workstream view is rendered against. Falls through to the parent
+    /// snapshot until the first refresh lands.
+    private var currentWorkstream: Workstream {
+        liveWorkstream ?? workstream
+    }
+
     /// Source decision being promoted into a handbook skill. Drives the
     /// `PromoteSkillSheet` modal.
     struct PromoteTarget: Identifiable, Hashable {
@@ -53,6 +65,17 @@ struct AgentDetailView: View {
             VStack(alignment: .leading, spacing: 0) {
                 memoryHeader
                 Divider()
+                // Plan section (Feature B). Glanceable checklist of the
+                // agent's current TodoWrite plan, rendered above the
+                // Markdown memory body. Omitted entirely when no todos have
+                // been seen — no empty placeholder.
+                if let todos = currentWorkstream.todos, !todos.isEmpty {
+                    PlanSection(todos: todos)
+                        .padding(.horizontal, 18)
+                        .padding(.top, 14)
+                        .padding(.bottom, 6)
+                    Divider()
+                }
                 MemoryPaneView(
                     memory: WorkstreamMemory(
                         workstreamID: workstream.id,
@@ -67,7 +90,8 @@ struct AgentDetailView: View {
         .navigationTitle(workstream.title)
         .navigationSubtitle(workstream.id)
         .task(id: workstream.id) {
-            // Initial historical fetch (events + memory).
+            // Initial historical fetch (events + memory + workstream record).
+            liveWorkstream = workstream
             await reload()
             // Then live-subscribe to new events for this workstream until
             // `.task(id:)` cancels us (workstream change or view disappear).
@@ -77,6 +101,12 @@ struct AgentDetailView: View {
             for await event in stream {
                 if Task.isCancelled { break }
                 appendLive(event: event)
+                // The Plan section + "Currently:" line are daemon-side
+                // projections, so we re-fetch the workstream record so
+                // their fields refresh in step with the timeline.
+                if let refreshed = try? await client.getWorkstream(id: workstream.id) {
+                    liveWorkstream = refreshed
+                }
             }
             // If we get here, the stream ended (transport failure or
             // cancellation). Reconnect is a v1 deliverable.
@@ -449,6 +479,98 @@ private struct DecisionDetail: View {
     }
 }
 
+// MARK: - Plan section (TodoWrite mirror)
+
+/// Glanceable checklist of the agent's current TodoWrite plan.
+///
+/// Rendered above the Markdown memory body in `AgentDetailView`. Read-only
+/// by design — Dispatch is supervisory, not collaborative editing — so this
+/// is a single VStack of `Label` rows. The heading reads "Plan" to match
+/// what the agent sees in its own TodoWrite UI; intentionally not branded
+/// with Dispatch lexicon (Radar / Trace / etc.) per CLAUDE.md.
+private struct PlanSection: View {
+    let todos: [Todo]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "checklist")
+                    .imageScale(.small)
+                    .foregroundStyle(.secondary)
+                Text("Plan")
+                    .font(.headline)
+                Spacer()
+                Text("\(completedCount)/\(todos.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(todos) { todo in
+                    PlanRow(todo: todo)
+                }
+            }
+        }
+    }
+
+    private var completedCount: Int {
+        todos.lazy.filter { $0.status == .completed }.count
+    }
+}
+
+private struct PlanRow: View {
+    let todo: Todo
+
+    var body: some View {
+        Label {
+            Text(label)
+                .font(.callout)
+                .foregroundStyle(textTint)
+                .strikethrough(todo.status == .completed, color: .secondary)
+                .lineLimit(2)
+        } icon: {
+            Text(marker)
+                .font(.system(.callout, design: .monospaced))
+                .foregroundStyle(markerTint)
+                .frame(width: 18, alignment: .leading)
+        }
+        .labelStyle(.titleAndIcon)
+    }
+
+    /// Show the active form when the agent provided one and the row is
+    /// in_progress (matches what the agent's own TodoWrite UI does); fall
+    /// back to `content` everywhere else.
+    private var label: String {
+        if todo.status == .inProgress, let active = todo.activeForm, !active.isEmpty {
+            return active
+        }
+        return todo.content
+    }
+
+    private var marker: String {
+        switch todo.status {
+        case .pending:    return "[ ]"
+        case .inProgress: return "▶"
+        case .completed:  return "[x]"
+        }
+    }
+
+    private var markerTint: Color {
+        switch todo.status {
+        case .pending:    return .secondary
+        case .inProgress: return .accentColor
+        case .completed:  return .green
+        }
+    }
+
+    private var textTint: Color {
+        switch todo.status {
+        case .pending:    return .secondary
+        case .inProgress: return .primary
+        case .completed:  return .secondary
+        }
+    }
+}
+
 // MARK: - Memory pane
 
 struct MemoryPaneView: View {
@@ -514,6 +636,19 @@ struct MemoryPaneView: View {
 }
 
 #Preview("AgentDetailView (decision tree)") {
+    let ws = MockData.workstreams.first(where: { $0.id == "frontend-refactor" })
+        ?? MockData.workstreams[0]
+    return AgentDetailView(
+        workstream: ws,
+        client: MockDaemonClient()
+    )
+    .frame(width: 1100, height: 720)
+}
+
+#Preview("AgentDetailView (Plan section)") {
+    // frontend-refactor is the mock workstream seeded with a TodoWrite plan
+    // (mix of completed / in_progress / pending). Renders the Plan section
+    // above the Markdown memory body.
     let ws = MockData.workstreams.first(where: { $0.id == "frontend-refactor" })
         ?? MockData.workstreams[0]
     return AgentDetailView(

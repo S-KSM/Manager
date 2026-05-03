@@ -29,6 +29,27 @@ enum MockData {
             currentSubgoal: "Migrating billing queries to react-query",
             latestConfidence: 0.78,
             needsAttention: false,
+            // Frontend-refactor doubles as the "card has a TodoWrite plan"
+            // demo. Mix of completed / in-progress / pending so the Plan
+            // section in AgentDetailView exercises every status.
+            todos: [
+                Todo(content: "Pick query/cache library",
+                     status: .completed,
+                     activeForm: "Picking query/cache library"),
+                Todo(content: "Extract billing queries module",
+                     status: .completed,
+                     activeForm: "Extracting billing queries module"),
+                Todo(content: "Migrate billing queries to react-query",
+                     status: .inProgress,
+                     activeForm: "Migrating billing queries to react-query"),
+                Todo(content: "Plumb optimistic updates",
+                     status: .pending,
+                     activeForm: "Plumbing optimistic updates"),
+                Todo(content: "Drop Redux from non-offline views",
+                     status: .pending,
+                     activeForm: "Dropping Redux from non-offline views")
+            ],
+            latestActivity: "Editing src/dashboard/billing/queries.ts",
             lastEventAt: minutesAgo(2)
         ),
         Workstream(
@@ -40,6 +61,10 @@ enum MockData {
             currentSubgoal: "Audit refresh-token rotation behaviour",
             latestConfidence: 0.42,
             needsAttention: true,
+            // No TodoWrite yet — exercises the latest_activity fallback
+            // path in WorkstreamCard.
+            todos: nil,
+            latestActivity: "Running: ./scripts/replay_refresh_token.sh --concurrent",
             lastEventAt: minutesAgo(7)
         ),
         Workstream(
@@ -51,6 +76,8 @@ enum MockData {
             currentSubgoal: "Profile staging cluster hot paths",
             latestConfidence: 0.65,
             needsAttention: false,
+            todos: nil,
+            latestActivity: "Running: kubectl top nodes",
             lastEventAt: minutesAgo(18)
         ),
         Workstream(
@@ -62,6 +89,8 @@ enum MockData {
             currentSubgoal: "Awaiting brand sign-off on tagline options",
             latestConfidence: 0.55,
             needsAttention: false,
+            todos: nil,
+            latestActivity: nil,
             lastEventAt: hoursAgo(6)
         ),
         Workstream(
@@ -73,6 +102,8 @@ enum MockData {
             currentSubgoal: nil,
             latestConfidence: 0.92,
             needsAttention: false,
+            todos: nil,
+            latestActivity: nil,
             lastEventAt: daysAgo(1)
         )
     ]

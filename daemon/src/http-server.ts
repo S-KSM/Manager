@@ -110,7 +110,10 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
    *
    * v0.5.1 computes `current_subgoal`, `latest_confidence`, and
    * `needs_attention` by reading the workstream's events file and folding
-   * it through `projectFromEvents`. This re-reads the JSONL on every
+   * it through `projectFromEvents`. v1.2 adds `todos` (latest TodoWrite
+   * tool_use's todo array) and `latest_activity` (humanized last tool_use)
+   * so the home card can show a "Currently: …" line when the agent isn't
+   * calling `emit_subgoal`. All five projections re-read the JSONL on every
    * `GET /workstreams[/:id]` request — acceptable for v0/v0.5 file sizes
    * (single-digit MB at worst). v1 will move these projections behind a
    * SQLite index that is updated incrementally on append.
@@ -132,6 +135,8 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
       current_subgoal: projections.current_subgoal,
       latest_confidence: projections.latest_confidence,
       needs_attention: projections.needs_attention,
+      todos: projections.todos,
+      latest_activity: projections.latest_activity,
       last_event_at: lastEventAt,
     };
   }

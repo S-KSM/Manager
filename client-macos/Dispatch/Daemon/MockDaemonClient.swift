@@ -134,6 +134,8 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
             currentSubgoal: nil,
             latestConfidence: nil,
             needsAttention: false,
+            todos: nil,
+            latestActivity: nil,
             lastEventAt: nil
         )
         lock.lock()
@@ -168,6 +170,8 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
             currentSubgoal: old.currentSubgoal,
             latestConfidence: old.latestConfidence,
             needsAttention: old.needsAttention,
+            todos: old.todos,
+            latestActivity: old.latestActivity,
             lastEventAt: old.lastEventAt
         )
         _workstreams[idx] = updated

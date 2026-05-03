@@ -31,6 +31,15 @@ struct ContentView: View {
         .task(id: resolver.modeToken) {
             await reload()
         }
+        // Auto-refresh the workstream list when events arrive on any
+        // stream. The home-view cards expose daemon-side projections
+        // (current_subgoal, todos, latest_activity, ...) which only
+        // refresh on a fresh `GET /workstreams`. Subscribing to each
+        // workstream's WS event stream here (and debouncing reloads)
+        // keeps the cards roughly live without polling.
+        .task(id: workstreamSubscriptionKey) {
+            await streamWorkstreamUpdates()
+        }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 ModeBadge(mode: resolver.mode)
@@ -203,6 +212,62 @@ struct ContentView: View {
         }
     }
 
+    /// `.task(id:)` re-runs whenever this key changes, which in turn closes
+    /// out the previous subscription set. Tied to the active workstream id
+    /// list so adding/removing a workstream re-seeds subscriptions.
+    private var workstreamSubscriptionKey: [String] {
+        workstreams
+            .filter { $0.status != .retired }
+            .map(\.id)
+            .sorted()
+    }
+
+    /// Subscribe to every active workstream's WS event stream and kick a
+    /// debounced reload whenever any event arrives. Debounce is 1s so a
+    /// burst of tool_use events triggers a single re-fetch rather than one
+    /// per event.
+    private func streamWorkstreamUpdates() async {
+        let ids = workstreamSubscriptionKey
+        guard !ids.isEmpty else { return }
+        let client = resolver.client
+        let debouncer = ReloadDebouncer()
+        // Capture a Sendable reload closure so the debouncer's task body can
+        // call back into us without grabbing `self` directly.
+        let triggerReload: @Sendable () async -> Void = {
+            await Self.refreshWorkstreams(via: client) { fresh in
+                Task { @MainActor in
+                    workstreams = fresh
+                }
+            }
+        }
+
+        await withTaskGroup(of: Void.self) { group in
+            for id in ids {
+                group.addTask {
+                    let stream = client.streamEvents(workstreamID: id)
+                    for await _ in stream {
+                        if Task.isCancelled { break }
+                        await debouncer.kick(action: triggerReload)
+                    }
+                }
+            }
+            await group.waitForAll()
+        }
+    }
+
+    /// Refetch the workstream list and hand the fresh array to `apply` on the
+    /// MainActor. Static so the closure that calls it doesn't have to capture
+    /// `self`. Errors are swallowed — best-effort live refresh; the user can
+    /// still hit the explicit Refresh toolbar button.
+    private static func refreshWorkstreams(
+        via client: DaemonClientProtocol,
+        apply: @Sendable @escaping ([Workstream]) -> Void
+    ) async {
+        if let fresh = try? await client.listWorkstreams() {
+            apply(fresh)
+        }
+    }
+
     private func applyLifecycleAction(_ ws: Workstream, _ action: HomeView.LifecycleAction) async {
         switch action {
         case .pause:
@@ -238,6 +303,20 @@ struct ContentView: View {
         } catch {
             lifecycleError = (error as? LocalizedError)?.errorDescription
                 ?? "Could not update \(ws.id)."
+        }
+    }
+}
+
+/// Debounce coordinator for the home-view auto-refresh. Kicks coalesce —
+/// only the last `action` within a 1-second window actually fires.
+private actor ReloadDebouncer {
+    private var pending: Task<Void, Never>?
+    func kick(action: @Sendable @escaping () async -> Void) {
+        pending?.cancel()
+        pending = Task {
+            try? await Task.sleep(for: .seconds(1))
+            if Task.isCancelled { return }
+            await action()
         }
     }
 }

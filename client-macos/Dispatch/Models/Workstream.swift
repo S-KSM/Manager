@@ -27,6 +27,13 @@ struct Workstream: Identifiable, Codable, Hashable, Sendable {
     let currentSubgoal: String?
     let latestConfidence: Double?
     let needsAttention: Bool
+    /// Latest TodoWrite tool_use's todo array (Feature B). nil = the agent
+    /// hasn't called TodoWrite yet on this workstream — fall back to
+    /// `latestActivity` for the "Currently:" line.
+    let todos: [Todo]?
+    /// Humanized one-liner for the most recent tool_use event (Feature A).
+    /// Used as the "Currently:" line when `todos` is nil/empty.
+    let latestActivity: String?
     let lastEventAt: Date?
 
     init(
@@ -39,6 +46,8 @@ struct Workstream: Identifiable, Codable, Hashable, Sendable {
         currentSubgoal: String? = nil,
         latestConfidence: Double? = nil,
         needsAttention: Bool = false,
+        todos: [Todo]? = nil,
+        latestActivity: String? = nil,
         lastEventAt: Date? = nil
     ) {
         self.id = id
@@ -50,6 +59,8 @@ struct Workstream: Identifiable, Codable, Hashable, Sendable {
         self.currentSubgoal = currentSubgoal
         self.latestConfidence = latestConfidence
         self.needsAttention = needsAttention
+        self.todos = todos
+        self.latestActivity = latestActivity
         self.lastEventAt = lastEventAt
     }
 
@@ -63,8 +74,31 @@ struct Workstream: Identifiable, Codable, Hashable, Sendable {
         case currentSubgoal = "current_subgoal"
         case latestConfidence = "latest_confidence"
         case needsAttention = "needs_attention"
+        case todos
+        case latestActivity = "latest_activity"
         case lastEventAt = "last_event_at"
     }
+}
+
+/// Mirrors Claude Code's TodoWrite item shape. Decoded from the daemon's
+/// `todos` projection (which strips malformed rows server-side, so this stays
+/// a lean Codable struct on the client).
+///
+/// `Identifiable` uses `content` as the id. TodoWrite items are unique by
+/// slot per agent convention; if the agent ever ships duplicate contents the
+/// list will collapse them — acceptable for v1, glanceable display only.
+struct Todo: Codable, Hashable, Identifiable, Sendable {
+    enum Status: String, Codable, Sendable {
+        case pending
+        case inProgress = "in_progress"
+        case completed
+    }
+
+    let content: String
+    let status: Status
+    let activeForm: String?
+
+    var id: String { content }
 }
 
 extension Workstream {

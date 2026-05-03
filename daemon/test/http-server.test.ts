@@ -115,6 +115,8 @@ describe('HTTP server', () => {
     expect(list.body[0]).toHaveProperty('current_subgoal');
     expect(list.body[0]).toHaveProperty('latest_confidence');
     expect(list.body[0]).toHaveProperty('needs_attention');
+    expect(list.body[0]).toHaveProperty('todos');
+    expect(list.body[0]).toHaveProperty('latest_activity');
     expect(list.body[0]).toHaveProperty('last_event_at');
 
     const detail = await request(handle.app).get('/workstreams/a');

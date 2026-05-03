@@ -582,6 +582,19 @@ struct TeamFloorView: View {
 struct WorkstreamCard: View {
     let workstream: Workstream
 
+    /// What to render in the "Currently:" line. Resolution order:
+    ///  1. The in-progress todo from TodoWrite (Feature B). Prefers
+    ///     `activeForm` ("Migrating billing queries") over `content`.
+    ///  2. Else `latestActivity` (Feature A — humanized last tool_use).
+    ///  3. Else nil (no row rendered).
+    private var currentActivityLine: String? {
+        if let todos = workstream.todos, !todos.isEmpty,
+           let active = todos.first(where: { $0.status == .inProgress }) {
+            return active.activeForm ?? active.content
+        }
+        return workstream.latestActivity
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 10) {
@@ -611,6 +624,24 @@ struct WorkstreamCard: View {
                         Text(goal)
                             .font(.callout)
                             .lineLimit(2)
+                    }
+                }
+
+                // "Currently:" line (Features A + B). Prefer the in-progress
+                // todo (TodoWrite is the agent's actual planning surface);
+                // fall back to the humanized last tool_use; render nothing
+                // when neither signal is available. Single-line, .secondary
+                // styling so it sits visually below the subgoal row.
+                if let activity = currentActivityLine {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Image(systemName: "hammer.fill")
+                            .imageScale(.small)
+                            .foregroundStyle(.tertiary)
+                        Text(activity)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
                 }
 
@@ -856,6 +887,26 @@ struct LiveTickerView: View {
             }
         }
     }
+}
+
+#Preview("WorkstreamCard — todos vs activity") {
+    // Two cards side-by-side: one with a TodoWrite plan (uses the
+    // in-progress todo's activeForm), one without (falls back to the
+    // humanized latest_activity).
+    let withTodos = MockData.workstreams.first { $0.id == "frontend-refactor" }
+    let withActivity = MockData.workstreams.first { $0.id == "auth-hardening" }
+    return HStack(spacing: 16) {
+        if let withTodos {
+            WorkstreamCard(workstream: withTodos)
+                .frame(width: 320)
+        }
+        if let withActivity {
+            WorkstreamCard(workstream: withActivity)
+                .frame(width: 320)
+        }
+    }
+    .padding(20)
+    .background(Color(nsColor: .windowBackgroundColor))
 }
 
 #Preview("HomeView (mock)") {
