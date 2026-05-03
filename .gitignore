@@ -1,0 +1,31 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode / SwiftUI client
+client-macos/build/
+client-macos/DerivedData/
+client-macos/*.xcuserstate
+*.xcuserdatad/
+
+# Node / TypeScript daemon
+daemon/node_modules/
+daemon/dist/
+daemon/.env
+daemon/.env.local
+*.log
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+
+# Local dev event store / memory (per-machine, not in repo)
+events/
+memory/
+
+# OS / misc
+*.swp
+*.swo
+.tmp/

@@ -1,0 +1,5 @@
+I am thinking about building a system that can help us monitor the agents as if they are employees. Currently the approaches are closer to you are either monitoring one agent live as it's coding during the session or you are using Linear or Jira ticketing approach to see what each one is working on by looking at the outcome. In human set up, this is what a manager normally does tracking the updates and writing what is achieved and the ability to track the logic and path or methodology that an outcome was achieved. Sometime you need to micro-manage so that you can intervene and course-correct and employee's approach.
+
+More over we have some knowledge transfer sessions where we can share newly learned "skills" among the team. 
+
+My goal is to generate this experience in a visual and native manner for an ai team so that the human engineer can become the VP of engineering or even CEO for a team of agents with various jobs.
