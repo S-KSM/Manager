@@ -512,4 +512,125 @@ Prototype a learned reranker on top of the existing BM25 retrieval.
             payload: .sessionEnd(.init(reason: "shipped behind flag"))
         )
     ]
+
+    // MARK: - Reports + scheduler (v1.1)
+
+    /// Mirrors the daemon's built-in audience presets. Kept here so previews
+    /// and offline launches can render the audience dropdown without the
+    /// daemon round-trip.
+    static let reportPresets: [ReportPreset] = [
+        ReportPreset(
+            id: "executive",
+            name: "Executive",
+            description: "Lead with outcomes and risks. 5–7 quantified bullets.",
+            systemPrompt: "You write a weekly executive summary for a busy senior leader. Lead with outcomes and risks, not activity. Use 5-7 bullet points. Quantify when possible. Skip implementation detail unless it explains a risk."
+        ),
+        ReportPreset(
+            id: "business_partner",
+            name: "Business partner",
+            description: "Commitments and timelines. Plain language.",
+            systemPrompt: "You write an update for a business partner who cares about commitments and timelines. Focus on shipped/in-flight commitments and any blockers needing their action. Use plain language."
+        ),
+        ReportPreset(
+            id: "engineer_peer",
+            name: "Engineer peer",
+            description: "Methodology, what was tried, what was learned.",
+            systemPrompt: "You write a peer technical update for engineers on adjacent teams. Include the methodology — what was tried, why a particular path was chosen, what was learned. Useful for cross-pollinating techniques."
+        ),
+        ReportPreset(
+            id: "sponsor",
+            name: "Sponsor",
+            description: "Traction signals, deliverables, asks.",
+            systemPrompt: "You write a status update for an investor or program sponsor. Lead with traction signals, deliverables landed, and risks/asks. Keep tone confident and crisp."
+        )
+    ]
+
+    /// Two seeded reports — one draft (typically scheduler output awaiting
+    /// review) and one saved (user kept it). Body is a few lines of plausible
+    /// Markdown so the viewer / list rows render meaningfully.
+    static let reports: [Report] = [
+        Report(
+            id: "rep_seed_draft01",
+            title: "Weekly draft — pending review",
+            audiencePreset: "executive",
+            audienceFreetext: nil,
+            periodSince: daysAgo(7),
+            periodUntil: now,
+            workstreamIDs: ["frontend-refactor", "auth-hardening"],
+            provider: "claude",
+            model: "claude-sonnet-4-7",
+            bodyMD: """
+            # Weekly update (draft)
+
+            ## Highlights
+
+            - **Frontend refactor** — first feature module fully migrated to react-query; bundle size down 6%.
+            - **Auth hardening** — refresh-token reuse window tightened to 30s; one regression caught in eval.
+
+            ## Risks
+
+            - Pending decision on offline-cache strategy; needs sync with mobile team.
+
+            ## Asks
+
+            - 30 minutes with security to ratify rotation cadence.
+            """,
+            status: .draft,
+            generatedAt: hoursAgo(2),
+            savedAt: nil
+        ),
+        Report(
+            id: "rep_seed_saved01",
+            title: "Last week — executive update",
+            audiencePreset: "executive",
+            audienceFreetext: nil,
+            periodSince: daysAgo(14),
+            periodUntil: daysAgo(7),
+            workstreamIDs: ["frontend-refactor", "auth-hardening", "infra-cost"],
+            provider: "claude",
+            model: "claude-sonnet-4-7",
+            bodyMD: """
+            # Weekly update — last week
+
+            ## Highlights
+
+            - **Frontend refactor** — landed query-key registry; 3 modules migrated.
+            - **Auth hardening** — OIDC flow now hardened against refresh reuse.
+            - **Infra cost** — staging cluster right-sized; ~18% monthly savings.
+
+            ## Risks
+
+            - None blocking.
+
+            ## Next week
+
+            - Begin search reranker rollout.
+            """,
+            status: .saved,
+            generatedAt: daysAgo(7),
+            savedAt: daysAgo(7)
+        )
+    ]
+
+    /// Default scheduler config — both jobs disabled until the user opts in.
+    static let schedulerJobs: [SchedulerJob] = [
+        SchedulerJob(
+            id: "weekly_report",
+            enabled: false,
+            cron: "0 8 * * 1",
+            audiencePreset: "executive",
+            provider: "claude",
+            model: nil,
+            nextFireAt: nil
+        ),
+        SchedulerJob(
+            id: "monthly_report",
+            enabled: false,
+            cron: "0 8 1 * *",
+            audiencePreset: "executive",
+            provider: "claude",
+            model: nil,
+            nextFireAt: nil
+        )
+    ]
 }

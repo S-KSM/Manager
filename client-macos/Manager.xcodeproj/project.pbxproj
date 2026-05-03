@@ -31,6 +31,12 @@
 		A100000000000000000002A4 /* HandbookView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000002B4 /* HandbookView.swift */; };
 		A100000000000000000002A5 /* SkillCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000002B5 /* SkillCodableTests.swift */; };
 		A100000000000000000002A6 /* DigestCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000002B6 /* DigestCodableTests.swift */; };
+		A100000000000000000003A1 /* Report.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000003B1 /* Report.swift */; };
+		A100000000000000000003A2 /* UpdatesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000003B2 /* UpdatesView.swift */; };
+		A100000000000000000003A3 /* GenerateReportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000003B3 /* GenerateReportSheet.swift */; };
+		A100000000000000000003A4 /* ReportViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000003B4 /* ReportViewer.swift */; };
+		A100000000000000000003A5 /* SchedulerSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000003B5 /* SchedulerSettings.swift */; };
+		A100000000000000000003A6 /* ReportCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000003B6 /* ReportCodableTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -68,6 +74,12 @@
 		A100000000000000000002B4 /* HandbookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandbookView.swift; sourceTree = "<group>"; };
 		A100000000000000000002B5 /* SkillCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillCodableTests.swift; sourceTree = "<group>"; };
 		A100000000000000000002B6 /* DigestCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DigestCodableTests.swift; sourceTree = "<group>"; };
+		A100000000000000000003B1 /* Report.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Report.swift; sourceTree = "<group>"; };
+		A100000000000000000003B2 /* UpdatesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdatesView.swift; sourceTree = "<group>"; };
+		A100000000000000000003B3 /* GenerateReportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerateReportSheet.swift; sourceTree = "<group>"; };
+		A100000000000000000003B4 /* ReportViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportViewer.swift; sourceTree = "<group>"; };
+		A100000000000000000003B5 /* SchedulerSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulerSettings.swift; sourceTree = "<group>"; };
+		A100000000000000000003B6 /* ReportCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportCodableTests.swift; sourceTree = "<group>"; };
 		A100000000000000000000C0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A100000000000000000000C1 /* Manager.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Manager.entitlements; sourceTree = "<group>"; };
 		A100000000000000000000C2 /* Manager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Manager.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -124,6 +136,7 @@
 				A100000000000000000001B3 /* InterventionCodableTests.swift */,
 				A100000000000000000002B5 /* SkillCodableTests.swift */,
 				A100000000000000000002B6 /* DigestCodableTests.swift */,
+				A100000000000000000003B6 /* ReportCodableTests.swift */,
 			);
 			path = ManagerTests;
 			sourceTree = "<group>";
@@ -146,6 +159,7 @@
 				A100000000000000000001B1 /* Intervention.swift */,
 				A100000000000000000002B1 /* Skill.swift */,
 				A100000000000000000002B2 /* Digest.swift */,
+				A100000000000000000003B1 /* Report.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -168,6 +182,10 @@
 				A100000000000000000001B2 /* InterventionPanel.swift */,
 				A100000000000000000002B3 /* NewWorkstreamSheet.swift */,
 				A100000000000000000002B4 /* HandbookView.swift */,
+				A100000000000000000003B2 /* UpdatesView.swift */,
+				A100000000000000000003B3 /* GenerateReportSheet.swift */,
+				A100000000000000000003B4 /* ReportViewer.swift */,
+				A100000000000000000003B5 /* SchedulerSettings.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -306,6 +324,11 @@
 				A100000000000000000001A2 /* InterventionPanel.swift in Sources */,
 				A100000000000000000002A3 /* NewWorkstreamSheet.swift in Sources */,
 				A100000000000000000002A4 /* HandbookView.swift in Sources */,
+				A100000000000000000003A1 /* Report.swift in Sources */,
+				A100000000000000000003A2 /* UpdatesView.swift in Sources */,
+				A100000000000000000003A3 /* GenerateReportSheet.swift in Sources */,
+				A100000000000000000003A4 /* ReportViewer.swift in Sources */,
+				A100000000000000000003A5 /* SchedulerSettings.swift in Sources */,
 				A100000000000000000000AB /* MockData.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -319,6 +342,7 @@
 				A100000000000000000001A3 /* InterventionCodableTests.swift in Sources */,
 				A100000000000000000002A5 /* SkillCodableTests.swift in Sources */,
 				A100000000000000000002A6 /* DigestCodableTests.swift in Sources */,
+				A100000000000000000003A6 /* ReportCodableTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

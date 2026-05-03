@@ -60,6 +60,39 @@ protocol DaemonClientProtocol: Sendable {
     /// promoting; flips its status to `dismissed`.
     func dismissSkill(id: String) async throws -> SkillProposal
 
+    // MARK: - v1.1: reports + scheduler
+
+    /// `GET /report-presets` — list the daemon's built-in audience presets.
+    func listReportPresets() async throws -> [ReportPreset]
+
+    /// `POST /reports/generate` — synthesises an update from the given
+    /// workstreams + window. When `params.save == true` the daemon persists
+    /// the resulting `Report` with status=saved; otherwise it returns a
+    /// transient draft (status=draft) that the UI can choose to keep.
+    func generateReport(_ params: GenerateReportParams) async throws -> Report
+
+    /// `GET /reports?status=...` — list saved reports filtered by status.
+    /// Pass `nil` to fetch every status.
+    func listReports(status: ReportStatus?) async throws -> [Report]
+
+    /// `GET /reports/:id` — single report.
+    func getReport(id: String) async throws -> Report
+
+    /// `PATCH /reports/:id` — partial update. Setting `status = .saved` on a
+    /// draft also stamps `saved_at` server-side.
+    func updateReport(id: String, fields: ReportUpdateFields) async throws -> Report
+
+    /// `DELETE /reports/:id` — soft-delete; the daemon flips status=archived
+    /// and returns the updated record so the UI can confirm the change.
+    func deleteReport(id: String) async throws -> Report
+
+    /// `GET /scheduler/jobs` — current weekly/monthly draft-generator config.
+    func listSchedulerJobs() async throws -> [SchedulerJob]
+
+    /// `PATCH /scheduler/jobs/:id` — partial update + reschedule.
+    func updateSchedulerJob(id: String,
+                            fields: SchedulerJobUpdateFields) async throws -> SchedulerJob
+
     /// Returns `false` on connection error; never throws. Used by
     /// `DaemonResolver` to choose live vs mock at startup.
     func health() async -> Bool
@@ -290,6 +323,77 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
             path: "skills/proposed/\(id)/dismiss",
             body: EmptyBody()
         )
+    }
+
+    // MARK: - v1.1: reports + scheduler
+
+    func listReportPresets() async throws -> [ReportPreset] {
+        try await getJSON(path: "report-presets")
+    }
+
+    func generateReport(_ params: GenerateReportParams) async throws -> Report {
+        try await sendJSON(method: "POST", path: "reports/generate", body: params)
+    }
+
+    func listReports(status: ReportStatus?) async throws -> [Report] {
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("reports"),
+            resolvingAgainstBaseURL: false
+        ) ?? URLComponents()
+        if let status {
+            components.queryItems = [URLQueryItem(name: "status", value: status.rawValue)]
+        }
+        guard let url = components.url else { throw DaemonError.badURL }
+        do {
+            let (data, response) = try await session.data(from: url)
+            try Self.assertOK(response)
+            do {
+                return try decoder.decode([Report].self, from: data)
+            } catch {
+                throw DaemonError.decoding(error)
+            }
+        } catch let e as DaemonError {
+            throw e
+        } catch {
+            throw DaemonError.transport(error)
+        }
+    }
+
+    func getReport(id: String) async throws -> Report {
+        try await getJSON(path: "reports/\(id)")
+    }
+
+    func updateReport(id: String, fields: ReportUpdateFields) async throws -> Report {
+        try await sendJSON(method: "PATCH", path: "reports/\(id)", body: fields)
+    }
+
+    func deleteReport(id: String) async throws -> Report {
+        let url = baseURL.appendingPathComponent("reports/\(id)")
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        do {
+            let (data, response) = try await session.data(for: req)
+            try Self.assertOK(response)
+            do {
+                return try decoder.decode(Report.self, from: data)
+            } catch {
+                throw DaemonError.decoding(error)
+            }
+        } catch let e as DaemonError {
+            throw e
+        } catch {
+            throw DaemonError.transport(error)
+        }
+    }
+
+    func listSchedulerJobs() async throws -> [SchedulerJob] {
+        try await getJSON(path: "scheduler/jobs")
+    }
+
+    func updateSchedulerJob(id: String,
+                            fields: SchedulerJobUpdateFields) async throws -> SchedulerJob {
+        try await sendJSON(method: "PATCH", path: "scheduler/jobs/\(id)", body: fields)
     }
 
     func streamEvents(workstreamID: String) -> AsyncStream<Event> {

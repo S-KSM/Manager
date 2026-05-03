@@ -1,5 +1,11 @@
 import Foundation
 
+private extension String {
+    /// `nil` when the string is empty, otherwise `self`. Convenience for
+    /// optional-coalescing chains that prefer "no value" over "empty value".
+    var nonEmpty: String? { isEmpty ? nil : self }
+}
+
 /// In-process implementation of `DaemonClientProtocol` backed by `MockData`.
 ///
 /// Used by:
@@ -16,6 +22,9 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
     private var _interventions: [Intervention] = []
     private var _proposedSkills: [SkillProposal]
     private var _handbook: String
+    private var _reports: [Report]
+    private var _schedulerJobs: [SchedulerJob]
+    private let _reportPresets: [ReportPreset]
     private let lock = NSLock()
 
     init(
@@ -24,6 +33,9 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         memoryByWorkstream: [String: String] = MockData.memoryByWorkstream,
         proposedSkills: [SkillProposal] = MockData.proposedSkills,
         handbook: String = MockData.handbook,
+        reports: [Report] = MockData.reports,
+        schedulerJobs: [SchedulerJob] = MockData.schedulerJobs,
+        reportPresets: [ReportPreset] = MockData.reportPresets,
         simulatedLatency: Duration = .milliseconds(50)
     ) {
         self._workstreams = workstreams
@@ -31,6 +43,9 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         self.memoryByWorkstream = memoryByWorkstream
         self._proposedSkills = proposedSkills
         self._handbook = handbook
+        self._reports = reports
+        self._schedulerJobs = schedulerJobs
+        self._reportPresets = reportPresets
         self.simulatedLatency = simulatedLatency
     }
 
@@ -313,6 +328,238 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         )
         _proposedSkills[idx] = updated
         return updated
+    }
+
+    // MARK: - v1.1: reports + scheduler
+
+    /// Read-only snapshot of the current reports list (mock only).
+    var reportsSnapshot: [Report] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _reports
+    }
+
+    /// Read-only snapshot of the current scheduler config (mock only).
+    var schedulerJobsSnapshot: [SchedulerJob] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _schedulerJobs
+    }
+
+    func listReportPresets() async throws -> [ReportPreset] {
+        try? await Task.sleep(for: simulatedLatency)
+        return _reportPresets
+    }
+
+    /// Always succeeds. Synthesises a realistic-looking report from the given
+    /// workstream ids + audience preset/freetext, persists it (with whatever
+    /// status the params imply: saved=true ⇒ .saved, otherwise .draft), and
+    /// returns the persisted record. Mirrors the live daemon's contract.
+    func generateReport(_ params: GenerateReportParams) async throws -> Report {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        let workstreamSnapshot = _workstreams
+        lock.unlock()
+
+        let now = Date()
+        let since = params.since ?? now.addingTimeInterval(-7 * 24 * 60 * 60)
+        let until = params.until ?? now
+
+        let titleWindowFmt = DateFormatter()
+        titleWindowFmt.dateFormat = "yyyy-MM-dd"
+
+        let pickedTitles: [String] = params.workstreamIDs.compactMap { id in
+            workstreamSnapshot.first(where: { $0.id == id })?.title
+        }
+
+        let bodyMD = Self.synthesiseBody(
+            workstreamIDs: params.workstreamIDs,
+            workstreamTitles: pickedTitles,
+            audiencePreset: params.audiencePreset,
+            audienceFreetext: params.audienceFreetext,
+            since: since,
+            until: until
+        )
+
+        let title = params.title?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+            ?? "Weekly update — \(titleWindowFmt.string(from: until))"
+
+        let status: ReportStatus = params.save ? .saved : .draft
+
+        let report = Report(
+            id: "rep_mock_\(UUID().uuidString.prefix(8))",
+            title: title,
+            audiencePreset: params.audiencePreset,
+            audienceFreetext: params.audienceFreetext,
+            periodSince: since,
+            periodUntil: until,
+            workstreamIDs: params.workstreamIDs,
+            provider: params.provider,
+            model: params.model,
+            bodyMD: bodyMD,
+            status: status,
+            generatedAt: now,
+            savedAt: params.save ? now : nil
+        )
+
+        if params.save {
+            lock.lock()
+            _reports.insert(report, at: 0)
+            lock.unlock()
+        }
+        return report
+    }
+
+    func listReports(status: ReportStatus?) async throws -> [Report] {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        defer { lock.unlock() }
+        let filtered: [Report]
+        if let status {
+            filtered = _reports.filter { $0.status == status }
+        } else {
+            filtered = _reports
+        }
+        return filtered.sorted {
+            ($0.savedAt ?? $0.generatedAt) > ($1.savedAt ?? $1.generatedAt)
+        }
+    }
+
+    func getReport(id: String) async throws -> Report {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        defer { lock.unlock() }
+        guard let report = _reports.first(where: { $0.id == id }) else {
+            throw DaemonError.badResponse(404)
+        }
+        return report
+    }
+
+    func updateReport(id: String, fields: ReportUpdateFields) async throws -> Report {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        defer { lock.unlock() }
+        guard let idx = _reports.firstIndex(where: { $0.id == id }) else {
+            throw DaemonError.badResponse(404)
+        }
+        let old = _reports[idx]
+        let nextStatus = fields.status ?? old.status
+        let nextSavedAt: Date?
+        if let newStatus = fields.status, newStatus == .saved, old.status != .saved {
+            nextSavedAt = Date()
+        } else if let newStatus = fields.status, newStatus != .saved {
+            // Moving away from saved — clear savedAt to mirror the daemon.
+            nextSavedAt = nil
+        } else {
+            nextSavedAt = old.savedAt
+        }
+        let updated = Report(
+            id: old.id,
+            title: fields.title ?? old.title,
+            audiencePreset: old.audiencePreset,
+            audienceFreetext: old.audienceFreetext,
+            periodSince: old.periodSince,
+            periodUntil: old.periodUntil,
+            workstreamIDs: old.workstreamIDs,
+            provider: old.provider,
+            model: old.model,
+            bodyMD: fields.bodyMD ?? old.bodyMD,
+            status: nextStatus,
+            generatedAt: old.generatedAt,
+            savedAt: nextSavedAt
+        )
+        _reports[idx] = updated
+        return updated
+    }
+
+    func deleteReport(id: String) async throws -> Report {
+        // Soft-delete: flip to archived, mirror updateReport(.archived).
+        return try await updateReport(id: id, fields: ReportUpdateFields(status: .archived))
+    }
+
+    func listSchedulerJobs() async throws -> [SchedulerJob] {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        defer { lock.unlock() }
+        return _schedulerJobs
+    }
+
+    func updateSchedulerJob(id: String,
+                            fields: SchedulerJobUpdateFields) async throws -> SchedulerJob {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        defer { lock.unlock() }
+        guard let idx = _schedulerJobs.firstIndex(where: { $0.id == id }) else {
+            throw DaemonError.badResponse(404)
+        }
+        let old = _schedulerJobs[idx]
+        let updated = SchedulerJob(
+            id: old.id,
+            enabled: fields.enabled ?? old.enabled,
+            cron: fields.cron ?? old.cron,
+            audiencePreset: fields.audiencePreset ?? old.audiencePreset,
+            provider: fields.provider ?? old.provider,
+            model: fields.model ?? old.model,
+            nextFireAt: old.nextFireAt
+        )
+        _schedulerJobs[idx] = updated
+        return updated
+    }
+
+    /// Realistic-ish stub. Builds a few sections of plausible Markdown so the
+    /// preview / Updates surface have something to show without a daemon.
+    private static func synthesiseBody(
+        workstreamIDs: [String],
+        workstreamTitles: [String],
+        audiencePreset: String?,
+        audienceFreetext: String?,
+        since: Date,
+        until: Date
+    ) -> String {
+        let dayFmt = DateFormatter()
+        dayFmt.dateFormat = "MMM d"
+
+        let audienceLine: String
+        if let freetext = audienceFreetext?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !freetext.isEmpty {
+            audienceLine = "_For: \(freetext)_"
+        } else if let preset = audiencePreset {
+            audienceLine = "_Audience: \(preset.replacingOccurrences(of: "_", with: " "))_"
+        } else {
+            audienceLine = "_Audience: executive_"
+        }
+
+        let bullets: [String]
+        if workstreamTitles.isEmpty {
+            bullets = ["- No workstreams selected — empty draft."]
+        } else {
+            bullets = workstreamTitles.prefix(6).enumerated().map { (i, title) in
+                let progress = ["shipping", "in flight", "blocked on review", "ramping",
+                                "stalled", "wrapping up"][i % 6]
+                return "- **\(title)** — \(progress); 2 decisions landed this week."
+            }
+        }
+
+        return """
+        # Weekly update
+
+        \(audienceLine)
+        _Window: \(dayFmt.string(from: since)) – \(dayFmt.string(from: until))_
+
+        ## Highlights
+
+        \(bullets.joined(separator: "\n"))
+
+        ## Risks & asks
+
+        - One workstream is blocked on a cross-team review — I'll chase tomorrow.
+        - No infra incidents this week.
+
+        ## Next week
+
+        - Land the open decisions on \(workstreamTitles.first ?? "the active workstream").
+        - Begin scoping the next cross-team migration.
+        """
     }
 
     func streamEvents(workstreamID: String) -> AsyncStream<Event> {

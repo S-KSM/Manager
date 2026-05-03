@@ -197,6 +197,165 @@ final class MockDaemonClientTests: XCTestCase {
         XCTAssertFalse(after.contains { $0.id == target.id })
     }
 
+    // MARK: - v1.1: reports + scheduler
+
+    func testListReportPresetsReturnsFour() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let presets = try await client.listReportPresets()
+        XCTAssertEqual(presets.count, 4)
+        XCTAssertTrue(presets.contains { $0.id == "executive" })
+        XCTAssertTrue(presets.contains { $0.id == "business_partner" })
+        XCTAssertTrue(presets.contains { $0.id == "engineer_peer" })
+        XCTAssertTrue(presets.contains { $0.id == "sponsor" })
+    }
+
+    func testGenerateReportWithSaveFalseDoesNotPersist() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let beforeCount = client.reportsSnapshot.count
+
+        let params = GenerateReportParams(
+            workstreamIDs: ["frontend-refactor"],
+            audiencePreset: "executive",
+            provider: "claude",
+            save: false
+        )
+        let report = try await client.generateReport(params)
+
+        XCTAssertEqual(report.status, .draft)
+        XCTAssertNil(report.savedAt)
+        XCTAssertFalse(report.bodyMD.isEmpty)
+        XCTAssertEqual(client.reportsSnapshot.count, beforeCount,
+                       "save=false must not persist a row")
+    }
+
+    func testGenerateReportWithSaveTruePersistsAndAppearsInList() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+
+        let params = GenerateReportParams(
+            workstreamIDs: ["frontend-refactor"],
+            audiencePreset: "executive",
+            provider: "claude",
+            save: true,
+            title: "My saved update"
+        )
+        let report = try await client.generateReport(params)
+        XCTAssertEqual(report.status, .saved)
+        XCTAssertNotNil(report.savedAt)
+        XCTAssertEqual(report.title, "My saved update")
+
+        let saved = try await client.listReports(status: .saved)
+        XCTAssertTrue(saved.contains { $0.id == report.id })
+    }
+
+    func testListReportsFiltersByStatus() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let drafts = try await client.listReports(status: .draft)
+        let saved = try await client.listReports(status: .saved)
+        XCTAssertTrue(drafts.allSatisfy { $0.status == .draft })
+        XCTAssertTrue(saved.allSatisfy { $0.status == .saved })
+        XCTAssertGreaterThanOrEqual(drafts.count, 1)
+        XCTAssertGreaterThanOrEqual(saved.count, 1)
+
+        let all = try await client.listReports(status: nil)
+        XCTAssertGreaterThanOrEqual(all.count, drafts.count + saved.count)
+    }
+
+    func testUpdateReportFlipsStatusToSaved() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let drafts = try await client.listReports(status: .draft)
+        let target = try XCTUnwrap(drafts.first)
+        XCTAssertNil(target.savedAt)
+
+        let updated = try await client.updateReport(
+            id: target.id,
+            fields: ReportUpdateFields(status: .saved)
+        )
+        XCTAssertEqual(updated.status, .saved)
+        XCTAssertNotNil(updated.savedAt)
+
+        let savedNow = try await client.listReports(status: .saved)
+        XCTAssertTrue(savedNow.contains { $0.id == target.id })
+    }
+
+    func testUpdateReportPatchesTitleAndBody() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let saved = try await client.listReports(status: .saved)
+        let target = try XCTUnwrap(saved.first)
+
+        let updated = try await client.updateReport(
+            id: target.id,
+            fields: ReportUpdateFields(title: "Edited title", bodyMD: "# New body")
+        )
+        XCTAssertEqual(updated.title, "Edited title")
+        XCTAssertEqual(updated.bodyMD, "# New body")
+        // Status preserved when not specified.
+        XCTAssertEqual(updated.status, target.status)
+    }
+
+    func testDeleteReportFlipsToArchived() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let saved = try await client.listReports(status: .saved)
+        let target = try XCTUnwrap(saved.first)
+
+        let archived = try await client.deleteReport(id: target.id)
+        XCTAssertEqual(archived.status, .archived)
+
+        let stillSaved = try await client.listReports(status: .saved)
+        XCTAssertFalse(stillSaved.contains { $0.id == target.id })
+
+        let archivedList = try await client.listReports(status: .archived)
+        XCTAssertTrue(archivedList.contains { $0.id == target.id })
+    }
+
+    func testListSchedulerJobsReturnsBothDefaults() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let jobs = try await client.listSchedulerJobs()
+        XCTAssertEqual(jobs.count, 2)
+        XCTAssertTrue(jobs.contains { $0.id == "weekly_report" })
+        XCTAssertTrue(jobs.contains { $0.id == "monthly_report" })
+    }
+
+    func testUpdateSchedulerJobMutates() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let updated = try await client.updateSchedulerJob(
+            id: "weekly_report",
+            fields: SchedulerJobUpdateFields(
+                enabled: true,
+                cron: "*/2 * * * *",
+                audiencePreset: "engineer_peer",
+                provider: "ollama",
+                model: "qwen3:8b"
+            )
+        )
+        XCTAssertTrue(updated.enabled)
+        XCTAssertEqual(updated.cron, "*/2 * * * *")
+        XCTAssertEqual(updated.audiencePreset, "engineer_peer")
+        XCTAssertEqual(updated.provider, "ollama")
+        XCTAssertEqual(updated.model, "qwen3:8b")
+
+        let observed = try await client.listSchedulerJobs()
+        let weekly = try XCTUnwrap(observed.first { $0.id == "weekly_report" })
+        XCTAssertTrue(weekly.enabled)
+        XCTAssertEqual(weekly.cron, "*/2 * * * *")
+    }
+
+    func testGenerateReportRespectsFreetextAudience() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let report = try await client.generateReport(
+            GenerateReportParams(
+                workstreamIDs: ["frontend-refactor"],
+                audiencePreset: nil,
+                audienceFreetext: "Series A investors",
+                provider: "claude",
+                save: false
+            )
+        )
+        XCTAssertNil(report.audiencePreset)
+        XCTAssertEqual(report.audienceFreetext, "Series A investors")
+        XCTAssertTrue(report.bodyMD.contains("Series A investors"),
+                      "synthesizer should weave the freetext into the body")
+    }
+
     func testPostInterventionStoresAndReturnsRecord() async throws {
         let client = MockDaemonClient(simulatedLatency: .zero)
 

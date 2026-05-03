@@ -12,10 +12,13 @@ struct ContentView: View {
     @State private var lifecycleError: String? = nil
 
     /// What the sidebar can have selected. Workstream id, the team handbook,
-    /// or nothing (which falls back to the home view).
+    /// the Updates surface, the explicit Home entry, or nothing (which also
+    /// falls back to the home view).
     enum SidebarSelection: Hashable {
+        case home
         case workstream(String)
         case handbook
+        case updates
     }
 
     var body: some View {
@@ -91,6 +94,17 @@ struct ContentView: View {
         let retired = workstreams.filter { $0.status == .retired }
 
         List(selection: $selection) {
+            // "Home" is the explicit back-to-landing affordance: selecting it
+            // clears the workstream selection so the detail area falls back
+            // to HomeView (digest + team floor + ticker). It lives in its
+            // own section above the workstream list so the bold separator
+            // visually distinguishes it from the workstream rows below.
+            Section {
+                Label("Home", systemImage: "house.fill")
+                    .tag(Optional(SidebarSelection.home))
+            }
+            .listSectionSeparator(.visible)
+
             Section {
                 if loading && workstreams.isEmpty {
                     ProgressView().controlSize(.small)
@@ -116,6 +130,8 @@ struct ContentView: View {
             Section("Reference") {
                 Label("Team handbook", systemImage: "book")
                     .tag(Optional(SidebarSelection.handbook))
+                Label("Updates", systemImage: "doc.text.image")
+                    .tag(Optional(SidebarSelection.updates))
             }
 
             if !retired.isEmpty {
@@ -150,7 +166,9 @@ struct ContentView: View {
             }
         case .some(.handbook):
             HandbookView(client: resolver.client)
-        case .none:
+        case .some(.updates):
+            UpdatesView(client: resolver.client, workstreams: workstreams)
+        case .some(.home), .none:
             placeholderHome
         }
     }
