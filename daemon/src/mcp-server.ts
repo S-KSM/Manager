@@ -6,6 +6,7 @@ import {
   ListToolsRequestSchema,
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
+import { readEnvWithLegacy } from './config.js';
 import type { EventStore, ManagerEvent, ManagerEventType } from './event-store.js';
 import type { MemoryStore } from './memory-store.js';
 import type { SkillProposalsStore } from './skill-proposals.js';
@@ -13,15 +14,16 @@ import type { WorkstreamRegistry } from './workstream.js';
 
 /**
  * Reads the workstream id this MCP session is bound to. v0 supports a single
- * workstream per Claude Code session via the `MANAGER_WORKSTREAM` env var; v1
- * will switch to multiplexed sessions.
+ * workstream per Claude Code session via the `DISPATCH_WORKSTREAM` env var
+ * (legacy `MANAGER_WORKSTREAM` honored for one release); v1 will switch to
+ * multiplexed sessions.
  */
 function resolveWorkstreamId(): string {
-  return process.env.MANAGER_WORKSTREAM ?? 'default';
+  return readEnvWithLegacy('DISPATCH_WORKSTREAM', 'MANAGER_WORKSTREAM') ?? 'default';
 }
 
 function resolveSessionId(): string | undefined {
-  return process.env.MANAGER_SESSION_ID;
+  return readEnvWithLegacy('DISPATCH_SESSION_ID', 'MANAGER_SESSION_ID');
 }
 
 interface BuildOptions {
@@ -142,7 +144,7 @@ export function buildMcpServer(opts: BuildOptions): Server {
   const { eventStore, memoryStore, registry, skillProposalsStore } = opts;
   const server = new Server(
     {
-      name: 'manager-daemon',
+      name: 'dispatch-daemon',
       version: '0.0.1',
     },
     {
@@ -160,7 +162,7 @@ export function buildMcpServer(opts: BuildOptions): Server {
     const workstreamId = resolveWorkstreamId();
     const sessionId = resolveSessionId();
     // Make sure the workstream row exists — agents can call MCP tools before any
-    // explicit `manager register`. ensure() is idempotent.
+    // explicit `dispatch register`. ensure() is idempotent.
     registry.ensure(workstreamId);
 
     const ts = new Date().toISOString();

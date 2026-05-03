@@ -1,15 +1,15 @@
 {
-  "name": "@manager/daemon",
+  "name": "@dispatch/daemon",
   "version": "0.0.1",
   "private": true,
-  "description": "Manager daemon — local MCP + HTTP/WS brain for supervising AI agents.",
+  "description": "Dispatch daemon — local MCP + HTTP/WS brain for supervising AI agents.",
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "main": "dist/index.js",
   "bin": {
-    "manager": "dist/index.js"
+    "dispatch": "dist/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

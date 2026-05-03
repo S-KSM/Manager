@@ -48,8 +48,8 @@ export OLLAMA_URL=http://192.168.1.20:11434
 Then bounce the daemon so it picks up the new env:
 
 ```sh
-launchctl unload ~/Library/LaunchAgents/com.manager.daemon.plist
-launchctl load   ~/Library/LaunchAgents/com.manager.daemon.plist
+launchctl unload ~/Library/LaunchAgents/com.dispatch.daemon.plist
+launchctl load   ~/Library/LaunchAgents/com.dispatch.daemon.plist
 ```
 
 That's the only Ollama-related env var the daemon reads. Model selection happens per-request from the app, not at daemon startup, so you can switch between `qwen3:8b` and `llama3.1:8b` without any restart.
@@ -59,7 +59,7 @@ That's the only Ollama-related env var the daemon reads. Model selection happens
 After generating an Update, the report header in the Updates pane shows the provider it ran against. You can also check the daemon log:
 
 ```sh
-tail -n 50 ~/Library/Logs/manager.daemon.out.log | grep -i ollama
+tail -n 50 ~/Library/Logs/dispatch.daemon.out.log | grep -i ollama
 ```
 
 Or hit the daemon directly:
@@ -107,4 +107,4 @@ You can keep both configured and pick provider per Update. Nothing prevents mixi
 - Ollama client: `daemon/src/llm/ollama.ts` — reads `OLLAMA_URL`, defaults to `http://localhost:11434`, default model `qwen3:8b`
 - Claude client: `daemon/src/llm/claude.ts` — reads `ANTHROPIC_API_KEY`, default model `claude-sonnet-4-7`
 - HTTP entry point: `POST /reports/generate` in `daemon/src/http-server.ts` — accepts `provider` and optional `model` per request
-- Scheduler: `daemon/src/scheduler.ts` — picks provider/model from per-job config persisted in `~/.claude/manager/scheduler.json`
+- Scheduler: `daemon/src/scheduler.ts` — picks provider/model from per-job config persisted in `~/.claude/dispatch/scheduler.json`

@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Manager hook: UserPromptSubmit.
+# Dispatch hook: UserPromptSubmit.
 #
 # v0     — POST the hook event to the daemon.
 # v0.5   — also drain the per-workstream intervention queue and emit pending
@@ -21,25 +21,27 @@ set -u
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SCRIPT_DIR/_common.sh"
 
-# 1. Existing v0 behavior: notify the daemon. manager_post slurps stdin, so
+# 1. Existing v0 behavior: notify the daemon. dispatch_post slurps stdin, so
 #    the drain logic below must not depend on stdin.
-manager_post user-prompt-submit
+dispatch_post user-prompt-submit
 
 # 2. Drain pending interventions. Requires jq; degrade gracefully without it.
 if ! command -v jq >/dev/null 2>&1; then
-  echo "[manager-hook] user-prompt-submit: jq not found; skipping intervention drain" >&2
+  echo "[dispatch-hook] user-prompt-submit: jq not found; skipping intervention drain" >&2
   exit 0
 fi
 
-workstream="${MANAGER_WORKSTREAM:-default}"
+workstream=$(dispatch__legacy_env DISPATCH_WORKSTREAM MANAGER_WORKSTREAM)
+workstream="${workstream:-default}"
 
 # Optional debug knob: feed a canned pending-array via env var instead of
 # hitting the daemon. Useful for unit-style smoke tests when Track A's
 # endpoints aren't wired up yet.
-if [ -n "${MANAGER_TEST_PENDING_JSON:-}" ]; then
-  pending="$MANAGER_TEST_PENDING_JSON"
+test_pending=$(dispatch__legacy_env DISPATCH_TEST_PENDING_JSON MANAGER_TEST_PENDING_JSON)
+if [ -n "$test_pending" ]; then
+  pending="$test_pending"
 else
-  pending=$(manager_get "/workstreams/${workstream}/interventions/pending") || exit 0
+  pending=$(dispatch_get "/workstreams/${workstream}/interventions/pending") || exit 0
 fi
 
 # Empty body or non-JSON: nothing to do. jq -e returns non-zero on parse
@@ -66,7 +68,7 @@ augmented=$(printf '%s' "$pending" | jq -c '.[]' 2>/dev/null | (
     if [ "$kind" = "rollback" ]; then
       dec_id=$(printf '%s' "$line" | jq -r '.payload.rollback_to_decision_id // empty' 2>/dev/null)
       if [ -n "$dec_id" ]; then
-        decision=$(manager_get "/workstreams/${workstream}/decisions/${dec_id}" 2>/dev/null) || decision=""
+        decision=$(dispatch_get "/workstreams/${workstream}/decisions/${dec_id}" 2>/dev/null) || decision=""
         # Validate: must be a JSON object with at least one of considered/choice/
         # rationale/confidence under .payload. This rejects empty bodies, 404
         # error envelopes like {"error":"..."}, and malformed responses.
@@ -113,7 +115,7 @@ combined=$(printf '%s' "$augmented" | jq -r '
     | (.payload.message // "") as $msg
     | (._decision // null) as $d
     | if $kind == "rollback" then
-        "## Manager intervention (rollback)\n"
+        "## Dispatch intercept (rollback)\n"
         + "We are returning to decision `\(.payload.rollback_to_decision_id // "?")` and reconsidering from there."
         + (if $d != null
               and (($d.payload.considered // []) | type == "array")
@@ -135,17 +137,17 @@ combined=$(printf '%s' "$augmented" | jq -r '
            else "" end)
         + (if $d != null then
              (if ($msg | length) > 0 then
-                "\n\n### Hint from the manager\n" + $msg
+                "\n\n### Hint from the dispatcher\n" + $msg
               else "" end)
            else
              # v0.5 thin frame fallback (no decision lookup): preserve the
-             # original single-line "Hint from the manager: <msg>" form.
+             # original single-line "Hint from the dispatcher: <msg>" form.
              (if ($msg | length) > 0 then
-                "\n" + "Hint from the manager: " + $msg
+                "\n" + "Hint from the dispatcher: " + $msg
               else "" end)
            end)
       else
-        "## Manager intervention (\($kind))\n\($msg)"
+        "## Dispatch intercept (\($kind))\n\($msg)"
       end;
   map(block) | join("\n\n")
 ') || exit 0
@@ -172,7 +174,7 @@ printf '%s\n' "$emitted"
 # 6. Ack delivery. Best-effort: if this fails the agent has the context this
 #    turn already; the next turn may re-emit (acceptable v0.5 trade-off).
 ids_body=$(printf '%s' "$pending" | jq -c '{ids: [.[].id]}') || exit 0
-manager_post_json "/workstreams/${workstream}/interventions/ack" "$ids_body" || true
+dispatch_post_json "/workstreams/${workstream}/interventions/ack" "$ids_body" || true
 
 # 7. Always succeed.
 exit 0

@@ -32,9 +32,9 @@ Expect:
 If you get `Connection refused`, kick it:
 
 ```sh
-launchctl load ~/Library/LaunchAgents/com.manager.daemon.plist
+launchctl load ~/Library/LaunchAgents/com.dispatch.daemon.plist
 # Logs:
-tail -f ~/Library/Logs/manager.daemon.err.log
+tail -f ~/Library/Logs/dispatch.daemon.err.log
 ```
 
 ## 2. Open the macOS app
@@ -44,7 +44,7 @@ Launch **Manager** (the app's display name still says Manager until v1.2 — sam
 - **Sidebar (left)** — workstream list, lifecycle actions (create / pause / retire), and navigation between Radar / Updates / Protocol panes.
 - **The Radar (center, default view)** — digest rail at the top (today's headline numbers), team-floor cards for each active workstream, live event ticker. Glanceable status for every agent.
 - **The Trace (right detail pane, click any card)** — forensic timeline of decision events for the selected workstream. Each row is a fork the agent made: what was *considered*, the *choice*, the *rationale*, a *confidence* score. Not a transcript — a methodology map.
-- **The Dossier tab (within the detail pane)** — the Markdown memory file the agent maintains across sessions. This is the workstream's identity. Lives at `~/.claude/manager/memory/<workstream-id>.md` on disk.
+- **The Dossier tab (within the detail pane)** — the Markdown memory file the agent maintains across sessions. This is the workstream's identity. Lives at `~/.claude/dispatch/memory/<workstream-id>.md` on disk.
 
 The **Protocol** view (sidebar → Protocol) shows the team handbook plus pending skill proposals. **Updates** (sidebar → Updates) is where LLM-generated weekly / monthly summaries live; see [`LOCAL_MODELS.md`](LOCAL_MODELS.md) to wire that up.
 
@@ -61,12 +61,12 @@ claude
 
 Two things happen:
 
-1. The `SessionStart` hook fires. The daemon registers a workstream named after the project's git-root basename (override with `MANAGER_WORKSTREAM=foo claude`). A **Radar** card appears in the app within 1–2 seconds.
+1. The `SessionStart` hook fires. The daemon registers a workstream named after the project's git-root basename (override with `DISPATCH_WORKSTREAM=foo claude`). A **Radar** card appears in the app within 1–2 seconds.
 2. Claude Code's system prompt gets nudged to mention the Dispatch MCP tools (`emit_decision`, `propose_skill`, `update_memory`, etc.) and inlines the team Protocol handbook.
 
 Now ask the agent to actually log its reasoning. Paste this prompt:
 
-> Use the manager MCP tools to log your reasoning about how you'd refactor this README into shorter sections. Call `emit_decision` for each non-trivial fork. Don't actually edit any files yet.
+> Use the dispatch MCP tools to log your reasoning about how you'd refactor this README into shorter sections. Call `emit_decision` for each non-trivial fork. Don't actually edit any files yet.
 
 Within a few seconds you should see decision rows pop into **The Trace** for this workstream — each row a structured fork with `considered` / `choice` / `rationale` / `confidence`. That's the data Dispatch is built around.
 
@@ -83,7 +83,7 @@ Back in the app: the team floor on the Radar now has **two cards** side by side.
 
 Try a different prompt in the second terminal so the two Traces look different:
 
-> Use the manager MCP tools to log your decisions while you sketch out a test plan for the auth flow in this repo.
+> Use the dispatch MCP tools to log your decisions while you sketch out a test plan for the auth flow in this repo.
 
 ## 5. Watch the Trace
 
@@ -124,7 +124,7 @@ The agent calls `propose_skill(title, body, source_decision_id?)`. Two things ha
 1. A `skill_proposed` event lands in this workstream's Trace.
 2. The proposal lands in the **Protocol** view's "Pending" list (sidebar → Protocol).
 
-Open the Protocol view. You'll see the proposal with the agent's title + body. Hit **Promote**. The handbook (plain Markdown at `~/.claude/manager/handbook.md`) gets the skill appended.
+Open the Protocol view. You'll see the proposal with the agent's title + body. Hit **Promote**. The handbook (plain Markdown at `~/.claude/dispatch/handbook.md`) gets the skill appended.
 
 From that point on, **every new Claude Code session in any workstream** picks up the promoted skill. The mechanism: the `SessionStart` hook inlines the handbook (capped at 8 KB) into the agent's system prompt at the start of each session. Skills propagate without re-installing anything, without restarting the daemon, without telling agents one by one.
 
@@ -136,8 +136,8 @@ You've now got two workstreams with rich Traces, an intercept history, and a pro
 
 - **Pause a workstream** — sidebar context menu → **Pause**. The card stays on the Radar but greys out; new sessions are still recorded.
 - **Retire a workstream** — sidebar → **Retire**. The card moves off the Radar into the retired list. Events and the Dossier stay on disk; nothing is destroyed.
-- **Where Dossiers live on disk** — `~/.claude/manager/memory/<workstream-id>.md`. Plain Markdown, agent-curated via `update_memory`. You can read or edit it by hand if you want to seed an agent with context.
-- **Where everything else lives** — `~/.claude/manager/db.sqlite` (workstream registry, intercept queue, skill proposals, saved Updates), `~/.claude/manager/events/<id>.jsonl` (append-only event log per workstream), `~/.claude/manager/handbook.md` (team Protocol). All local. No cloud, no auth, no remote access through v1.
+- **Where Dossiers live on disk** — `~/.claude/dispatch/memory/<workstream-id>.md`. Plain Markdown, agent-curated via `update_memory`. You can read or edit it by hand if you want to seed an agent with context.
+- **Where everything else lives** — `~/.claude/dispatch/db.sqlite` (workstream registry, intercept queue, skill proposals, saved Updates), `~/.claude/dispatch/events/<id>.jsonl` (append-only event log per workstream), `~/.claude/dispatch/handbook.md` (team Protocol). All local. No cloud, no auth, no remote access through v1.
 
 ## What's next
 
@@ -146,4 +146,4 @@ You've now got two workstreams with rich Traces, an intercept history, and a pro
 - **Read the architecture** — [`ARCHITECTURE.md`](ARCHITECTURE.md) has the full event schema, HTTP+WebSocket contract, and component diagrams.
 - **Check the roadmap** — [`ROADMAP.md`](ROADMAP.md) for what's coming (v1.2 code-layer rename, v1.5 mobile / remote auth, v2 non-coding workflows).
 
-If you get stuck, check `~/Library/Logs/manager.daemon.err.log` first — the daemon is verbose about hook payloads, MCP calls, and provider errors.
+If you get stuck, check `~/Library/Logs/dispatch.daemon.err.log` first — the daemon is verbose about hook payloads, MCP calls, and provider errors.

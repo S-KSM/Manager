@@ -77,7 +77,7 @@ interface JobRuntime {
 
 /**
  * In-process cron-like scheduler that triggers report generation on the
- * configured cadence. Persists per-job config to `~/.claude/manager/scheduler.json`
+ * configured cadence. Persists per-job config to `~/.claude/dispatch/scheduler.json`
  * so toggles survive daemon restarts. Uses `croner` to parse cron expressions
  * and compute next fire times.
  *

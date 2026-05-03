@@ -2,7 +2,7 @@
 
 Local long-running process: hosts the MCP server agents call into and the HTTP/WebSocket API clients (the macOS app today, mobile/web later) read from. All persistent state — events, Dossier (workstream memory), Intercept queue, Protocol handbook, reports — lives here.
 
-> Codenamed **Manager** through v1.1.x; the binary, package name, env vars, and state directory still use that name. Rename to `dispatch` is queued for v1.2 — see [`../docs/ROADMAP.md`](../docs/ROADMAP.md). The HTTP/WebSocket/MCP wire contracts are stable and unaffected by the rebrand.
+> v1.2 rename note: the binary is `dispatch`; canonical env vars are `DISPATCH_*`; canonical state dir is `~/.claude/dispatch/`. Legacy `manager` / `MANAGER_*` / `~/.claude/manager` are still honored for one release as a backwards-compat fallback (with a stderr deprecation breadcrumb) and removed in v1.3 — see [`../docs/ROADMAP.md`](../docs/ROADMAP.md). The HTTP/WebSocket/MCP wire contracts are stable and unaffected by the rebrand.
 
 See [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) for the full data model and event schema.
 
@@ -19,7 +19,7 @@ npm install
 npm run build
 ```
 
-This produces `dist/index.js`. The package also exposes a `manager` bin once linked.
+This produces `dist/index.js`. The package also exposes a `dispatch` bin once linked.
 
 ## Run
 
@@ -41,10 +41,10 @@ node dist/index.js mcp
 node dist/index.js start --mcp-stdio
 ```
 
-State is written to `~/.claude/manager/` by default:
+State is written to `~/.claude/dispatch/` by default:
 
 ```
-~/.claude/manager/
+~/.claude/dispatch/
   events/<workstream>.jsonl     append-only event log per workstream
   memory/<workstream>.md        agent-owned markdown memory
   queues/<workstream>.jsonl     intervention queue (v0.5)
@@ -55,10 +55,13 @@ State is written to `~/.claude/manager/` by default:
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `MANAGER_PORT` | `9876` | HTTP/WebSocket port. |
-| `MANAGER_HOME` | `~/.claude/manager` | State directory. |
-| `MANAGER_WORKSTREAM` | `default` | Workstream a Claude Code session belongs to. Hooks and the MCP server read this. |
-| `MANAGER_SESSION_ID` | _(unset)_ | Override the session id; otherwise hooks supply one. |
+| `DISPATCH_PORT` | `9876` | HTTP/WebSocket port. |
+| `DISPATCH_HOME` | `~/.claude/dispatch` | State directory. |
+| `DISPATCH_WORKSTREAM` | `default` | Workstream a Claude Code session belongs to. Hooks and the MCP server read this. |
+| `DISPATCH_SESSION_ID` | _(unset)_ | Override the session id; otherwise hooks supply one. |
+| `DISPATCH_DEBUG` | _(unset)_ | Set to `1` for extra hook stderr breadcrumbs. |
+
+The legacy `MANAGER_*` names are still read as a backwards-compat fallback for one release; setting only the legacy name produces a stderr deprecation breadcrumb. Migrate before v1.3.
 
 ## CLI
 
@@ -72,27 +75,28 @@ node dist/index.js attach <workstream-id>      # print env vars for a session
 
 ## Wiring MCP to Claude Code
 
-The `manager mcp` subcommand is the production wiring. Register it once, user-scoped, so every Claude Code session gets the manager tools:
+The `dispatch mcp` subcommand is the production wiring. Register it once, user-scoped, so every Claude Code session gets the dispatch tools:
 
 ```sh
-claude mcp add manager --scope user -- node /absolute/path/to/manager/daemon/dist/index.js mcp
+claude mcp add dispatch --scope user -- node /absolute/path/to/Manager/daemon/dist/index.js mcp
 ```
 
-`bin/install.sh` does this automatically. After it lands, the agent has the following tools available in every session:
+`bin/install.sh` does this automatically (and removes any legacy `manager` MCP entry first). After it lands, the agent has the following tools available in every session:
 
 | Tool | Purpose |
 |---|---|
 | `emit_decision(considered, choice, rationale, confidence, parent_id?)` | Structured decision point — the unit the methodology timeline is built from. |
 | `emit_subgoal(goal, parent_id?)` | Push a sub-goal. |
 | `emit_confidence(value, note?)` | Spot-update confidence outside a decision. |
-| `flag_blocked(reason)` | Escalate to the human VP when stuck. |
+| `flag_blocked(reason)` | Escalate to the human dispatcher when stuck. |
 | `update_memory(section, content)` | Write into the workstream Markdown memory. |
 | `read_memory(section?)` | Read it back. |
+| `propose_skill(title, body, source_decision_id?)` | Propose a pattern for promotion to the team handbook. |
 
-Before launching `claude` in a project, set `MANAGER_WORKSTREAM` so the MCP server knows which workstream to write into:
+Before launching `claude` in a project, set `DISPATCH_WORKSTREAM` so the MCP server knows which workstream to write into:
 
 ```sh
-export MANAGER_WORKSTREAM=my-proj
+export DISPATCH_WORKSTREAM=my-proj
 claude
 ```
 
@@ -117,9 +121,9 @@ The `SessionStart` hook (installed by `hooks/install.sh`) emits an `additionalCo
 
 ## MCP tools (v0)
 
-Exposed by `manager mcp` (production) or `manager start --mcp-stdio` (legacy/test). Names and shapes match `docs/ARCHITECTURE.md`:
+Exposed by `dispatch mcp` (production) or `dispatch start --mcp-stdio` (legacy/test). Names and shapes match `docs/ARCHITECTURE.md`:
 
-`emit_decision`, `emit_subgoal`, `emit_confidence`, `flag_blocked`, `update_memory`, `read_memory`.
+`emit_decision`, `emit_subgoal`, `emit_confidence`, `flag_blocked`, `update_memory`, `read_memory`, `propose_skill`.
 
 ## Hook installation
 

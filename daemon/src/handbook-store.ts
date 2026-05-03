@@ -11,7 +11,7 @@ const HANDBOOK_FILENAME = 'handbook.md';
 const HANDBOOK_HEADER = '# Team handbook\n\n';
 
 /**
- * Single Markdown file owned by the manager (human + macOS app), read by all
+ * Single Markdown file owned by the human dispatcher (via the macOS app), read by all
  * agents at SessionStart. Section layout is `## <skill title>` blocks; each
  * block ends with an italic "from workstream / decision" footer when source
  * is provided.

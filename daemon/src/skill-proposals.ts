@@ -38,8 +38,8 @@ export interface ProposeArgs {
 }
 
 /**
- * SQLite-backed store of agent-proposed skills awaiting manager review. Lives
- * in the same `~/.claude/manager/db.sqlite` as the registry/queue. Mirrors the
+ * SQLite-backed store of agent-proposed skills awaiting human review. Lives
+ * in the same `~/.claude/dispatch/db.sqlite` as the registry/queue. Mirrors the
  * `InterventionQueue` shape (own connection, WAL, optional `dbPath`).
  */
 export class SkillProposalsStore {

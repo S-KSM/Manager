@@ -1,17 +1,21 @@
 #!/usr/bin/env sh
-# Manager — one-command install.
+# Dispatch — one-command install.
 #
 # Idempotent. Builds the daemon and the macOS app, copies the app to
 # /Applications, installs lifecycle hooks into ~/.claude/settings.json, wires
-# the manager MCP into Claude Code (user scope), and registers a launchd agent
+# the dispatch MCP into Claude Code (user scope), and registers a launchd agent
 # so the daemon starts at login.
+#
+# Migrates legacy v1.1.x state (`~/.claude/manager/`, `com.manager.daemon`,
+# `claude mcp add manager`) to the v1.2 names. The MANAGER_* env vars are
+# still honored at runtime for one release (v1.3 removes them).
 #
 # Usage:
 #   bash bin/install.sh           # interactive (confirms each step)
 #   bash bin/install.sh --yes     # skip confirmations
 #   bash bin/install.sh --force   # rebuild even if dist is newer than src
 #   bash bin/install.sh --skip-app    # skip the macOS app build/copy
-#   bash bin/install.sh --app-dest /tmp/Manager.app   # override copy target
+#   bash bin/install.sh --app-dest /tmp/Dispatch.app   # override copy target
 #
 # Never sudoes. If a step needs elevated permissions (e.g. /Applications)
 # the script prints a clear error and instructs the user.
@@ -24,7 +28,7 @@ ASSUME_YES=0
 FORCE_BUILD=0
 SKIP_APP=0
 CHECK_ONLY=0
-APP_DEST="/Applications/Manager.app"
+APP_DEST="/Applications/Dispatch.app"
 
 for arg in "$@"; do
   case "$arg" in
@@ -34,10 +38,10 @@ for arg in "$@"; do
     --check-only) CHECK_ONLY=1 ;;
     --app-dest=*) APP_DEST="${arg#--app-dest=}" ;;
     --app-dest)
-      echo "error: --app-dest requires =PATH form, e.g. --app-dest=/tmp/Manager.app" >&2
+      echo "error: --app-dest requires =PATH form, e.g. --app-dest=/tmp/Dispatch.app" >&2
       exit 2 ;;
     -h|--help)
-      sed -n '2,18p' "$0"
+      sed -n '2,22p' "$0"
       exit 0 ;;
     *)
       echo "unknown arg: $arg (use --help)" >&2
@@ -94,6 +98,35 @@ REPO=$(cd "$SCRIPT_DIR/.." && pwd)
 USER_NAME="$(id -un)"
 HOME_DIR="${HOME:-/Users/$USER_NAME}"
 
+# ---------------- v1.2 state migration --------------------------------------
+
+# migrate_state_dir — move legacy ~/.claude/manager → ~/.claude/dispatch on
+# upgrade from v1.1.x. Idempotent: silent no-op if already migrated.
+#  - both dirs exist  → warn and leave alone (user resolves manually)
+#  - only legacy dir  → atomic rename
+#  - only new dir     → no-op
+#  - neither          → no-op (fresh install)
+migrate_state_dir() {
+  legacy="$HOME_DIR/.claude/manager"
+  current="$HOME_DIR/.claude/dispatch"
+  if [ -d "$legacy" ] && [ -d "$current" ]; then
+    warn "both $legacy and $current exist — leaving in place. Resolve manually:"
+    warn "  - if dispatch is the live one, rm -rf '$legacy'"
+    warn "  - otherwise, merge events/memory/queues from manager into dispatch then rm -rf '$legacy'"
+    return 0
+  fi
+  if [ -d "$legacy" ] && [ ! -d "$current" ]; then
+    if mv "$legacy" "$current"; then
+      ok "migrated state $legacy → $current"
+    else
+      warn "could not migrate $legacy → $current; daemon will start with empty state"
+    fi
+    return 0
+  fi
+  # Either only $current exists, or neither — nothing to do.
+  return 0
+}
+
 # ---------------- preflight -------------------------------------------------
 
 # Detailed prereq check. Returns 0 if everything required is present, non-zero
@@ -103,7 +136,7 @@ check_prereqs() {
   pre_fail=0
 
   if [ "$(uname -s 2>/dev/null)" != "Darwin" ]; then
-    warn "Manager only supports macOS for v1; current uname=$(uname -s)"
+    warn "Dispatch only supports macOS for v1; current uname=$(uname -s)"
     pre_fail=1
   else
     ok "macOS detected"
@@ -113,7 +146,7 @@ check_prereqs() {
     nv=$(node --version 2>/dev/null | sed 's/^v//')
     nmajor=$(printf '%s' "$nv" | cut -d. -f1)
     if [ "${nmajor:-0}" -lt 20 ] 2>/dev/null; then
-      warn "node $nv found but Manager needs Node 20+. Upgrade with: brew install node"
+      warn "node $nv found but Dispatch needs Node 20+. Upgrade with: brew install node"
       pre_fail=1
     else
       ok "node $nv"
@@ -182,6 +215,11 @@ if [ "$CHECK_ONLY" = "1" ]; then
 fi
 ok "preflight"
 
+# ---------------- 0. migrate v1.1.x state -----------------------------------
+
+step "Migrate legacy state (v1.1.x → v1.2)"
+migrate_state_dir
+
 # ---------------- 1. build daemon ------------------------------------------
 
 step "Build daemon"
@@ -218,13 +256,25 @@ else
     warn "xcodebuild not found; skipping app build (install Xcode command-line tools)"
   else
     if confirm "Build client-macos via xcodebuild and copy to $APP_DEST?"; then
+      # Track 2 owns the Xcode rename; it produces a Dispatch.app from
+      # Dispatch.xcodeproj. Until that lands, fall back to the legacy Manager
+      # project name so the install path keeps working on user machines.
+      if [ -d "$REPO/client-macos/Dispatch.xcodeproj" ]; then
+        XCODE_PROJ="Dispatch.xcodeproj"
+        XCODE_SCHEME="Dispatch"
+        XCODE_PRODUCT="Dispatch.app"
+      else
+        XCODE_PROJ="Manager.xcodeproj"
+        XCODE_SCHEME="Manager"
+        XCODE_PRODUCT="Manager.app"
+      fi
       (cd "$REPO/client-macos" && xcodebuild \
-          -project Manager.xcodeproj \
-          -scheme Manager \
+          -project "$XCODE_PROJ" \
+          -scheme "$XCODE_SCHEME" \
           -destination 'platform=macOS' \
           -derivedDataPath build/ \
           build) || die "xcodebuild failed"
-      APP_SRC="$REPO/client-macos/build/Build/Products/Debug/Manager.app"
+      APP_SRC="$REPO/client-macos/build/Build/Products/Debug/$XCODE_PRODUCT"
       if [ ! -d "$APP_SRC" ]; then
         die "built app not found at $APP_SRC"
       fi
@@ -268,19 +318,27 @@ fi
 
 # ---------------- 4. wire MCP -----------------------------------------------
 
-step "Wire Manager MCP into Claude Code"
+step "Wire Dispatch MCP into Claude Code"
 SETTINGS_FILE="$HOME_DIR/.claude/settings.json"
 MCP_INSTALLED=0
 
+# Best-effort: drop legacy `manager` MCP entry before installing `dispatch`.
+if command -v claude >/dev/null 2>&1; then
+  if claude mcp list 2>/dev/null | grep -qE '^manager(\s|:|$)'; then
+    info "removing legacy 'manager' MCP entry from claude"
+    claude mcp remove manager >/dev/null 2>&1 || warn "'claude mcp remove manager' failed; continuing"
+  fi
+fi
+
 if command -v claude >/dev/null 2>&1; then
   # Claude Code CLI is on PATH; prefer its declarative API.
-  if claude mcp list 2>/dev/null | grep -qE '^manager(\s|:|$)'; then
-    info "manager MCP already registered in claude (skipping)"
+  if claude mcp list 2>/dev/null | grep -qE '^dispatch(\s|:|$)'; then
+    info "dispatch MCP already registered in claude (skipping)"
     MCP_INSTALLED=1
   else
-    if confirm "Run 'claude mcp add manager --scope user -- node $REPO/daemon/dist/index.js mcp'?"; then
-      if claude mcp add manager --scope user -- node "$REPO/daemon/dist/index.js" mcp; then
-        ok "manager MCP added via claude CLI"
+    if confirm "Run 'claude mcp add dispatch --scope user -- node $REPO/daemon/dist/index.js mcp'?"; then
+      if claude mcp add dispatch --scope user -- node "$REPO/daemon/dist/index.js" mcp; then
+        ok "dispatch MCP added via claude CLI"
         MCP_INSTALLED=1
       else
         warn "claude mcp add failed; will fall back to settings.json merge"
@@ -292,16 +350,17 @@ if command -v claude >/dev/null 2>&1; then
 fi
 
 if [ "$MCP_INSTALLED" = "0" ]; then
-  if confirm "Merge manager MCP entry into $SETTINGS_FILE directly?"; then
+  if confirm "Merge dispatch MCP entry into $SETTINGS_FILE directly?"; then
     mkdir -p "$(dirname "$SETTINGS_FILE")"
     [ -f "$SETTINGS_FILE" ] || echo "{}" > "$SETTINGS_FILE"
     TMP=$(mktemp)
+    # Drop legacy 'manager' MCP entry in the same write so jq isn't run twice.
     jq \
       --arg cmd "node" \
       --arg arg0 "$REPO/daemon/dist/index.js" \
       --arg arg1 "mcp" \
-      '.mcpServers = ((.mcpServers // {}) + {
-         "manager": {
+      '.mcpServers = ((.mcpServers // {}) | del(.manager) + {
+         "dispatch": {
            "type": "stdio",
            "command": $cmd,
            "args": [$arg0, $arg1]
@@ -317,13 +376,28 @@ fi
 # ---------------- 5. launchd plist ------------------------------------------
 
 step "Generate launchd plist"
-PLIST_TPL="$REPO/bin/com.manager.daemon.plist.template"
-PLIST_DEST="$HOME_DIR/Library/LaunchAgents/com.manager.daemon.plist"
+PLIST_TPL="$REPO/bin/com.dispatch.daemon.plist.template"
+PLIST_DEST="$HOME_DIR/Library/LaunchAgents/com.dispatch.daemon.plist"
+LEGACY_LABEL="com.manager.daemon"
+LEGACY_PLIST="$HOME_DIR/Library/LaunchAgents/com.manager.daemon.plist"
 if [ ! -f "$PLIST_TPL" ]; then
   die "missing plist template: $PLIST_TPL"
 fi
 mkdir -p "$(dirname "$PLIST_DEST")"
 mkdir -p "$HOME_DIR/Library/Logs"
+
+# v1.2: tear down the legacy manager launchd agent BEFORE writing the new one,
+# so the freshly-installed daemon owns port 9876 alone.
+UID_VAL=$(id -u)
+DOMAIN="gui/$UID_VAL"
+if launchctl print "$DOMAIN/$LEGACY_LABEL" >/dev/null 2>&1; then
+  info "booting out legacy $LEGACY_LABEL"
+  launchctl bootout "$DOMAIN/$LEGACY_LABEL" 2>/dev/null || warn "bootout legacy agent failed (continuing)"
+fi
+if [ -f "$LEGACY_PLIST" ]; then
+  rm -f "$LEGACY_PLIST" && ok "removed legacy $LEGACY_PLIST"
+fi
+
 # sed escape: REPO and USER_NAME must not contain unescaped slashes/ampersands
 # in plain English contexts. Use a `|` delimiter to dodge typical macOS paths.
 sed \
@@ -336,9 +410,7 @@ ok "wrote $PLIST_DEST"
 # ---------------- 6. load launchd -------------------------------------------
 
 step "Load launchd agent"
-UID_VAL=$(id -u)
-LABEL="com.manager.daemon"
-DOMAIN="gui/$UID_VAL"
+LABEL="com.dispatch.daemon"
 
 # If already loaded, bootout first (idempotent reinstall).
 if launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
@@ -351,11 +423,11 @@ if confirm "Bootstrap $LABEL into $DOMAIN now?"; then
     ok "agent loaded"
     # Health probe.
     sleep 2
-    PORT="${MANAGER_PORT:-9876}"
+    PORT="${DISPATCH_PORT:-${MANAGER_PORT:-9876}}"
     if curl -s --max-time 2 "http://127.0.0.1:$PORT/health" | grep -q '"ok":true'; then
       ok "daemon healthy on port $PORT"
     else
-      warn "could not reach daemon /health on port $PORT (may still be starting; check ~/Library/Logs/manager.daemon.err.log)"
+      warn "could not reach daemon /health on port $PORT (may still be starting; check ~/Library/Logs/dispatch.daemon.err.log)"
     fi
   else
     warn "launchctl bootstrap failed (run 'launchctl print $DOMAIN/$LABEL' to inspect)"
@@ -369,8 +441,8 @@ fi
 step "Done"
 cat <<EOF
 Logs:
-  $HOME_DIR/Library/Logs/manager.daemon.out.log
-  $HOME_DIR/Library/Logs/manager.daemon.err.log
+  $HOME_DIR/Library/Logs/dispatch.daemon.out.log
+  $HOME_DIR/Library/Logs/dispatch.daemon.err.log
 
 App:
   $APP_DEST
@@ -378,7 +450,7 @@ App:
 To register a workstream and launch a Claude Code session under it:
 
   node "$REPO/daemon/dist/index.js" register my-proj "My Project"
-  cd /path/to/my-proj && MANAGER_WORKSTREAM=my-proj claude
+  cd /path/to/my-proj && DISPATCH_WORKSTREAM=my-proj claude
 
 Uninstall:
 

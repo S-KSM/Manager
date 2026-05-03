@@ -25,8 +25,8 @@ describe('MCP server propose_skill tool', () => {
     eventStore = new EventStore(join(dir, 'events'));
     memoryStore = new MemoryStore(join(dir, 'memory'));
     skillProposalsStore = new SkillProposalsStore(join(dir, 'db.sqlite'));
-    prevEnvWorkstream = process.env['MANAGER_WORKSTREAM'];
-    process.env['MANAGER_WORKSTREAM'] = 'sk_ws';
+    prevEnvWorkstream = process.env['DISPATCH_WORKSTREAM'];
+    process.env['DISPATCH_WORKSTREAM'] = 'sk_ws';
 
     const server = buildMcpServer({ eventStore, memoryStore, registry, skillProposalsStore });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -39,9 +39,9 @@ describe('MCP server propose_skill tool', () => {
     skillProposalsStore.close();
     registry.close();
     if (prevEnvWorkstream === undefined) {
-      delete process.env['MANAGER_WORKSTREAM'];
+      delete process.env['DISPATCH_WORKSTREAM'];
     } else {
-      process.env['MANAGER_WORKSTREAM'] = prevEnvWorkstream;
+      process.env['DISPATCH_WORKSTREAM'] = prevEnvWorkstream;
     }
     rmSync(dir, { recursive: true, force: true });
   });

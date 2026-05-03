@@ -4,7 +4,7 @@
 
 Air-traffic-control for AI agents. Agents are pilots; you're the head dispatcher. Watch the radar, trace methodology, intercept errors, broadcast new protocols across the fleet.
 
-> Originally codenamed **Manager**; rebranded to Dispatch in v1.1.x. Runtime paths (`~/.claude/manager/`, `MANAGER_*` env vars, the `manager` binary) still use the old name until a follow-up code-layer rename — fully working installs are unaffected.
+> Originally codenamed **Manager**; rebranded to Dispatch in v1.1.x and the code-layer rename landed in v1.2 (binary `dispatch`, `DISPATCH_*` env vars, state at `~/.claude/dispatch/`). Legacy `MANAGER_*` env vars are still read as a backwards-compat fallback for one release and removed in v1.3.
 
 ## Quickstart (60 seconds)
 
@@ -73,14 +73,14 @@ The daemon is the only stateful piece. Clients (macOS now, iOS / web later in v1
 - **Lifecycle hooks** (zero-touch): `SessionStart`, `Stop`, `PreToolUse`, `PostToolUse`, `UserPromptSubmit` POST to the daemon — installed via the one-command installer into `~/.claude/settings.json`.
 - **MCP server** (per-session stdio): exposes the high-fidelity tools — `emit_decision`, `emit_subgoal`, `emit_confidence`, `flag_blocked`, `update_memory`, `read_memory`, `propose_skill`. Wired automatically by the installer.
 - **`SessionStart` system-prompt nudge**: tells the agent the Dispatch tools exist and inlines the team Protocol handbook (capped at 8 KB) so promoted skills propagate to every session.
-- **Auto-workstream**: if `MANAGER_WORKSTREAM` isn't set, the hook derives a workstream id from the project's git-root basename (or `pwd`). Slugified. Override with `MANAGER_WORKSTREAM=other-name claude`.
+- **Auto-workstream**: if `DISPATCH_WORKSTREAM` isn't set, the hook derives a workstream id from the project's git-root basename (or `pwd`). Slugified. Override with `DISPATCH_WORKSTREAM=other-name claude`.
 
 ## Where state lives
 
-Everything local-only, under `~/.claude/manager/` (path renamed in a future code-layer pass):
+Everything local-only, under `~/.claude/dispatch/` (legacy `~/.claude/manager/` from v1.1.x is migrated automatically by `bin/install.sh`):
 
 ```
-~/.claude/manager/
+~/.claude/dispatch/
 ├── db.sqlite           # workstream registry, intercept queue, skill proposals, reports
 ├── events/<id>.jsonl   # append-only event log per workstream
 ├── memory/<id>.md      # per-workstream Dossier (agent-curated Markdown)

@@ -53,11 +53,21 @@ What this proves: solo→scale is a single design move (cards collapse to pods),
 
 Scope:
 
-- **Dispatch rename (code layer)**: rename daemon binary `manager` → `dispatch`; env vars `MANAGER_*` → `DISPATCH_*` (with one release of fallback aliases); state dir `~/.claude/manager/` → `~/.claude/dispatch/` via a one-shot migration in `bin/install.sh` on upgrade; launchd label `com.manager.daemon` → `com.dispatch.daemon`; Xcode project + Swift module + bundle identifier + `CFBundleDisplayName` from `Manager` to `Dispatch`; ship the new brutalist "D" app icon (heavy, glitchy, with a pixelated signal trail) into `Assets.xcassets/AppIcon.appiconset`. Internal contract identifiers (event types, MCP tool names, SQLite columns) stay unchanged — they're already neutral.
-- **Kanban board**: replace the team-floor grid with a 4-column board (Backlog / Active / Paused / Retired) + drag-and-drop status changes. Pod auto-grouping moves into the Active column when card count exceeds the threshold.
-- **Linear.app integration**: `workstream_links` SQLite table + GraphQL client. Link a workstream to a Linear issue from the agent-detail header. Status changes flow Linear ↔ Dispatch; high-confidence decisions optionally land as comments on the linked issue.
+- ✅ **Dispatch rename (code layer)** — shipped: daemon binary `dispatch`, env vars `DISPATCH_*` with one-release `MANAGER_*` fallback, state dir `~/.claude/dispatch/` (one-shot migration in `bin/install.sh`), launchd label `com.dispatch.daemon`, Xcode project `Dispatch.xcodeproj`, bundle id `com.dispatch.app`, `CFBundleDisplayName` Dispatch, Swift module `DispatchApp` (suffixed to avoid colliding with system libdispatch), custom logo. Internal contract identifiers (event types, MCP tool names, SQLite columns) unchanged.
+- 🟡 **Kanban board** — pending: replace the team-floor grid with a 4-column board (Backlog / Active / Paused / Retired) + drag-and-drop status changes. Pod auto-grouping moves into the Active column when card count exceeds the threshold.
+- 🟡 **Linear.app integration** — pending: `workstream_links` SQLite table + GraphQL client. Link a workstream to a Linear issue from the agent-detail header. Status changes flow Linear ↔ Dispatch; high-confidence decisions optionally land as comments on the linked issue.
 
 What this proves: the rebrand can land cleanly without breaking installed copies; the daemon-as-brain split makes external integrations (Linear) cheap to add.
+
+## v1.3 — MLX local LLM + `/dispatcher` slash command + tooltip & UX polish
+
+**Goal:** lean harder into the macOS-native angle for on-device LLM, and tighten the Claude-Code → app loop.
+
+Scope:
+
+- **MLX-backed local LLM**: replace the Ollama-only path with a generic OpenAI-compatible provider (`DISPATCH_LLM_BASE_URL`). The recommended local default becomes `mlx_lm.server` — Apple's MLX framework is faster on M-series silicon than the llama.cpp engine Ollama wraps. Ollama keeps working since it speaks the same surface. Trade-off: `mlx_lm.server` needs Python; a pure-Swift MLX path (inference inside the macOS app via `mlx-swift-examples`) is a stretch goal.
+- **`/dispatcher <ws>` Claude Code slash command + URL scheme**: register `dispatch://workstream/<id>` in the macOS app; ship `~/.claude/commands/dispatcher.md` so a session can `open dispatch://workstream/...` to surface the matching card in the app.
+- **Remove `MANAGER_*` env-var fallbacks** introduced in v1.2 (the deprecation breadcrumb has fired for one release; old installs will have migrated by now).
 
 ## v1.5 — Remote / mobile
 

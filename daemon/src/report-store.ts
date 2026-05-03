@@ -74,7 +74,7 @@ const DEFAULT_LIST_LIMIT = 100;
 
 /**
  * SQLite-backed store of generated reports. Lives in the same
- * `~/.claude/manager/db.sqlite` as the registry / queue / proposals stores.
+ * `~/.claude/dispatch/db.sqlite` as the registry / queue / proposals stores.
  * Mirrors `WorkstreamRegistry` / `InterventionQueue` shape: own connection,
  * WAL pragmas, lazy migrate.
  *

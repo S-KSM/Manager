@@ -2,7 +2,7 @@
 
 SwiftUI front-end for the Dispatch daemon. Renders **The Radar** — the three-zone home view (digest rail, team floor, live ticker) — and an **agent detail view** with **The Trace** (methodology timeline) + **Dossier** pane (workstream memory). Intercept controls (nudge / redirect / rollback) live on the agent-detail toolbar; Protocol promotion happens from the decision rows in the Trace.
 
-> Codenamed **Manager** through v1.1.x. The Xcode project, Swift module, bundle identifier, `CFBundleDisplayName`, and app icon all still carry the old name — they get renamed in v1.2 alongside the daemon code-layer rename and a new brutalist "D" icon (see `docs/ROADMAP.md`).
+> Codenamed **Manager** through v1.1.x. As of v1.2 the Xcode project, Swift module, bundle identifier (`com.dispatch.app`), `CFBundleDisplayName`, and the env-var override (`DISPATCH_DAEMON`) all carry the new name. The legacy `MANAGER_DAEMON` env var is still honored for one release with a deprecation log line — set `DISPATCH_DAEMON` instead.
 >
 > The contract this client speaks to is documented in [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) at the repo root; treat that as the source of truth.
 
@@ -17,7 +17,7 @@ No third-party dependencies. Everything the client needs ships in the OS.
 ## Open / build / run
 
 ```sh
-open client-macos/Manager.xcodeproj
+open client-macos/Dispatch.xcodeproj
 ```
 
 …then **Run** (Cmd-R). The app opens with mock data populated; you should see
@@ -27,8 +27,8 @@ Build from the command line:
 
 ```sh
 cd client-macos
-xcodebuild -project Manager.xcodeproj \
-           -scheme Manager \
+xcodebuild -project Dispatch.xcodeproj \
+           -scheme Dispatch \
            -destination 'platform=macOS' \
            -configuration Debug build
 ```
@@ -37,8 +37,8 @@ Run the unit tests:
 
 ```sh
 cd client-macos
-xcodebuild -project Manager.xcodeproj \
-           -scheme Manager \
+xcodebuild -project Dispatch.xcodeproj \
+           -scheme Dispatch \
            -destination 'platform=macOS' \
            test
 ```
@@ -86,15 +86,17 @@ The app picks at startup:
 2. Otherwise → fall back to `MockDaemonClient` so the UI is always populated.
 
 The chosen mode is shown in the toolbar (green dot = live, yellow dot = mock)
-and logged on launch via `os_log` (subsystem `com.manager.app`, category
+and logged on launch via `os_log` (subsystem `com.dispatch.app`, category
 `DaemonResolver`).
 
 Two ways to override:
 
-- **Env var** — set `MANAGER_DAEMON=mock` in the Xcode scheme (Edit Scheme →
+- **Env var** — set `DISPATCH_DAEMON=mock` in the Xcode scheme (Edit Scheme →
   Run → Arguments → Environment Variables) to force mock mode even when a
-  daemon is running.
-- **Menu** — `Manager → Toggle Mock / Live Daemon` (`⌘⇧M`) flips at runtime.
+  daemon is running. The legacy `MANAGER_DAEMON` env var is still read as a
+  fallback for one release; switching produces an `os_log` deprecation
+  notice but otherwise keeps working.
+- **Menu** — `Dispatch → Toggle Mock / Live Daemon` (`⌘⇧M`) flips at runtime.
 
 The base URL `http://localhost:9876` is the default; change it in
 `LiveDaemonClient.defaultBaseURL` if the daemon binds elsewhere.
@@ -102,8 +104,8 @@ The base URL `http://localhost:9876` is the default; change it in
 ## What's where
 
 ```
-Manager/
-  ManagerApp.swift            @main app, env-injects DaemonResolver.
+Dispatch/
+  DispatchApp.swift           @main app, env-injects DaemonResolver.
   ContentView.swift           NavigationSplitView; sidebar + detail.
   Models/
     Workstream.swift          Mirrors the daemon Workstream record.
@@ -126,10 +128,10 @@ Manager/
                                5 mock memory blobs.
   Resources/
     Info.plist
-    Manager.entitlements      App sandbox + outgoing network.
+    Dispatch.entitlements     App sandbox + outgoing network.
     Assets.xcassets
 
-ManagerTests/
+DispatchTests/
   EventCodableTests.swift     ARCHITECTURE.md JSON round-trip,
                               all-variant payload coverage.
   MockDaemonClientTests.swift Fixtures, decision-tree consistency,

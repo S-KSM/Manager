@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# install.sh — register Manager's lifecycle hooks in ~/.claude/settings.json.
+# install.sh — register Dispatch's lifecycle hooks in ~/.claude/settings.json.
 #
 # Idempotent: re-running won't duplicate entries. Asks for confirmation before
 # writing. Requires `jq` for safe JSON merging.
@@ -66,4 +66,4 @@ jq --argjson hooks "$HOOK_FRAGMENT" \
 mv "$TMP" "$SETTINGS_FILE"
 
 echo "wrote $SETTINGS_FILE"
-echo "remember to set MANAGER_WORKSTREAM (and optionally MANAGER_PORT) in your shell."
+echo "remember to set DISPATCH_WORKSTREAM (and optionally DISPATCH_PORT) in your shell."

@@ -15,7 +15,9 @@ Read first:
 
 ## Status
 
-v1.1.x shipped. Daemon, hooks, MCP server, and macOS app are all in. Code-layer rename from `manager` → `dispatch` (binary name, env vars `MANAGER_*` → `DISPATCH_*`, state dir `~/.claude/manager/` → `~/.claude/dispatch/`, launchd label, Xcode project + Swift module + bundle identifier + display name, app icon) is queued for v1.2 — until then, runtime artifacts keep the `manager` codename to avoid breaking installed copies. **Brand-layer rebrand is done in the docs only**; the new "D" app icon and display name land with v1.2.
+v1.2 code-layer rename shipped. Daemon binary is `dispatch`, env vars are `DISPATCH_*` (with one-release `MANAGER_*` fallback + deprecation breadcrumb, removed in v1.3), state dir is `~/.claude/dispatch/` (one-shot migration in `bin/install.sh` from `~/.claude/manager/`), launchd label `com.dispatch.daemon`, Xcode project `Dispatch.xcodeproj`, bundle id `com.dispatch.app`, app file `/Applications/Dispatch.app`, custom logo shipped. Swift module name is `DispatchApp` (not `Dispatch`) to avoid colliding with system libdispatch.
+
+Kanban + Linear (the other v1.2 deliverables) and MLX-backed local LLM (queued for v1.3) are not yet shipped.
 
 ## Locked architectural decisions
 
@@ -36,8 +38,9 @@ These are decided. Do not relitigate without a reason; do propose changes if you
 
 ## Working in this repo
 
-- Build/lint/test live per-component: `cd daemon && npm run build|test|lint`; `cd client-macos && xcodebuild -project Manager.xcodeproj`. Hooks are POSIX shell — no build step.
-- Local state at runtime lives at `~/.claude/manager/` (events, memory, db, handbook, scheduler). Do not commit — `.gitignore` excludes it.
+- Build/lint/test live per-component: `cd daemon && npm run build|test|lint`; `cd client-macos && xcodebuild -project Dispatch.xcodeproj -scheme Dispatch`. Hooks are POSIX shell — no build step.
+- Local state at runtime lives at `~/.claude/dispatch/` (events, memory, db, handbook, scheduler). Do not commit — `.gitignore` excludes it.
 - When making non-trivial decisions about the build, update `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` rather than letting decisions drift.
 - **When writing user-facing copy** (UI strings, README sections, error messages surfaced to the human) prefer the Dispatch lexicon — Radar / Trace / Intercept / Protocol / Dossier. Internal identifiers (event types `decision`, `intervention_delivered`, `skill_proposed`; MCP tool names; SQLite columns) stay as the technical contract — do not rename them on the brand pass.
-- **Code-layer rename pending** — when v1.2 ships the rename, every `~/.claude/manager/` / `MANAGER_*` / `manager mcp` / `com.manager.daemon` / Xcode `Manager` reference becomes `dispatch`. Don't introduce new code that hardcodes the old name in places that would break the migration script.
+- **Backwards-compat env vars** — `MANAGER_*` env vars are honored for one release with a deprecation breadcrumb. The fallback removes in v1.3. Don't add new sites that read the legacy form; new code reads `DISPATCH_*` only.
+- **Swift module is `DispatchApp`, not `Dispatch`** — required because `Dispatch` is a system framework (libdispatch / GCD). Bundle id, target name, and `.app` filename are all `Dispatch`; only the Swift module identifier is suffixed. Test imports therefore use `@testable import DispatchApp`.

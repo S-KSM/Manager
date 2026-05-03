@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createServer, type Server as HttpServer, type IncomingMessage } from 'node:http';
 import express, { type Express, type Request, type Response } from 'express';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { readEnvWithLegacy } from './config.js';
 import { buildDigest } from './digest.js';
 import type { EventStore, ManagerEvent, ManagerEventType } from './event-store.js';
 import type { HandbookStore, SkillSource } from './handbook-store.js';
@@ -318,7 +319,11 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
   for (const [hook, type] of Object.entries(HOOK_TYPE_MAP)) {
     app.post(`/hooks/${hook}`, async (req: Request, res: Response) => {
       const body = (req.body ?? {}) as HookBody;
-      const workstreamId = String(body.workstream ?? process.env.MANAGER_WORKSTREAM ?? 'default');
+      const workstreamId = String(
+        body.workstream ??
+          readEnvWithLegacy('DISPATCH_WORKSTREAM', 'MANAGER_WORKSTREAM') ??
+          'default',
+      );
       const sessionId = body.session ? String(body.session) : undefined;
       registry.ensure(workstreamId);
       if (type === 'session_start' && sessionId) {

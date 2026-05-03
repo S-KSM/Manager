@@ -37,7 +37,7 @@ interface InterventionRow {
 /**
  * SQLite-backed FIFO queue of pending interventions per workstream.
  *
- * Lives in the same `~/.claude/manager/db.sqlite` as `WorkstreamRegistry`.
+ * Lives in the same `~/.claude/dispatch/db.sqlite` as `WorkstreamRegistry`.
  * The class opens its own connection (with the same WAL + foreign_keys
  * pragmas) rather than sharing the registry's: keeps construction
  * symmetrical with `WorkstreamRegistry`, makes test setup trivial, and

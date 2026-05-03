@@ -15,11 +15,11 @@ import { SkillProposalsStore } from './skill-proposals.js';
 import { WorkstreamRegistry } from './workstream.js';
 
 /**
- * Whether to launch an MCP stdio server in `manager start`.
+ * Whether to launch an MCP stdio server in `dispatch start`.
  * Off by default so a daemon launched as a long-running background process
  * doesn't try to read from a non-existent stdin (which would EOF immediately).
  *
- * Note: in v0.5.2 the production wiring is `manager mcp` (stdio-only, no HTTP),
+ * Note: in v0.5.2 the production wiring is `dispatch mcp` (stdio-only, no HTTP),
  * which Claude Code launches per session. The `--mcp-stdio` flag on `start`
  * is kept for backward compat / testing only — it binds BOTH HTTP and MCP, so
  * if a long-running daemon is already up they will fight for the port.
@@ -29,8 +29,8 @@ const MCP_STDIO_FLAG = '--mcp-stdio';
 export function buildCli(): Command {
   const program = new Command();
   program
-    .name('manager')
-    .description('Manager daemon — local brain for supervising AI agents.')
+    .name('dispatch')
+    .description('Dispatch daemon — local brain for supervising AI agents.')
     .version('0.0.1');
 
   program
@@ -38,7 +38,7 @@ export function buildCli(): Command {
     .description('Boot HTTP/WS API. Optionally also bind an MCP server to stdio.')
     .option(
       MCP_STDIO_FLAG,
-      'Bind the MCP server to stdio (testing only — production uses `manager mcp`).',
+      'Bind the MCP server to stdio (testing only — production uses `dispatch mcp`).',
     )
     .action(async (opts: { mcpStdio?: boolean }) => {
       await runStart({ mcpStdio: !!opts.mcpStdio });
@@ -110,15 +110,15 @@ export function buildCli(): Command {
       process.stdout.write(
         [
           '# Add these to your shell before launching Claude Code:',
-          `export MANAGER_WORKSTREAM=${shellQuote(workstreamId)}`,
-          `export MANAGER_SESSION_ID=${shellQuote(sessionId)}`,
-          `export MANAGER_PORT=${cfg.httpPort}`,
+          `export DISPATCH_WORKSTREAM=${shellQuote(workstreamId)}`,
+          `export DISPATCH_SESSION_ID=${shellQuote(sessionId)}`,
+          `export DISPATCH_PORT=${cfg.httpPort}`,
           '',
           '# Install the lifecycle hooks (one-time, user-scoped):',
           '#   bash hooks/install.sh',
           '',
-          "# Wire Claude Code's MCP to manager (one-time, user-scoped):",
-          `#   claude mcp add manager --scope user -- node "${repo}/daemon/dist/index.js" mcp`,
+          "# Wire Claude Code's MCP to dispatch (one-time, user-scoped):",
+          `#   claude mcp add dispatch --scope user -- node "${repo}/daemon/dist/index.js" mcp`,
         ].join('\n'),
       );
       process.stdout.write('\n');
@@ -170,21 +170,21 @@ async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
   });
   const port = await http.listen(cfg.httpPort);
   // stderr so JSON-over-stdout MCP traffic stays clean.
-  process.stderr.write(`[manager] HTTP/WS listening on http://127.0.0.1:${port}\n`);
-  process.stderr.write(`[manager] state at ${cfg.home}\n`);
+  process.stderr.write(`[dispatch] HTTP/WS listening on http://127.0.0.1:${port}\n`);
+  process.stderr.write(`[dispatch] state at ${cfg.home}\n`);
   await scheduler.start();
-  process.stderr.write('[manager] scheduler started\n');
+  process.stderr.write('[dispatch] scheduler started\n');
 
   let mcpRunning = false;
   if (opts.mcpStdio) {
     const mcp = buildMcpServer({ eventStore, memoryStore, registry, skillProposalsStore });
     await startMcpStdio(mcp);
     mcpRunning = true;
-    process.stderr.write('[manager] MCP server bound to stdio\n');
+    process.stderr.write('[dispatch] MCP server bound to stdio\n');
   }
 
   const shutdown = async (): Promise<void> => {
-    process.stderr.write('[manager] shutting down\n');
+    process.stderr.write('[dispatch] shutting down\n');
     try {
       scheduler.stop();
       await http.close();
@@ -193,7 +193,7 @@ async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
       skillProposalsStore.close();
       reportStore.close();
     } catch (e) {
-      process.stderr.write(`[manager] shutdown error: ${(e as Error).message}\n`);
+      process.stderr.write(`[dispatch] shutdown error: ${(e as Error).message}\n`);
     }
     process.exit(0);
   };
@@ -209,7 +209,7 @@ async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
 
 /**
  * MCP-only mode: stdio MCP server, NO HTTP. Reads/writes the same on-disk
- * state as the long-running `manager start` daemon (SQLite WAL + JSONL append
+ * state as the long-running `dispatch start` daemon (SQLite WAL + JSONL append
  * make this concurrent-safe). Logs only to stderr — stdout is reserved for
  * MCP JSON-RPC traffic.
  */
@@ -227,16 +227,16 @@ async function runMcp(): Promise<void> {
   const skillProposalsStore = new SkillProposalsStore(cfg.dbPath);
   const mcp = buildMcpServer({ eventStore, memoryStore, registry, skillProposalsStore });
   await startMcpStdio(mcp);
-  process.stderr.write(`[manager] MCP stdio bound; state at ${cfg.home}\n`);
+  process.stderr.write(`[dispatch] MCP stdio bound; state at ${cfg.home}\n`);
 
   const shutdown = async (): Promise<void> => {
-    process.stderr.write('[manager] shutting down MCP\n');
+    process.stderr.write('[dispatch] shutting down MCP\n');
     try {
       registry.close();
       interventionQueue.close();
       skillProposalsStore.close();
     } catch (e) {
-      process.stderr.write(`[manager] shutdown error: ${(e as Error).message}\n`);
+      process.stderr.write(`[dispatch] shutdown error: ${(e as Error).message}\n`);
     }
     process.exit(0);
   };
