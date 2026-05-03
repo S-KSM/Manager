@@ -105,19 +105,71 @@ final class DaemonResolver: ObservableObject {
     }
 
     /// Re-probes the daemon and switches to live mode if it's reachable.
-    /// Used as a "Retry" affordance from the mock-mode banner so the user
-    /// can recover without restarting the app once the daemon is up.
+    /// If the probe fails, attempts to start the launchd-managed daemon
+    /// (`com.dispatch.daemon`) and re-probes once. Used as a "Retry" /
+    /// "Start daemon" affordance from the mock-mode banner.
     func retryConnection() async {
         if forcedMode != nil { return }
         let live = LiveDaemonClient(baseURL: liveBaseURL)
         if await probeHealthWithRetry(live) {
             logger.info("DaemonResolver: retryConnection succeeded — switching to live.")
             switchTo(.live, reason: .liveHealthy, client: live)
-        } else {
-            logger.notice("DaemonResolver: retryConnection failed — staying on mock.")
-            // Bump the token anyway so views that show "last checked" UI
-            // can re-render. The mode itself doesn't change.
-            modeToken &+= 1
+            return
+        }
+        logger.notice("DaemonResolver: probe failed — attempting to start launchd agent com.dispatch.daemon.")
+        let started = await startLaunchdAgent()
+        if started, await probeHealthWithRetry(live) {
+            logger.info("DaemonResolver: launchd agent started, daemon healthy — switching to live.")
+            switchTo(.live, reason: .liveHealthy, client: live)
+            return
+        }
+        logger.notice("DaemonResolver: retryConnection failed — staying on mock.")
+        modeToken &+= 1
+    }
+
+    /// Tries to bring the launchd-managed daemon up. Order:
+    ///   1. `kickstart -k` — works whether the agent is loaded (kills +
+    ///      restarts) or not (returns non-zero, which we ignore).
+    ///   2. `bootstrap` — only succeeds when the agent isn't loaded; loads
+    ///      the plist from `~/Library/LaunchAgents`.
+    /// Returns true if either step exited 0. Sandbox must be disabled
+    /// (entitlements: `com.apple.security.app-sandbox = false`) for
+    /// `Process()` to spawn `/bin/launchctl`; v1.2 already disables it.
+    private func startLaunchdAgent() async -> Bool {
+        let label = "com.dispatch.daemon"
+        let uid = getuid()
+        let domain = "gui/\(uid)"
+        let plist = FileManager.default
+            .homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/\(label).plist")
+            .path
+
+        if await runLaunchctl(["kickstart", "-k", "\(domain)/\(label)"]) {
+            return true
+        }
+        if FileManager.default.fileExists(atPath: plist),
+           await runLaunchctl(["bootstrap", domain, plist]) {
+            return true
+        }
+        return false
+    }
+
+    private func runLaunchctl(_ args: [String]) async -> Bool {
+        await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global().async {
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+                p.arguments = args
+                p.standardOutput = Pipe()
+                p.standardError = Pipe()
+                do {
+                    try p.run()
+                    p.waitUntilExit()
+                    cont.resume(returning: p.terminationStatus == 0)
+                } catch {
+                    cont.resume(returning: false)
+                }
+            }
         }
     }
 

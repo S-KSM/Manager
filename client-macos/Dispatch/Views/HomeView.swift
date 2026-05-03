@@ -145,7 +145,7 @@ private struct MockModeBanner: View {
                     if retrying {
                         ProgressView().controlSize(.small)
                     } else {
-                        Label("Retry connection", systemImage: "arrow.clockwise")
+                        Label(retryButtonLabel, systemImage: "play.circle.fill")
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -190,13 +190,21 @@ private struct MockModeBanner: View {
     private var subhead: String {
         switch reason {
         case .liveUnreachable:
-            return "These workstreams aren't real. Start the daemon (`launchctl kickstart -k gui/$UID/com.dispatch.daemon`) and click Retry."
+            return "These workstreams aren't real. Click Start daemon to bring it back up."
         case .envOverride:
             return "Unset DISPATCH_DAEMON in your scheme to use the live daemon."
         case .userToggled:
             return "Press ⌘⇧M or click Retry to switch back to the live daemon."
         case .forced, .liveHealthy, .unknown:
             return "These workstreams aren't real."
+        }
+    }
+
+    private var retryButtonLabel: String {
+        switch reason {
+        case .liveUnreachable: return "Start daemon"
+        case .userToggled:     return "Switch to live"
+        default:               return "Retry connection"
         }
     }
 
