@@ -230,11 +230,81 @@ private struct ConfidenceBar: View {
 
 // MARK: - Live ticker
 
+/// Live, WebSocket-driven ticker buffer.
+///
+/// On first load (or whenever the workstream set changes) it seeds itself
+/// from `getEvents(workstreamID:)` per workstream, then opens an
+/// `AsyncStream<Event>` per workstream via `streamEvents(...)` and merges
+/// new events into the buffer (newest first, capped at `bufferCap`).
+///
+/// Reconnect on transport failure is intentionally deferred to v1 — if a
+/// stream finishes the corresponding feeder task simply ends; the ticker
+/// keeps the entries it already has.
+@MainActor
+final class LiveTickerViewModel: ObservableObject {
+    @Published private(set) var entries: [LiveTickerView.TickerEntry] = []
+
+    private static let bufferCap = 50
+
+    private var feederTasks: [Task<Void, Never>] = []
+    private var titlesByID: [String: String] = [:]
+    private var seededKey: [String]? = nil
+
+    func start(client: DaemonClientProtocol, workstreams: [Workstream]) async {
+        let key = workstreams.map(\.id)
+        // Re-seed only when the set of workstream IDs actually changes.
+        if seededKey == key { return }
+        await stop()
+        seededKey = key
+        titlesByID = Dictionary(uniqueKeysWithValues: workstreams.map { ($0.id, $0.title) })
+
+        // Seed pass: one historical fetch per workstream, merged.
+        var seeded: [LiveTickerView.TickerEntry] = []
+        for ws in workstreams {
+            if let evs = try? await client.getEvents(workstreamID: ws.id) {
+                seeded.append(contentsOf: evs.map {
+                    LiveTickerView.TickerEntry(event: $0, workstreamTitle: ws.title)
+                })
+            }
+        }
+        seeded.sort { $0.event.ts > $1.event.ts }
+        entries = Array(seeded.prefix(Self.bufferCap))
+
+        // Live pass: one WS subscription per workstream.
+        feederTasks = workstreams.map { ws in
+            Task { [weak self] in
+                let stream = client.streamEvents(workstreamID: ws.id)
+                for await event in stream {
+                    if Task.isCancelled { break }
+                    await self?.merge(event: event, workstreamID: ws.id)
+                }
+                // Stream finished (transport failure or normal end). v1 reconnect.
+            }
+        }
+    }
+
+    func stop() async {
+        for task in feederTasks { task.cancel() }
+        feederTasks.removeAll()
+    }
+
+    private func merge(event: Event, workstreamID: String) {
+        // Skip duplicates by event id.
+        if entries.contains(where: { $0.event.id == event.id }) { return }
+        let title = titlesByID[workstreamID] ?? workstreamID
+        var next = entries
+        next.append(LiveTickerView.TickerEntry(event: event, workstreamTitle: title))
+        next.sort { $0.event.ts > $1.event.ts }
+        if next.count > Self.bufferCap { next = Array(next.prefix(Self.bufferCap)) }
+        entries = next
+    }
+}
+
 struct LiveTickerView: View {
     let client: DaemonClientProtocol
     let workstreams: [Workstream]
 
-    @State private var events: [TickerEntry] = []
+    @StateObject private var model = LiveTickerViewModel()
 
     private static let timeFormatter: DateFormatter = {
         let df = DateFormatter()
@@ -258,7 +328,7 @@ struct LiveTickerView: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(events) { entry in
+                    ForEach(model.entries) { entry in
                         TickerRow(entry: entry)
                     }
                 }
@@ -269,24 +339,30 @@ struct LiveTickerView: View {
         }
         .background(Color(nsColor: .underPageBackgroundColor))
         .task(id: workstreams.map(\.id)) {
-            await loadInitial()
+            // .task(id:) cancels the previous body task when the id changes,
+            // and cancels on view disappear. We chain that into the feeder
+            // tasks via `stop()` in the cancellation handler below.
+            await model.start(client: client, workstreams: workstreams)
+            // Block until cancellation so feeders stay alive while the view
+            // is on-screen for this workstream set.
+            await waitUntilCancelled()
+            await model.stop()
         }
     }
 
-    private func loadInitial() async {
-        var combined: [TickerEntry] = []
-        for ws in workstreams {
-            if let evs = try? await client.getEvents(workstreamID: ws.id) {
-                combined.append(contentsOf: evs.map {
-                    TickerEntry(event: $0, workstreamTitle: ws.title)
-                })
+    private func waitUntilCancelled() async {
+        // Sleeps in a loop; each `Task.sleep` throws when the enclosing task
+        // is cancelled, ending the loop cleanly.
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(for: .seconds(60))
+            } catch {
+                break
             }
         }
-        combined.sort { $0.event.ts > $1.event.ts }
-        events = Array(combined.prefix(60))
     }
 
-    private struct TickerEntry: Identifiable {
+    struct TickerEntry: Identifiable {
         let event: Event
         let workstreamTitle: String
         var id: String { event.id }

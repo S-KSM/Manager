@@ -164,6 +164,7 @@ private struct MessageInterventionSheet: View {
     @State private var message: String = ""
     @State private var sending = false
     @State private var errorText: String?
+    @State private var sentMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -200,10 +201,17 @@ private struct MessageInterventionSheet: View {
                     .foregroundStyle(.red)
             }
 
+            if let sentMessage {
+                Label(sentMessage, systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { onDismiss() }
                     .keyboardShortcut(.cancelAction)
+                    .disabled(sentMessage != nil)
                 Button {
                     Task { await send() }
                 } label: {
@@ -215,7 +223,9 @@ private struct MessageInterventionSheet: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
-                .disabled(sending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(sending
+                          || sentMessage != nil
+                          || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(20)
@@ -233,8 +243,10 @@ private struct MessageInterventionSheet: View {
                 rollbackToDecisionID: nil
             )
             sending = false
-            onDismiss()
+            sentMessage = (kind == .nudge) ? "Nudge queued" : "Redirect queued"
+            try? await Task.sleep(for: .milliseconds(1200))
             await onSent()
+            onDismiss()
         } catch {
             sending = false
             errorText = (error as? LocalizedError)?.errorDescription ?? "Could not send: \(error)"
@@ -255,6 +267,7 @@ private struct RollbackInterventionSheet: View {
     @State private var hint: String = ""
     @State private var sending = false
     @State private var errorText: String?
+    @State private var sentMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -316,10 +329,17 @@ private struct RollbackInterventionSheet: View {
                     .foregroundStyle(.red)
             }
 
+            if let sentMessage {
+                Label(sentMessage, systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { onDismiss() }
                     .keyboardShortcut(.cancelAction)
+                    .disabled(sentMessage != nil)
                 Button {
                     Task { await send() }
                 } label: {
@@ -331,7 +351,10 @@ private struct RollbackInterventionSheet: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
-                .disabled(sending || pickedDecisionID == nil || decisions.isEmpty)
+                .disabled(sending
+                          || sentMessage != nil
+                          || pickedDecisionID == nil
+                          || decisions.isEmpty)
             }
         }
         .padding(20)
@@ -371,8 +394,10 @@ private struct RollbackInterventionSheet: View {
                 rollbackToDecisionID: decisionID
             )
             sending = false
-            onDismiss()
+            sentMessage = "Rollback to \(decisionID) queued"
+            try? await Task.sleep(for: .milliseconds(1200))
             await onSent()
+            onDismiss()
         } catch {
             sending = false
             errorText = (error as? LocalizedError)?.errorDescription ?? "Could not send: \(error)"
@@ -389,6 +414,21 @@ private struct RollbackInterventionSheet: View {
     return InterventionPanel(
         workstream: ws,
         events: events,
+        client: MockDaemonClient(simulatedLatency: .zero),
+        onSent: {}
+    )
+    .frame(width: 520)
+}
+
+/// Preview of the toast confirmation state. Tap "Send nudge" with any
+/// non-empty body to see the green "Nudge queued" label appear before the
+/// sheet auto-dismisses ~1.2s later.
+#Preview("InterventionPanel — nudge sheet (toast)") {
+    let ws = MockData.workstreams.first(where: { $0.id == "frontend-refactor" })
+        ?? MockData.workstreams[0]
+    return InterventionPanel(
+        workstream: ws,
+        events: [],
         client: MockDaemonClient(simulatedLatency: .zero),
         onSent: {}
     )

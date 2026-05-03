@@ -45,6 +45,40 @@ xcodebuild -project Manager.xcodeproj \
            test
 ```
 
+## Live updates
+
+As of v0.5.1, both the home-view ticker and the agent-detail timeline
+subscribe to the daemon's WebSocket event stream
+(`WS /workstreams/{id}/events/stream`) in addition to their initial
+historical fetch:
+
+- `LiveTickerView` — seeds from `GET /workstreams/{id}/events` once per
+  workstream, then opens one WS subscription per workstream and merges new
+  events into a 50-entry ring buffer (newest first).
+- `AgentDetailView` — `reload()` does the historical events + memory fetch,
+  then a single WS subscription appends new events into the timeline as the
+  agent emits them. `.task(id: workstream.id)` cancels the prior stream
+  cleanly when the user navigates between workstreams.
+
+**Reconnect on transport failure is intentionally a v1 deliverable.** If
+the WS stream finishes (daemon restart, network hiccup, etc.) the
+corresponding feeder task ends and that surface stops receiving new events
+until the view is re-mounted. For v0.5.1 a Cmd-R back to Home and re-open
+of the agent is the workaround.
+
+`MockDaemonClient.streamEvents` returns a short, finite stream (~8 entries,
+400 ms apart) so previews and offline launches exercise the merge code
+without hanging.
+
+### Intervention toast (v0.5.1)
+
+`InterventionPanel`'s nudge / redirect / rollback sheets now show a small
+inline confirmation (`Nudge queued` / `Redirect queued` /
+`Rollback to <decision-id> queued`) for ~1.2 s after a successful POST
+before auto-dismissing. The Send button is disabled while the toast is
+visible to prevent double-sends. Inline error labels still appear on
+failure exactly as before.
+
 ## Mock vs. live daemon
 
 The app picks at startup:

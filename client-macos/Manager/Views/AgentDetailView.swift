@@ -45,7 +45,19 @@ struct AgentDetailView: View {
         .navigationTitle(workstream.title)
         .navigationSubtitle(workstream.id)
         .task(id: workstream.id) {
+            // Initial historical fetch (events + memory).
             await reload()
+            // Then live-subscribe to new events for this workstream until
+            // `.task(id:)` cancels us (workstream change or view disappear).
+            // Cancellation propagates into the AsyncStream, which calls
+            // its `onTermination` handler to close the underlying WS task.
+            let stream = client.streamEvents(workstreamID: workstream.id)
+            for await event in stream {
+                if Task.isCancelled { break }
+                appendLive(event: event)
+            }
+            // If we get here, the stream ended (transport failure or
+            // cancellation). Reconnect is a v1 deliverable.
         }
         .sheet(isPresented: $showInterventionPanel) {
             InterventionPanel(
@@ -112,6 +124,16 @@ struct AgentDetailView: View {
         memoryRaw = m
         loadingEvents = false
         loadingMemory = false
+    }
+
+    /// Append a live-streamed event into `events`, skipping duplicates by id
+    /// and re-sorting by ts so the timeline stays in chronological order.
+    private func appendLive(event: Event) {
+        if events.contains(where: { $0.id == event.id }) { return }
+        var next = events
+        next.append(event)
+        next.sort { $0.ts < $1.ts }
+        events = next
     }
 }
 
