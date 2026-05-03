@@ -9,6 +9,7 @@ import type {
   InterventionQueue,
 } from './intervention-queue.js';
 import type { MemoryStore } from './memory-store.js';
+import { projectFromEvents } from './projections.js';
 import type { Workstream, WorkstreamRegistry, WorkstreamWithSessions } from './workstream.js';
 
 interface BuildOptions {
@@ -60,14 +61,22 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
 
   /**
    * Wire-format Workstream as documented in docs/ARCHITECTURE.md (snake_case),
-   * including the home-view projection fields. v0 leaves the methodology-derived
-   * projections null and computes only `last_event_at` (cheaply, from mtime).
+   * including the home-view projection fields.
+   *
+   * v0.5.1 computes `current_subgoal`, `latest_confidence`, and
+   * `needs_attention` by reading the workstream's events file and folding
+   * it through `projectFromEvents`. This re-reads the JSONL on every
+   * `GET /workstreams[/:id]` request — acceptable for v0/v0.5 file sizes
+   * (single-digit MB at worst). v1 will move these projections behind a
+   * SQLite index that is updated incrementally on append.
    */
   async function serializeWorkstream(
     ws: Workstream | WorkstreamWithSessions,
   ): Promise<Record<string, unknown>> {
     const sessionIds: string[] = 'sessions' in ws ? ws.sessions.map((s) => s.sessionId) : [];
     const lastEventAt = await eventStore.lastActivityAt(ws.id);
+    const { events } = await eventStore.readEvents(ws.id);
+    const projections = projectFromEvents(events);
     return {
       workstream_id: ws.id,
       title: ws.title,
@@ -75,9 +84,9 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
       created_at: ws.createdAt,
       memory_path: memoryStore.pathFor(ws.id),
       sessions: sessionIds,
-      current_subgoal: null,
-      latest_confidence: null,
-      needs_attention: false,
+      current_subgoal: projections.current_subgoal,
+      latest_confidence: projections.latest_confidence,
+      needs_attention: projections.needs_attention,
       last_event_at: lastEventAt,
     };
   }
@@ -142,6 +151,28 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     const sinceOffset = typeof since === 'string' ? Number.parseInt(since, 10) : 0;
     const result = await eventStore.readEvents(id, Number.isFinite(sinceOffset) ? sinceOffset : 0);
     res.json(result.events);
+  });
+
+  /**
+   * Decision lookup by id. Returns the full event envelope
+   * (`ts`, `workstream_id`, `session_id`, `parent_id`, `payload`) for the
+   * `decision` event whose `id` matches. 404 for unknown workstream or
+   * unknown decision id.
+   */
+  app.get('/workstreams/:id/decisions/:decisionId', async (req: Request, res: Response) => {
+    const id = String(req.params['id']);
+    const decisionId = String(req.params['decisionId']);
+    if (!registry.get(id)) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const { events } = await eventStore.readEvents(id);
+    const match = events.find((e) => e.type === 'decision' && e.id === decisionId);
+    if (!match) {
+      res.status(404).json({ error: 'decision not found' });
+      return;
+    }
+    res.json(match);
   });
 
   // ---- Hooks ---------------------------------------------------------------

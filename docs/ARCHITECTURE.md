@@ -80,6 +80,7 @@ Localhost-only in v0/v0.5/v1; auth + remote binding land in v1.5. Default port 9
 | `GET` | `/workstreams/:id` | Workstream wire object (with `sessions[]` populated). 404 if unknown. |
 | `GET` | `/workstreams/:id/memory` | Raw Markdown body (`text/markdown`). |
 | `GET` | `/workstreams/:id/events` | Array of Event JSON objects. Optional `?since=<byteOffset>`. |
+| `GET` | `/workstreams/:id/decisions/:decisionId` | Full event envelope of the named `decision` event (`ts`, `workstream_id`, `session_id`, `parent_id`, `payload`). 404 if workstream or decision unknown. |
 | `WS`  | `/workstreams/:id/events/stream` | Live event stream. Optional `?since=<byteOffset>` to resume. |
 | `POST` | `/hooks/<event>` | Hook intake; `<event>` ∈ {session-start, stop, pre-tool-use, post-tool-use, user-prompt-submit}. |
 | `POST` | `/interventions` | Body `{workstream_id, kind, payload}`. Persists into the per-workstream queue. Returns 201 with the persisted Intervention. (Accepts legacy `workstreamId` for one release.) |
@@ -137,7 +138,14 @@ needs_attention    : boolean             # true after a flag_blocked event until
 last_event_at      : ISO 8601 timestamp | null   # most recent activity (cheap mtime approximation in v0)
 ```
 
-A workstream is the persistent identity. Sessions come and go. The four projection fields (`current_subgoal`, `latest_confidence`, `needs_attention`, `last_event_at`) drive the home-view cards. v0 returns null/false for the methodology-derived projections and computes `last_event_at` from the JSONL file mtime; v1 wires real projections from the event log.
+A workstream is the persistent identity. Sessions come and go. The four projection fields drive the home-view cards and are computed as follows:
+
+- `current_subgoal`: head of the goal stack obtained by walking `subgoal_push` / `subgoal_pop` events in chronological order.
+- `latest_confidence`: the most recent (by `ts`) numeric confidence from either a `confidence` event (`payload.value`) or a `decision` event (`payload.confidence`).
+- `needs_attention`: `true` iff there is a `blocked` event with no later `session_end` for the same `session_id` (a `blocked` event without a `session_id` is resolved by any later `session_end`).
+- `last_event_at`: cheap approximation from the JSONL file mtime.
+
+In v0.5.1 these are recomputed by re-reading the per-workstream events file on each `GET /workstreams[/:id]` request — fine for current file sizes; v1 will index them in SQLite and update incrementally on append.
 
 ### Event (JSONL line in events store)
 

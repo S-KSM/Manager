@@ -13,13 +13,14 @@ describe('HTTP server', () => {
   let dir: string;
   let registry: WorkstreamRegistry;
   let interventionQueue: InterventionQueue;
+  let eventStore: EventStore;
   let handle: HttpServerHandle;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'manager-http-'));
     registry = new WorkstreamRegistry(join(dir, 'db.sqlite'));
     interventionQueue = new InterventionQueue(join(dir, 'db.sqlite'));
-    const eventStore = new EventStore(join(dir, 'events'));
+    eventStore = new EventStore(join(dir, 'events'));
     const memoryStore = new MemoryStore(join(dir, 'memory'));
     handle = buildHttpServer({ eventStore, memoryStore, registry, interventionQueue });
   });
@@ -229,5 +230,94 @@ describe('HTTP server', () => {
   it('rejects malformed workstream creates', async () => {
     const r = await request(handle.app).post('/workstreams').send({ id: 'x' });
     expect(r.status).toBe(400);
+  });
+
+  it('GET /workstreams/:id returns real projections from the event log', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'p1', title: 'P1' });
+    // Seed a curated event sequence directly via the event store.
+    await eventStore.appendEvent('p1', {
+      ts: '2026-05-02T10:00:00Z',
+      workstream_id: 'p1',
+      session_id: 's1',
+      type: 'subgoal_push',
+      id: 'sg_1',
+      payload: { goal: 'migrate auth queries' },
+    });
+    await eventStore.appendEvent('p1', {
+      ts: '2026-05-02T10:01:00Z',
+      workstream_id: 'p1',
+      session_id: 's1',
+      type: 'decision',
+      id: 'dec_07',
+      payload: {
+        considered: ['A', 'B', 'C'],
+        choice: 'B',
+        rationale: 'because Y',
+        confidence: 0.72,
+      },
+    });
+
+    const detail = await request(handle.app).get('/workstreams/p1');
+    expect(detail.status).toBe(200);
+    expect(detail.body.current_subgoal).toBe('migrate auth queries');
+    expect(detail.body.latest_confidence).toBe(0.72);
+    expect(detail.body.needs_attention).toBe(false);
+  });
+
+  it('GET /workstreams reflects needs_attention=true after a blocked event', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'p2', title: 'P2' });
+    await eventStore.appendEvent('p2', {
+      ts: '2026-05-02T10:00:00Z',
+      workstream_id: 'p2',
+      session_id: 's1',
+      type: 'blocked',
+      id: 'blk_1',
+      payload: { reason: 'need creds' },
+    });
+    const list = await request(handle.app).get('/workstreams');
+    expect(list.status).toBe(200);
+    const p2 = (list.body as Array<{ workstream_id: string; needs_attention: boolean }>).find(
+      (w) => w.workstream_id === 'p2',
+    );
+    expect(p2?.needs_attention).toBe(true);
+  });
+
+  it('GET /workstreams/:id/decisions/:decisionId returns the full event envelope', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'd1', title: 'D1' });
+    await eventStore.appendEvent('d1', {
+      ts: '2026-05-02T10:00:00Z',
+      workstream_id: 'd1',
+      session_id: 's1',
+      type: 'decision',
+      id: 'dec_07',
+      parent_id: 'dec_05',
+      payload: {
+        considered: ['A', 'B'],
+        choice: 'B',
+        rationale: 'because Y',
+        confidence: 0.72,
+      },
+    });
+    const r = await request(handle.app).get('/workstreams/d1/decisions/dec_07');
+    expect(r.status).toBe(200);
+    expect(r.body.id).toBe('dec_07');
+    expect(r.body.type).toBe('decision');
+    expect(r.body.workstream_id).toBe('d1');
+    expect(r.body.session_id).toBe('s1');
+    expect(r.body.parent_id).toBe('dec_05');
+    expect(r.body.ts).toBe('2026-05-02T10:00:00Z');
+    expect(r.body.payload.choice).toBe('B');
+    expect(r.body.payload.confidence).toBe(0.72);
+  });
+
+  it('GET /workstreams/:id/decisions/:decisionId → 404 for unknown decision', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'd2', title: 'D2' });
+    const r = await request(handle.app).get('/workstreams/d2/decisions/nope');
+    expect(r.status).toBe(404);
+  });
+
+  it('GET /workstreams/:id/decisions/:decisionId → 404 for unknown workstream', async () => {
+    const r = await request(handle.app).get('/workstreams/missing/decisions/dec_01');
+    expect(r.status).toBe(404);
   });
 });
