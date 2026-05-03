@@ -68,6 +68,135 @@ final class MockDaemonClientTests: XCTestCase {
         XCTAssertTrue(headings.contains("Key decisions"))
     }
 
+    func testCreateWorkstreamRoundTripsIntoList() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let before = try await client.listWorkstreams()
+        XCTAssertFalse(before.contains { $0.id == "billing-migration" })
+
+        let created = try await client.createWorkstream(
+            id: "billing-migration",
+            title: "Billing migration to Stripe"
+        )
+        XCTAssertEqual(created.id, "billing-migration")
+        XCTAssertEqual(created.title, "Billing migration to Stripe")
+        XCTAssertEqual(created.status, .active)
+
+        let after = try await client.listWorkstreams()
+        XCTAssertEqual(after.count, before.count + 1)
+        XCTAssertTrue(after.contains { $0.id == "billing-migration" })
+    }
+
+    func testUpdateWorkstreamMutatesStatusAndTitle() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+
+        let paused = try await client.updateWorkstream(
+            id: "frontend-refactor",
+            status: .paused,
+            title: nil
+        )
+        XCTAssertEqual(paused.status, .paused)
+        XCTAssertEqual(paused.title, "Frontend refactor: Redux → react-query")
+
+        // Verify the change is observable through listWorkstreams.
+        let list = try await client.listWorkstreams()
+        let observed = try XCTUnwrap(list.first { $0.id == "frontend-refactor" })
+        XCTAssertEqual(observed.status, .paused)
+
+        let renamed = try await client.updateWorkstream(
+            id: "frontend-refactor",
+            status: nil,
+            title: "Frontend refactor (in progress)"
+        )
+        XCTAssertEqual(renamed.title, "Frontend refactor (in progress)")
+        // Status preserved when not specified.
+        XCTAssertEqual(renamed.status, .paused)
+    }
+
+    func testUpdateUnknownWorkstreamThrows() async {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        do {
+            _ = try await client.updateWorkstream(
+                id: "no-such-thing",
+                status: .paused,
+                title: nil
+            )
+            XCTFail("expected throw")
+        } catch {
+            // ok
+        }
+    }
+
+    func testGetDigestSynthesisesFromMockState() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let digest = try await client.getDigest(since: nil)
+        // auth-hardening has needsAttention = true in MockData.
+        XCTAssertGreaterThanOrEqual(digest.totals.blocked, 1)
+        XCTAssertEqual(digest.totals.needsAttention, digest.totals.blocked)
+        XCTAssertGreaterThanOrEqual(digest.totals.active, 1)
+        // The first highlight should be the attention-needing one.
+        XCTAssertEqual(digest.highlights.first?.workstreamID, "auth-hardening")
+        XCTAssertLessThanOrEqual(digest.highlights.count, 5)
+    }
+
+    func testAppendHandbookSkillUpdatesHandbookString() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let before = try await client.getHandbook()
+        XCTAssertFalse(before.contains("## Test handbook entry"))
+
+        try await client.appendHandbookSkill(
+            title: "Test handbook entry",
+            body: "A handy reusable pattern.",
+            sourceWorkstreamID: "frontend-refactor",
+            sourceDecisionID: "dec_07"
+        )
+
+        let after = try await client.getHandbook()
+        XCTAssertTrue(after.contains("## Test handbook entry"))
+        XCTAssertTrue(after.contains("A handy reusable pattern."))
+        XCTAssertTrue(after.contains("frontend-refactor"),
+                      "footer should mention the source workstream")
+    }
+
+    func testListProposedSkillsReturnsFixture() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let proposals = try await client.listProposedSkills()
+        XCTAssertGreaterThanOrEqual(proposals.count, 1)
+        XCTAssertTrue(proposals.allSatisfy { $0.status == .proposed })
+    }
+
+    func testPromoteSkillFlipsStatusAndAppendsHandbook() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let initial = try await client.listProposedSkills()
+        let target = try XCTUnwrap(initial.first)
+
+        let handbookBefore = try await client.getHandbook()
+        XCTAssertFalse(handbookBefore.contains("## \(target.title)"))
+
+        let promoted = try await client.promoteSkill(id: target.id)
+        XCTAssertEqual(promoted.status, .promoted)
+        XCTAssertEqual(promoted.id, target.id)
+
+        // The promoted proposal no longer appears in the proposed-only list.
+        let after = try await client.listProposedSkills()
+        XCTAssertFalse(after.contains { $0.id == target.id })
+
+        // Handbook now contains the promoted skill.
+        let handbookAfter = try await client.getHandbook()
+        XCTAssertTrue(handbookAfter.contains("## \(target.title)"))
+    }
+
+    func testDismissSkillFlipsStatus() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let initial = try await client.listProposedSkills()
+        let target = try XCTUnwrap(initial.first)
+
+        let dismissed = try await client.dismissSkill(id: target.id)
+        XCTAssertEqual(dismissed.status, .dismissed)
+
+        let after = try await client.listProposedSkills()
+        XCTAssertFalse(after.contains { $0.id == target.id })
+    }
+
     func testPostInterventionStoresAndReturnsRecord() async throws {
         let client = MockDaemonClient(simulatedLatency: .zero)
 

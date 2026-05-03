@@ -25,6 +25,12 @@
 		A100000000000000000001A1 /* Intervention.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000001B1 /* Intervention.swift */; };
 		A100000000000000000001A2 /* InterventionPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000001B2 /* InterventionPanel.swift */; };
 		A100000000000000000001A3 /* InterventionCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000001B3 /* InterventionCodableTests.swift */; };
+		A100000000000000000002A1 /* Skill.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000002B1 /* Skill.swift */; };
+		A100000000000000000002A2 /* Digest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000002B2 /* Digest.swift */; };
+		A100000000000000000002A3 /* NewWorkstreamSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000002B3 /* NewWorkstreamSheet.swift */; };
+		A100000000000000000002A4 /* HandbookView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000002B4 /* HandbookView.swift */; };
+		A100000000000000000002A5 /* SkillCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000002B5 /* SkillCodableTests.swift */; };
+		A100000000000000000002A6 /* DigestCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000002B6 /* DigestCodableTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -56,6 +62,12 @@
 		A100000000000000000001B1 /* Intervention.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Intervention.swift; sourceTree = "<group>"; };
 		A100000000000000000001B2 /* InterventionPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterventionPanel.swift; sourceTree = "<group>"; };
 		A100000000000000000001B3 /* InterventionCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterventionCodableTests.swift; sourceTree = "<group>"; };
+		A100000000000000000002B1 /* Skill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Skill.swift; sourceTree = "<group>"; };
+		A100000000000000000002B2 /* Digest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Digest.swift; sourceTree = "<group>"; };
+		A100000000000000000002B3 /* NewWorkstreamSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewWorkstreamSheet.swift; sourceTree = "<group>"; };
+		A100000000000000000002B4 /* HandbookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandbookView.swift; sourceTree = "<group>"; };
+		A100000000000000000002B5 /* SkillCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillCodableTests.swift; sourceTree = "<group>"; };
+		A100000000000000000002B6 /* DigestCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DigestCodableTests.swift; sourceTree = "<group>"; };
 		A100000000000000000000C0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A100000000000000000000C1 /* Manager.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Manager.entitlements; sourceTree = "<group>"; };
 		A100000000000000000000C2 /* Manager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Manager.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -110,6 +122,8 @@
 				A100000000000000000000BE /* EventCodableTests.swift */,
 				A100000000000000000000BF /* MockDaemonClientTests.swift */,
 				A100000000000000000001B3 /* InterventionCodableTests.swift */,
+				A100000000000000000002B5 /* SkillCodableTests.swift */,
+				A100000000000000000002B6 /* DigestCodableTests.swift */,
 			);
 			path = ManagerTests;
 			sourceTree = "<group>";
@@ -130,6 +144,8 @@
 				A100000000000000000000B4 /* Event.swift */,
 				A100000000000000000000B5 /* Memory.swift */,
 				A100000000000000000001B1 /* Intervention.swift */,
+				A100000000000000000002B1 /* Skill.swift */,
+				A100000000000000000002B2 /* Digest.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -150,6 +166,8 @@
 				A100000000000000000000B9 /* HomeView.swift */,
 				A100000000000000000000BA /* AgentDetailView.swift */,
 				A100000000000000000001B2 /* InterventionPanel.swift */,
+				A100000000000000000002B3 /* NewWorkstreamSheet.swift */,
+				A100000000000000000002B4 /* HandbookView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -278,12 +296,16 @@
 				A100000000000000000000A4 /* Event.swift in Sources */,
 				A100000000000000000000A5 /* Memory.swift in Sources */,
 				A100000000000000000001A1 /* Intervention.swift in Sources */,
+				A100000000000000000002A1 /* Skill.swift in Sources */,
+				A100000000000000000002A2 /* Digest.swift in Sources */,
 				A100000000000000000000A6 /* DaemonClient.swift in Sources */,
 				A100000000000000000000A7 /* MockDaemonClient.swift in Sources */,
 				A100000000000000000000A8 /* DaemonResolver.swift in Sources */,
 				A100000000000000000000A9 /* HomeView.swift in Sources */,
 				A100000000000000000000AA /* AgentDetailView.swift in Sources */,
 				A100000000000000000001A2 /* InterventionPanel.swift in Sources */,
+				A100000000000000000002A3 /* NewWorkstreamSheet.swift in Sources */,
+				A100000000000000000002A4 /* HandbookView.swift in Sources */,
 				A100000000000000000000AB /* MockData.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -295,6 +317,8 @@
 				A100000000000000000000AE /* EventCodableTests.swift in Sources */,
 				A100000000000000000000AF /* MockDaemonClientTests.swift in Sources */,
 				A100000000000000000001A3 /* InterventionCodableTests.swift in Sources */,
+				A100000000000000000002A5 /* SkillCodableTests.swift in Sources */,
+				A100000000000000000002A6 /* DigestCodableTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

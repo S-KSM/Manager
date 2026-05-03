@@ -87,6 +87,54 @@ enum MockData {
         "search-rerank":      searchRerankEvents
     ]
 
+    // MARK: - Handbook + skill proposals (v1)
+
+    /// Seeded team handbook contents (the read-only surface in HandbookView).
+    static let handbook: String = """
+# Team handbook
+
+A living collection of patterns and skills the team has learned. New skills are
+proposed by agents and promoted by the manager.
+
+## Co-locate query keys with their components
+
+Don't centralise query keys in a `keys.ts` registry. Co-locating them with the
+component that owns the query keeps refactors local and makes the dependency
+graph obvious in code review.
+
+_from frontend-refactor / dec_12_
+
+"""
+
+    /// Pending skill proposals (agents proposed, manager hasn't acted on them).
+    static let proposedSkills: [SkillProposal] = [
+        SkillProposal(
+            id: "skill_001",
+            workstreamID: "auth-hardening",
+            title: "Reuse-window detection for refresh tokens",
+            body: """
+Refresh-token rotation can have a small reuse window where the old token is
+still accepted. Test for it explicitly with a concurrent refresh: hit the
+endpoint twice in quick succession and assert the second one is rejected.
+""",
+            sourceDecisionID: "dec_03",
+            proposedAt: minutesAgo(10),
+            status: .proposed
+        ),
+        SkillProposal(
+            id: "skill_002",
+            workstreamID: "search-rerank",
+            title: "Cap rerank windows at top-50",
+            body: """
+For cross-encoder rerankers on top of BM25, returns diminish past a top-50
+window. Going to top-100 doubles the latency for sub-1% MRR gain in our eval.
+""",
+            sourceDecisionID: "dec_06",
+            proposedAt: hoursAgo(20),
+            status: .proposed
+        )
+    ]
+
     // MARK: - Memory
 
     static let memoryByWorkstream: [String: String] = [

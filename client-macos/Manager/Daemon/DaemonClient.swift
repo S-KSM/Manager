@@ -21,6 +21,45 @@ protocol DaemonClientProtocol: Sendable {
                           kind: InterventionKind,
                           message: String,
                           rollbackToDecisionID: String?) async throws -> Intervention
+
+    // MARK: - v1: workstream lifecycle
+
+    /// `POST /workstreams` — creates a new workstream from an id slug + title.
+    /// Returns the persisted `Workstream` record.
+    func createWorkstream(id: String, title: String) async throws -> Workstream
+    /// `PATCH /workstreams/:id` — partial update. Pass `nil` for fields you
+    /// don't want to change. The daemon appends a `workstream_status_changed`
+    /// event to the JSONL log when status changes.
+    func updateWorkstream(id: String,
+                          status: Workstream.Status?,
+                          title: String?) async throws -> Workstream
+
+    // MARK: - v1: digest
+
+    /// `GET /digest?since=<iso8601>` — aggregate summary across all
+    /// workstreams since the timestamp. Default `since` (when nil) = 24h ago.
+    func getDigest(since: Date?) async throws -> Digest
+
+    // MARK: - v1: handbook + skills
+
+    /// `GET /handbook` — returns the team handbook as raw Markdown.
+    func getHandbook() async throws -> String
+    /// `POST /handbook/skills` — append a new skill section to the handbook.
+    /// `sourceWorkstreamID` and `sourceDecisionID` annotate where the skill
+    /// came from; both are optional.
+    func appendHandbookSkill(title: String,
+                             body: String,
+                             sourceWorkstreamID: String?,
+                             sourceDecisionID: String?) async throws
+    /// `GET /skills/proposed` — pending skill proposals from agents.
+    func listProposedSkills() async throws -> [SkillProposal]
+    /// `POST /skills/proposed/:id/promote` — moves a proposal into the
+    /// handbook and flips its status to `promoted`.
+    func promoteSkill(id: String) async throws -> SkillProposal
+    /// `POST /skills/proposed/:id/dismiss` — drops a proposal without
+    /// promoting; flips its status to `dismissed`.
+    func dismissSkill(id: String) async throws -> SkillProposal
+
     /// Returns `false` on connection error; never throws. Used by
     /// `DaemonResolver` to choose live vs mock at startup.
     func health() async -> Bool
@@ -45,13 +84,21 @@ enum DaemonError: Error, LocalizedError {
 /// HTTP + WebSocket client for the local daemon.
 ///
 /// API contract (docs/ARCHITECTURE.md):
-///   GET  /workstreams
-///   GET  /workstreams/{id}
-///   GET  /workstreams/{id}/memory   (raw Markdown body)
-///   GET  /workstreams/{id}/events   (JSON array of envelope events)
-///   POST /interventions             (queue a nudge/redirect/rollback)
-///   GET  /health                    (200 OK)
-///   WS   /workstreams/{id}/events/stream
+///   GET    /workstreams
+///   POST   /workstreams                     (create — v1)
+///   GET    /workstreams/{id}
+///   PATCH  /workstreams/{id}                (status / title — v1)
+///   GET    /workstreams/{id}/memory         (raw Markdown body)
+///   GET    /workstreams/{id}/events         (JSON array of envelope events)
+///   POST   /interventions                   (queue a nudge/redirect/rollback)
+///   GET    /digest?since=<iso8601>          (v1 — aggregate)
+///   GET    /handbook                        (v1 — raw Markdown body)
+///   POST   /handbook/skills                 (v1 — append skill)
+///   GET    /skills/proposed                 (v1 — pending proposals)
+///   POST   /skills/proposed/{id}/promote    (v1)
+///   POST   /skills/proposed/{id}/dismiss    (v1)
+///   GET    /health                          (200 OK)
+///   WS     /workstreams/{id}/events/stream
 final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
     static let defaultBaseURL = URL(string: "http://localhost:9876")!
 
@@ -145,6 +192,106 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         }
     }
 
+    // MARK: - v1: lifecycle
+
+    func createWorkstream(id: String, title: String) async throws -> Workstream {
+        let body = CreateWorkstreamBody(workstreamID: id, title: title)
+        return try await sendJSON(method: "POST", path: "workstreams", body: body)
+    }
+
+    func updateWorkstream(id: String,
+                          status: Workstream.Status?,
+                          title: String?) async throws -> Workstream {
+        let body = UpdateWorkstreamBody(status: status, title: title)
+        return try await sendJSON(method: "PATCH", path: "workstreams/\(id)", body: body)
+    }
+
+    // MARK: - v1: digest
+
+    func getDigest(since: Date?) async throws -> Digest {
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("digest"),
+            resolvingAgainstBaseURL: false
+        ) ?? URLComponents()
+        if let since {
+            // ISO-8601 with fractional seconds, matching the daemon's wire
+            // format for inbound query strings.
+            let fmt = ISO8601DateFormatter()
+            fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            components.queryItems = [URLQueryItem(name: "since", value: fmt.string(from: since))]
+        }
+        guard let url = components.url else { throw DaemonError.badURL }
+        do {
+            let (data, response) = try await session.data(from: url)
+            try Self.assertOK(response)
+            do {
+                return try decoder.decode(Digest.self, from: data)
+            } catch {
+                throw DaemonError.decoding(error)
+            }
+        } catch let e as DaemonError {
+            throw e
+        } catch {
+            throw DaemonError.transport(error)
+        }
+    }
+
+    // MARK: - v1: handbook + skills
+
+    func getHandbook() async throws -> String {
+        let url = baseURL.appendingPathComponent("handbook")
+        do {
+            let (data, response) = try await session.data(from: url)
+            try Self.assertOK(response)
+            return String(data: data, encoding: .utf8) ?? ""
+        } catch let e as DaemonError {
+            throw e
+        } catch {
+            throw DaemonError.transport(error)
+        }
+    }
+
+    func appendHandbookSkill(title: String,
+                             body: String,
+                             sourceWorkstreamID: String?,
+                             sourceDecisionID: String?) async throws {
+        let request = AppendSkillBody(
+            title: title,
+            body: body,
+            source: (sourceWorkstreamID == nil && sourceDecisionID == nil)
+                ? nil
+                : AppendSkillBody.Source(
+                    workstreamID: sourceWorkstreamID,
+                    decisionID: sourceDecisionID
+                )
+        )
+        let _: AppendSkillResponse = try await sendJSON(
+            method: "POST",
+            path: "handbook/skills",
+            body: request
+        )
+    }
+
+    func listProposedSkills() async throws -> [SkillProposal] {
+        try await getJSON(path: "skills/proposed")
+    }
+
+    func promoteSkill(id: String) async throws -> SkillProposal {
+        try await sendJSON(
+            method: "POST",
+            path: "skills/proposed/\(id)/promote",
+            body: EmptyBody()
+        )
+    }
+
+    func dismissSkill(id: String) async throws -> SkillProposal {
+        try await sendJSON(
+            method: "POST",
+            path: "skills/proposed/\(id)/dismiss",
+            body: EmptyBody()
+        )
+    }
+
     func streamEvents(workstreamID: String) -> AsyncStream<Event> {
         // Build a ws:// URL alongside the http base.
         var components = URLComponents(url: baseURL,
@@ -209,6 +356,38 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         }
     }
 
+    /// JSON-in / JSON-out helper. Encodes `body` as the request body and
+    /// decodes the response as `T`. Used by POST/PATCH endpoints.
+    private func sendJSON<Body: Encodable, T: Decodable>(
+        method: String,
+        path: String,
+        body: Body
+    ) async throws -> T {
+        let url = baseURL.appendingPathComponent(path)
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        do {
+            req.httpBody = try encoder.encode(body)
+        } catch {
+            throw DaemonError.decoding(error)
+        }
+        do {
+            let (data, response) = try await session.data(for: req)
+            try Self.assertOK(response)
+            do {
+                return try decoder.decode(T.self, from: data)
+            } catch {
+                throw DaemonError.decoding(error)
+            }
+        } catch let e as DaemonError {
+            throw e
+        } catch {
+            throw DaemonError.transport(error)
+        }
+    }
+
     private static func assertOK(_ response: URLResponse) throws {
         guard let http = response as? HTTPURLResponse else {
             throw DaemonError.badResponse(-1)
@@ -233,6 +412,49 @@ private struct InterventionRequestBody: Encodable {
         case payload
     }
 }
+
+/// Wire shape for `POST /workstreams`.
+private struct CreateWorkstreamBody: Encodable {
+    let workstreamID: String
+    let title: String
+
+    enum CodingKeys: String, CodingKey {
+        case workstreamID = "workstream_id"
+        case title
+    }
+}
+
+/// Wire shape for `PATCH /workstreams/:id`. Both fields optional — only the
+/// keys present in the encoded JSON will be applied by the daemon.
+private struct UpdateWorkstreamBody: Encodable {
+    let status: Workstream.Status?
+    let title: String?
+}
+
+/// Wire shape for `POST /handbook/skills`.
+private struct AppendSkillBody: Encodable {
+    let title: String
+    let body: String
+    let source: Source?
+
+    struct Source: Encodable {
+        let workstreamID: String?
+        let decisionID: String?
+
+        enum CodingKeys: String, CodingKey {
+            case workstreamID = "workstream_id"
+            case decisionID = "decision_id"
+        }
+    }
+}
+
+/// Wire shape for the `POST /handbook/skills` 201 response.
+private struct AppendSkillResponse: Decodable {
+    let title: String
+}
+
+/// Empty JSON body (`{}`) used for promote/dismiss POSTs that take no params.
+private struct EmptyBody: Encodable {}
 
 extension JSONDecoder.DateDecodingStrategy {
     /// ISO-8601 with optional fractional seconds, matching the daemon's

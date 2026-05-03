@@ -19,13 +19,33 @@ struct AgentDetailView: View {
     @State private var loadingEvents = true
     @State private var loadingMemory = true
     @State private var showInterventionPanel = false
+    @State private var promoteTarget: PromoteTarget?
+
+    /// Source decision being promoted into a handbook skill. Drives the
+    /// `PromoteSkillSheet` modal.
+    struct PromoteTarget: Identifiable, Hashable {
+        let decisionID: String
+        let title: String
+        let body: String
+        var id: String { decisionID }
+    }
 
     var body: some View {
         HSplitView {
             VStack(alignment: .leading, spacing: 0) {
                 header
                 Divider()
-                MethodologyTimelineView(events: events, isLoading: loadingEvents)
+                MethodologyTimelineView(
+                    events: events,
+                    isLoading: loadingEvents,
+                    onPromoteDecision: { decision, eventID in
+                        promoteTarget = PromoteTarget(
+                            decisionID: eventID,
+                            title: decision.choice,
+                            body: decision.rationale
+                        )
+                    }
+                )
             }
             .frame(minWidth: 460)
 
@@ -65,6 +85,17 @@ struct AgentDetailView: View {
                 events: events,
                 client: client,
                 onSent: { await reload() }
+            )
+        }
+        .sheet(item: $promoteTarget) { target in
+            PromoteSkillSheet(
+                workstream: workstream,
+                sourceDecisionID: target.decisionID,
+                initialTitle: target.title,
+                initialBody: target.body,
+                client: client,
+                onSaved: {},
+                onDismiss: { promoteTarget = nil }
             )
         }
     }
@@ -142,6 +173,10 @@ struct AgentDetailView: View {
 struct MethodologyTimelineView: View {
     let events: [Event]
     let isLoading: Bool
+    /// Called when the user clicks "Promote…" on a decision row. The first
+    /// argument is the decision payload and the second is the originating
+    /// event id (used as `source_decision_id` when posting to the handbook).
+    var onPromoteDecision: ((EventPayload.Decision, String) -> Void)? = nil
 
     @State private var expandedIDs: Set<String> = []
 
@@ -165,7 +200,14 @@ struct MethodologyTimelineView: View {
                                 event: event,
                                 indent: indent(for: event),
                                 isExpanded: expandedIDs.contains(event.id),
-                                onToggle: { toggle(event.id) }
+                                onToggle: { toggle(event.id) },
+                                onPromote: onPromoteDecision.map { handler in
+                                    {
+                                        if case .decision(let d) = event.payload {
+                                            handler(d, event.id)
+                                        }
+                                    }
+                                }
                             )
                         }
                     }
@@ -202,6 +244,10 @@ private struct TimelineRow: View {
     let indent: Int
     let isExpanded: Bool
     let onToggle: () -> Void
+    /// Tapped via the row's "Promote…" affordance (only present on decision
+    /// rows). Nil for non-decision events or when the parent view does not
+    /// supply a handler.
+    let onPromote: (() -> Void)?
 
     private static let timeFormatter: DateFormatter = {
         let df = DateFormatter()
@@ -224,6 +270,17 @@ private struct TimelineRow: View {
                     Text(headline)
                         .font(.callout.weight(.medium))
                     Spacer(minLength: 8)
+                    if case .decision = event.payload, let onPromote {
+                        Button {
+                            onPromote()
+                        } label: {
+                            Label("Promote…", systemImage: "books.vertical")
+                                .labelStyle(.titleAndIcon)
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .help("Promote this decision into a team handbook skill.")
+                    }
                     Text(Self.timeFormatter.string(from: event.ts))
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.tertiary)
@@ -244,6 +301,15 @@ private struct TimelineRow: View {
         .onTapGesture {
             if case .decision = event.payload {
                 onToggle()
+            }
+        }
+        .contextMenu {
+            if case .decision = event.payload, let onPromote {
+                Button {
+                    onPromote()
+                } label: {
+                    Label("Promote to handbook…", systemImage: "books.vertical")
+                }
             }
         }
     }
