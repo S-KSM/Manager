@@ -4,7 +4,7 @@ import express, { type Express, type Request, type Response } from 'express';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { EventStore, ManagerEvent, ManagerEventType } from './event-store.js';
 import type { MemoryStore } from './memory-store.js';
-import type { WorkstreamRegistry } from './workstream.js';
+import type { Workstream, WorkstreamRegistry, WorkstreamWithSessions } from './workstream.js';
 
 interface BuildOptions {
   eventStore: EventStore;
@@ -46,13 +46,44 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
-  // ---- Workstreams ---------------------------------------------------------
+  /**
+   * Wire-format Workstream as documented in docs/ARCHITECTURE.md (snake_case),
+   * including the home-view projection fields. v0 leaves the methodology-derived
+   * projections null and computes only `last_event_at` (cheaply, from mtime).
+   */
+  async function serializeWorkstream(
+    ws: Workstream | WorkstreamWithSessions,
+  ): Promise<Record<string, unknown>> {
+    const sessionIds: string[] = 'sessions' in ws ? ws.sessions.map((s) => s.sessionId) : [];
+    const lastEventAt = await eventStore.lastActivityAt(ws.id);
+    return {
+      workstream_id: ws.id,
+      title: ws.title,
+      status: ws.status,
+      created_at: ws.createdAt,
+      memory_path: memoryStore.pathFor(ws.id),
+      sessions: sessionIds,
+      current_subgoal: null,
+      latest_confidence: null,
+      needs_attention: false,
+      last_event_at: lastEventAt,
+    };
+  }
 
-  app.get('/workstreams', (_req: Request, res: Response) => {
-    res.json({ workstreams: registry.list() });
+  // ---- Health --------------------------------------------------------------
+
+  app.get('/health', (_req: Request, res: Response) => {
+    res.json({ ok: true });
   });
 
-  app.post('/workstreams', (req: Request, res: Response) => {
+  // ---- Workstreams ---------------------------------------------------------
+
+  app.get('/workstreams', async (_req: Request, res: Response) => {
+    const workstreams = await Promise.all(registry.list().map(serializeWorkstream));
+    res.json(workstreams);
+  });
+
+  app.post('/workstreams', async (req: Request, res: Response) => {
     const body = req.body as { id?: string; title?: string };
     if (!body?.id || !body?.title) {
       res.status(400).json({ error: 'id and title required' });
@@ -60,21 +91,23 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     }
     const existing = registry.get(body.id);
     if (existing) {
-      res.status(409).json({ error: 'workstream exists', workstream: existing });
+      res
+        .status(409)
+        .json({ error: 'workstream exists', workstream: await serializeWorkstream(existing) });
       return;
     }
     const ws = registry.create(body.id, body.title);
-    res.status(201).json({ workstream: ws });
+    res.status(201).json(await serializeWorkstream(ws));
   });
 
-  app.get('/workstreams/:id', (req: Request, res: Response) => {
+  app.get('/workstreams/:id', async (req: Request, res: Response) => {
     const id = String(req.params['id']);
     const detail = registry.detail(id);
     if (!detail) {
       res.status(404).json({ error: 'not found' });
       return;
     }
-    res.json({ workstream: detail });
+    res.json(await serializeWorkstream(detail));
   });
 
   app.get('/workstreams/:id/memory', async (req: Request, res: Response) => {
@@ -96,7 +129,7 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     const since = req.query['since'];
     const sinceOffset = typeof since === 'string' ? Number.parseInt(since, 10) : 0;
     const result = await eventStore.readEvents(id, Number.isFinite(sinceOffset) ? sinceOffset : 0);
-    res.json({ events: result.events, nextOffset: result.nextOffset });
+    res.json(result.events);
   });
 
   // ---- Hooks ---------------------------------------------------------------
@@ -152,7 +185,7 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
 
   httpServer.on('upgrade', (req: IncomingMessage, socket, head) => {
     const url = req.url ?? '';
-    const m = /^\/workstreams\/([^/]+)\/stream(?:\?(.*))?$/.exec(url);
+    const m = /^\/workstreams\/([^/]+)\/events\/stream(?:\?(.*))?$/.exec(url);
     if (!m) {
       socket.destroy();
       return;

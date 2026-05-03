@@ -32,6 +32,7 @@ describe('HTTP server', () => {
       .post('/workstreams')
       .send({ id: 'demo', title: 'Demo workstream' });
     expect(create.status).toBe(201);
+    expect(create.body.workstream_id).toBe('demo');
 
     const hook = await request(handle.app)
       .post('/hooks/session-start')
@@ -40,12 +41,12 @@ describe('HTTP server', () => {
 
     const events = await request(handle.app).get('/workstreams/demo/events');
     expect(events.status).toBe(200);
-    expect(events.body.events).toHaveLength(1);
-    expect(events.body.events[0].type).toBe('session_start');
-    expect(events.body.events[0].workstream_id).toBe('demo');
-    expect(events.body.events[0].session_id).toBe('sess-abc');
-    expect(events.body.events[0].payload.hook).toBe('session-start');
-    expect(events.body.events[0].payload.cwd).toBe('/tmp');
+    expect(events.body).toHaveLength(1);
+    expect(events.body[0].type).toBe('session_start');
+    expect(events.body[0].workstream_id).toBe('demo');
+    expect(events.body[0].session_id).toBe('sess-abc');
+    expect(events.body[0].payload.hook).toBe('session-start');
+    expect(events.body[0].payload.cwd).toBe('/tmp');
   });
 
   it('returns 404 for unknown workstream', async () => {
@@ -55,19 +56,33 @@ describe('HTTP server', () => {
     expect(e.status).toBe(404);
   });
 
-  it('lists workstreams and exposes detail with sessions', async () => {
+  it('lists workstreams and exposes detail with sessions (snake_case wire format)', async () => {
     await request(handle.app).post('/workstreams').send({ id: 'a', title: 'A' });
     await request(handle.app).post('/hooks/session-start').send({ workstream: 'a', session: 's1' });
 
     const list = await request(handle.app).get('/workstreams');
     expect(list.status).toBe(200);
-    expect(list.body.workstreams).toHaveLength(1);
+    expect(Array.isArray(list.body)).toBe(true);
+    expect(list.body).toHaveLength(1);
+    expect(list.body[0].workstream_id).toBe('a');
+    expect(list.body[0].title).toBe('A');
+    expect(list.body[0]).toHaveProperty('created_at');
+    expect(list.body[0]).toHaveProperty('memory_path');
+    expect(list.body[0]).toHaveProperty('current_subgoal');
+    expect(list.body[0]).toHaveProperty('latest_confidence');
+    expect(list.body[0]).toHaveProperty('needs_attention');
+    expect(list.body[0]).toHaveProperty('last_event_at');
 
     const detail = await request(handle.app).get('/workstreams/a');
     expect(detail.status).toBe(200);
-    expect(detail.body.workstream.id).toBe('a');
-    expect(detail.body.workstream.sessions).toHaveLength(1);
-    expect(detail.body.workstream.sessions[0].sessionId).toBe('s1');
+    expect(detail.body.workstream_id).toBe('a');
+    expect(detail.body.sessions).toEqual(['s1']);
+  });
+
+  it('exposes /health for client live-vs-mock probe', async () => {
+    const r = await request(handle.app).get('/health');
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
   });
 
   it('memory endpoint returns markdown', async () => {

@@ -71,6 +71,21 @@ export class EventStore {
   }
 
   /**
+   * Cheap approximation of the timestamp of the most recent event: the events
+   * file mtime. Returns null if no events have ever been written. Good enough
+   * for the home-view "last activity" projection in v0.
+   */
+  async lastActivityAt(workstreamId: string): Promise<string | null> {
+    try {
+      const st = await stat(this.pathFor(workstreamId));
+      return st.mtime.toISOString();
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw err;
+    }
+  }
+
+  /**
    * Atomically append one event line. Serialized per workstream within this
    * process; cross-process atomicity is provided by O_APPEND + the kernel.
    */

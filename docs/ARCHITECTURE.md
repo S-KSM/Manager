@@ -68,6 +68,22 @@ Responsibilities:
 
 State location: `~/.claude/manager/` (events/, memory/, db.sqlite, queues/).
 
+#### HTTP + WebSocket API contract
+
+Localhost-only in v0/v0.5/v1; auth + remote binding land in v1.5. Default port 9876, override via `MANAGER_PORT`. Responses are naked JSON (no envelope wrapping); errors are `{error: string}` with the HTTP status code. All Workstream payloads use the snake_case wire format documented under "Workstream" below.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | `{ok: true}` — liveness probe used by clients to choose live vs mock. |
+| `GET` | `/workstreams` | Array of Workstream wire objects. |
+| `POST` | `/workstreams` | Body `{id, title}` → 201 with the new Workstream wire object. |
+| `GET` | `/workstreams/:id` | Workstream wire object (with `sessions[]` populated). 404 if unknown. |
+| `GET` | `/workstreams/:id/memory` | Raw Markdown body (`text/markdown`). |
+| `GET` | `/workstreams/:id/events` | Array of Event JSON objects. Optional `?since=<byteOffset>`. |
+| `WS`  | `/workstreams/:id/events/stream` | Live event stream. Optional `?since=<byteOffset>` to resume. |
+| `POST` | `/hooks/<event>` | Hook intake; `<event>` ∈ {session-start, stop, pre-tool-use, post-tool-use, user-prompt-submit}. |
+| `POST` | `/interventions` | Body `{workstreamId, kind, payload}`. Stub in v0; queue + delivery land in v0.5. |
+
 ### Agent-side instrumentation (Claude Code, v0)
 
 Two channels feed the daemon:
@@ -104,16 +120,22 @@ Agent prompt (system message added at workstream start) instructs the agent to c
 
 ### Workstream
 
+Wire format served by `GET /workstreams` and `GET /workstreams/:id` (snake_case JSON):
+
 ```
-workstream_id   : string (slug, e.g. "frontend-refactor")
-title           : string
-created_at      : timestamp
-status          : active | paused | retired
-memory_path     : ~/.claude/manager/memory/<workstream_id>.md
-sessions        : [session_id, ...]   # all Claude Code sessions that ran under this workstream
+workstream_id      : string (slug, e.g. "frontend-refactor")
+title              : string
+created_at         : ISO 8601 timestamp
+status             : active | paused | retired
+memory_path        : absolute path to ~/.claude/manager/memory/<workstream_id>.md
+sessions           : [session_id, ...]   # all Claude Code sessions that ran under this workstream
+current_subgoal    : string | null       # head of the goal stack, or null if none
+latest_confidence  : number | null       # 0-1, from the most recent decision/confidence event
+needs_attention    : boolean             # true after a flag_blocked event until cleared
+last_event_at      : ISO 8601 timestamp | null   # most recent activity (cheap mtime approximation in v0)
 ```
 
-A workstream is the persistent identity. Sessions come and go.
+A workstream is the persistent identity. Sessions come and go. The four projection fields (`current_subgoal`, `latest_confidence`, `needs_attention`, `last_event_at`) drive the home-view cards. v0 returns null/false for the methodology-derived projections and computes `last_event_at` from the JSONL file mtime; v1 wires real projections from the event log.
 
 ### Event (JSONL line in events store)
 
