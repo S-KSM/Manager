@@ -1,13 +1,16 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { EventStore } from '../src/event-store.js';
 import { HandbookStore } from '../src/handbook-store.js';
 import { buildHttpServer, type HttpServerHandle } from '../src/http-server.js';
 import { InterventionQueue } from '../src/intervention-queue.js';
+import { type LLMProvider, type LLMProviderName, LLMUnreachableError } from '../src/llm/index.js';
 import { MemoryStore } from '../src/memory-store.js';
+import { ReportStore } from '../src/report-store.js';
+import { Scheduler } from '../src/scheduler.js';
 import { SkillProposalsStore } from '../src/skill-proposals.js';
 import { WorkstreamRegistry } from '../src/workstream.js';
 
@@ -18,9 +21,12 @@ describe('HTTP server', () => {
   let eventStore: EventStore;
   let handbookStore: HandbookStore;
   let skillProposalsStore: SkillProposalsStore;
+  let reportStore: ReportStore;
+  let scheduler: Scheduler;
   let handle: HttpServerHandle;
+  let providerCalls: { name: LLMProviderName; system: string; user: string }[];
 
-  beforeEach(() => {
+  beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'manager-http-'));
     registry = new WorkstreamRegistry(join(dir, 'db.sqlite'));
     interventionQueue = new InterventionQueue(join(dir, 'db.sqlite'));
@@ -28,6 +34,20 @@ describe('HTTP server', () => {
     const memoryStore = new MemoryStore(join(dir, 'memory'));
     handbookStore = new HandbookStore(join(dir, 'handbook.md'));
     skillProposalsStore = new SkillProposalsStore(join(dir, 'db.sqlite'));
+    reportStore = new ReportStore(join(dir, 'db.sqlite'));
+    scheduler = new Scheduler(
+      { registry, eventStore, memoryStore, reportStore },
+      join(dir, 'scheduler.json'),
+    );
+    await scheduler.start();
+    providerCalls = [];
+    const fakeProvider = (name: LLMProviderName): LLMProvider => ({
+      name,
+      generate: async ({ system, user }) => {
+        providerCalls.push({ name, system, user });
+        return `# Mock ${name} report\n\nbody for tests`;
+      },
+    });
     handle = buildHttpServer({
       eventStore,
       memoryStore,
@@ -35,13 +55,18 @@ describe('HTTP server', () => {
       interventionQueue,
       handbookStore,
       skillProposalsStore,
+      reportStore,
+      scheduler,
+      getProvider: fakeProvider,
     });
   });
 
   afterEach(async () => {
+    scheduler.stop();
     await handle.close();
     interventionQueue.close();
     skillProposalsStore.close();
+    reportStore.close();
     registry.close();
     rmSync(dir, { recursive: true, force: true });
   });
@@ -546,4 +571,214 @@ describe('HTTP server', () => {
     const r = await request(handle.app).post('/skills/proposed/prop_nope/promote');
     expect(r.status).toBe(404);
   });
+
+  // ---- Reports + presets + scheduler ------------------------------------
+
+  it('GET /report-presets returns the built-in audience presets', async () => {
+    const r = await request(handle.app).get('/report-presets');
+    expect(r.status).toBe(200);
+    expect(Array.isArray(r.body)).toBe(true);
+    expect(r.body.length).toBeGreaterThanOrEqual(4);
+    const ids = (r.body as Array<{ id: string }>).map((p) => p.id);
+    expect(ids).toContain('executive');
+    expect(ids).toContain('engineer_peer');
+  });
+
+  it('POST /reports/generate (claude provider, mocked) persists a draft when save=false', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'r1', title: 'R1' });
+    const r = await request(handle.app)
+      .post('/reports/generate')
+      .send({
+        workstream_ids: ['r1'],
+        audience_preset: 'executive',
+        provider: 'claude',
+      });
+    expect(r.status).toBe(201);
+    expect(r.body.id).toMatch(/^rep_/);
+    expect(r.body.status).toBe('draft');
+    expect(r.body.body_md).toContain('Mock claude report');
+    expect(providerCalls).toHaveLength(1);
+    expect(providerCalls[0]!.name).toBe('claude');
+    expect(providerCalls[0]!.system).toContain('executive summary');
+  });
+
+  it('POST /reports/generate with save=true persists status=saved + saved_at', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'r2', title: 'R2' });
+    const r = await request(handle.app)
+      .post('/reports/generate')
+      .send({
+        workstream_ids: ['r2'],
+        audience_preset: 'executive',
+        provider: 'ollama',
+        save: true,
+      });
+    expect(r.status).toBe(201);
+    expect(r.body.status).toBe('saved');
+    expect(r.body.saved_at).not.toBeNull();
+    expect(providerCalls[0]!.name).toBe('ollama');
+  });
+
+  it('POST /reports/generate with audience_freetext overrides the preset prompt', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'r3', title: 'R3' });
+    const r = await request(handle.app)
+      .post('/reports/generate')
+      .send({
+        workstream_ids: ['r3'],
+        audience_preset: 'executive',
+        audience_freetext: 'Series A investors, focus on traction',
+        provider: 'claude',
+      });
+    expect(r.status).toBe(201);
+    expect(providerCalls[0]!.system).toContain('Series A investors');
+    expect(providerCalls[0]!.system).not.toContain('executive summary');
+  });
+
+  it('POST /reports/generate with bad provider → 400', async () => {
+    const r = await request(handle.app)
+      .post('/reports/generate')
+      .send({ workstream_ids: ['r4'], audience_preset: 'executive', provider: 'bogus' });
+    expect(r.status).toBe(400);
+  });
+
+  it('POST /reports/generate with unknown audience_preset → 400', async () => {
+    const r = await request(handle.app)
+      .post('/reports/generate')
+      .send({ workstream_ids: ['r5'], audience_preset: 'nope', provider: 'claude' });
+    expect(r.status).toBe(400);
+  });
+
+  it('POST /reports/generate without preset and without freetext → 400', async () => {
+    const r = await request(handle.app)
+      .post('/reports/generate')
+      .send({ workstream_ids: ['r6'], provider: 'claude' });
+    expect(r.status).toBe(400);
+  });
+
+  it('POST /reports/generate maps LLMUnreachableError → 503', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'r7', title: 'R7' });
+    // Rebuild the server with a provider that throws Unreachable.
+    await handle.close();
+    handle = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      getProvider: (name) => ({
+        name,
+        generate: async () => {
+          throw new LLMUnreachableError('not reachable');
+        },
+      }),
+    });
+    const r = await request(handle.app)
+      .post('/reports/generate')
+      .send({
+        workstream_ids: ['r7'],
+        audience_preset: 'executive',
+        provider: 'ollama',
+      });
+    expect(r.status).toBe(503);
+    expect(r.body.code).toBe('LLM_UNREACHABLE');
+  });
+
+  it('GET /reports lists draft + saved by default; ?status=archived hides them', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'rl', title: 'RL' });
+    await request(handle.app)
+      .post('/reports/generate')
+      .send({ workstream_ids: ['rl'], audience_preset: 'executive', provider: 'claude' });
+    await request(handle.app)
+      .post('/reports/generate')
+      .send({
+        workstream_ids: ['rl'],
+        audience_preset: 'executive',
+        provider: 'claude',
+        save: true,
+      });
+    const list = await request(handle.app).get('/reports');
+    expect(list.status).toBe(200);
+    expect(list.body).toHaveLength(2);
+    const onlySaved = await request(handle.app).get('/reports?status=saved');
+    expect(onlySaved.body).toHaveLength(1);
+    expect(onlySaved.body[0].status).toBe('saved');
+  });
+
+  it('GET /reports/:id returns the report; PATCH updates fields; DELETE archives', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'rd', title: 'RD' });
+    const gen = await request(handle.app)
+      .post('/reports/generate')
+      .send({ workstream_ids: ['rd'], audience_preset: 'executive', provider: 'claude' });
+    const id = gen.body.id as string;
+
+    const got = await request(handle.app).get(`/reports/${id}`);
+    expect(got.status).toBe(200);
+    expect(got.body.id).toBe(id);
+
+    const patched = await request(handle.app)
+      .patch(`/reports/${id}`)
+      .send({ title: 'Renamed', status: 'saved' });
+    expect(patched.status).toBe(200);
+    expect(patched.body.title).toBe('Renamed');
+    expect(patched.body.status).toBe('saved');
+    expect(patched.body.saved_at).not.toBeNull();
+
+    const del = await request(handle.app).delete(`/reports/${id}`);
+    expect(del.status).toBe(200);
+    expect(del.body.status).toBe('archived');
+
+    const after = await request(handle.app).get('/reports');
+    expect(after.body.find((r: { id: string }) => r.id === id)).toBeUndefined();
+  });
+
+  it('GET /reports/:id → 404 for unknown id', async () => {
+    const r = await request(handle.app).get('/reports/rep_nope');
+    expect(r.status).toBe(404);
+  });
+
+  it('PATCH /reports/:id with bad status → 400', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'rp', title: 'RP' });
+    const gen = await request(handle.app)
+      .post('/reports/generate')
+      .send({ workstream_ids: ['rp'], audience_preset: 'executive', provider: 'claude' });
+    const r = await request(handle.app).patch(`/reports/${gen.body.id}`).send({ status: 'bogus' });
+    expect(r.status).toBe(400);
+  });
+
+  it('GET /scheduler/jobs returns weekly + monthly entries', async () => {
+    const r = await request(handle.app).get('/scheduler/jobs');
+    expect(r.status).toBe(200);
+    expect(Array.isArray(r.body)).toBe(true);
+    const ids = (r.body as Array<{ id: string }>).map((j) => j.id).sort();
+    expect(ids).toEqual(['monthly_report', 'weekly_report']);
+  });
+
+  it('PATCH /scheduler/jobs/:id enables job and reschedules next_fire_at', async () => {
+    const r = await request(handle.app)
+      .patch('/scheduler/jobs/weekly_report')
+      .send({ enabled: true, cron: '0 9 * * 1' });
+    expect(r.status).toBe(200);
+    expect(r.body.enabled).toBe(true);
+    expect(r.body.cron).toBe('0 9 * * 1');
+    expect(r.body.next_fire_at).not.toBeNull();
+  });
+
+  it('PATCH /scheduler/jobs/:id with bad cron → 400', async () => {
+    const r = await request(handle.app)
+      .patch('/scheduler/jobs/weekly_report')
+      .send({ cron: 'definitely-not-cron' });
+    expect(r.status).toBe(400);
+  });
+
+  it('PATCH /scheduler/jobs/:id with unknown id → 404', async () => {
+    const r = await request(handle.app)
+      .patch('/scheduler/jobs/does_not_exist')
+      .send({ enabled: true });
+    expect(r.status).toBe(404);
+  });
 });
+
+// Suppress unused var warning when vi isn't otherwise used.
+void vi;

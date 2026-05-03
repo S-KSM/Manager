@@ -9,6 +9,8 @@ import { buildHttpServer } from './http-server.js';
 import { InterventionQueue } from './intervention-queue.js';
 import { buildMcpServer, startMcpStdio } from './mcp-server.js';
 import { MemoryStore } from './memory-store.js';
+import { ReportStore } from './report-store.js';
+import { Scheduler } from './scheduler.js';
 import { SkillProposalsStore } from './skill-proposals.js';
 import { WorkstreamRegistry } from './workstream.js';
 
@@ -154,6 +156,8 @@ async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
   const interventionQueue = new InterventionQueue(cfg.dbPath);
   const handbookStore = new HandbookStore();
   const skillProposalsStore = new SkillProposalsStore(cfg.dbPath);
+  const reportStore = new ReportStore(cfg.dbPath);
+  const scheduler = new Scheduler({ registry, eventStore, memoryStore, reportStore });
   const http = buildHttpServer({
     eventStore,
     memoryStore,
@@ -161,11 +165,15 @@ async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
     interventionQueue,
     handbookStore,
     skillProposalsStore,
+    reportStore,
+    scheduler,
   });
   const port = await http.listen(cfg.httpPort);
   // stderr so JSON-over-stdout MCP traffic stays clean.
   process.stderr.write(`[manager] HTTP/WS listening on http://127.0.0.1:${port}\n`);
   process.stderr.write(`[manager] state at ${cfg.home}\n`);
+  await scheduler.start();
+  process.stderr.write('[manager] scheduler started\n');
 
   let mcpRunning = false;
   if (opts.mcpStdio) {
@@ -178,10 +186,12 @@ async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
   const shutdown = async (): Promise<void> => {
     process.stderr.write('[manager] shutting down\n');
     try {
+      scheduler.stop();
       await http.close();
       registry.close();
       interventionQueue.close();
       skillProposalsStore.close();
+      reportStore.close();
     } catch (e) {
       process.stderr.write(`[manager] shutdown error: ${(e as Error).message}\n`);
     }

@@ -66,7 +66,7 @@ Responsibilities:
 - Own the **workstream memory** — one Markdown file per workstream, owned by the agent (via `update_memory`) and editable by the human.
 - Own the **intervention queue** — per-workstream FIFO. Pre-turn hook on the agent side drains it.
 
-State location: `~/.claude/manager/` (events/, memory/, db.sqlite, queues/, handbook.md).
+State location: `~/.claude/manager/` (events/, memory/, db.sqlite, queues/, handbook.md, scheduler.json). The SQLite file holds the `workstreams`, `sessions`, `interventions`, `skill_proposals`, and `reports` tables; `scheduler.json` is a small JSON file written by the in-process scheduler.
 
 #### Two-process model
 
@@ -107,6 +107,14 @@ Localhost-only in v0/v0.5/v1; auth + remote binding land in v1.5. Default port 9
 | `GET` | `/skills/proposed` | Array of skill proposals with `status='proposed'`, oldest first. |
 | `POST` | `/skills/proposed/:id/promote` | Appends the proposal to `handbook.md`, marks `status='promoted'`, appends a `skill_promoted` event to the originating workstream's JSONL. 409 if already promoted/dismissed. |
 | `POST` | `/skills/proposed/:id/dismiss` | Marks `status='dismissed'` without writing to the handbook. 409 if already promoted/dismissed. |
+| `GET` | `/report-presets` | Array of built-in audience presets (`{id, name, description, system_prompt}`). |
+| `POST` | `/reports/generate` | Body `{workstream_ids?, since?, until?, audience_preset?, audience_freetext?, provider, model?, save?, title?}`. Validates inputs, assembles the deterministic report context (decisions/blockers in window, memory excerpt, projections), picks the system prompt (preset OR freetext override), calls the chosen LLM provider, persists the result. Returns 201 + the persisted Report. 400 on bad provider/preset; 503 when the LLM endpoint is unreachable; 500 on other LLM errors. |
+| `GET` | `/reports` | Naked array of Reports, ordered by `generated_at DESC`. Optional `?status=draft|saved|archived`; default hides `archived`. |
+| `GET` | `/reports/:id` | Single Report. 404 if unknown. |
+| `PATCH` | `/reports/:id` | Body `{title?, body_md?, status?}`. Updating `status` to `'saved'` sets `saved_at = now()`. |
+| `DELETE` | `/reports/:id` | Soft-delete: sets `status='archived'` and returns 200 + the updated Report. |
+| `GET` | `/scheduler/jobs` | Naked array of `{id, enabled, cron, audience_preset, provider, model, next_fire_at}`. |
+| `PATCH` | `/scheduler/jobs/:id` | Body `{enabled?, cron?, audience_preset?, provider?, model?}`. Validates the cron expression eagerly, persists the change to `~/.claude/manager/scheduler.json`, recomputes `next_fire_at`, and returns the updated job. 404 on unknown id; 400 on invalid cron / preset / provider. |
 
 ### Agent-side instrumentation (Claude Code, v0)
 
@@ -308,6 +316,61 @@ A team handbook (`~/.claude/manager/handbook.md`) is the shared knowledge surfac
 4. **Agents adopt.** On the next `SessionStart` for any workstream, the lifecycle hook fetches `GET /handbook` and inlines the contents as `additionalContext`. From then on, every session has the new pattern in its working context (until the inlined snippet is evicted by Claude Code's context window).
 
 The handbook is a single Markdown file, not one file per skill — keeps inlining cheap, keeps merging simple. Single writer (the manager via the macOS app); agents are read-only on the handbook itself, write-only into the proposal queue.
+
+## Reports (v1.1)
+
+The reports surface lets the human (or the scheduler) generate written updates summarising one or more workstreams over a chosen period. The implementation has four pieces:
+
+1. **Report context (`daemon/src/report-engine.ts`)** — a pure function `assembleReport({registry, eventStore, memoryStore}, {workstream_ids, since, until})` that returns a `ReportContext`:
+
+   ```
+   ReportContext { since, until, workstreams: WorkstreamSnapshot[] }
+   WorkstreamSnapshot {
+     id, title, status,
+     current_subgoal, latest_confidence, needs_attention,    # projection fields
+     decisions_in_window, blockers_in_window,                # capped most-recent slices
+     memory_excerpt,                                         # last ~2KB of memory MD
+     shipped_count, active_seconds                           # in-window aggregates
+   }
+   ```
+
+   Decisions are capped at the 30 most recent per workstream; the memory excerpt is the last 2KB of the markdown file, with an `(…older sections truncated)` notice when the original was longer. Unknown workstream ids are silently skipped — the function never throws.
+
+2. **Audience presets vs. free-text override (`daemon/src/report-presets.ts`)** — four built-in presets ship with the daemon: `executive`, `business_partner`, `engineer_peer`, `sponsor`. Each carries a tailored `system_prompt`. The HTTP layer also accepts an `audience_freetext` field; **when non-empty, the freetext replaces the preset's system prompt entirely** with `"You write an update for: <freetext>. Adapt the structure and tone to suit. Be concrete and avoid filler."`. The override always wins.
+
+3. **Pluggable LLM providers (`daemon/src/llm/`)**:
+
+   | Provider | Transport | Default model | Credentials | Failure modes |
+   |---|---|---|---|---|
+   | `claude` | `@anthropic-ai/sdk` (`messages.create`) | `claude-sonnet-4-7` | `ANTHROPIC_API_KEY` env var | Missing key → `LLMConfigError` (HTTP 500). SDK errors → `LLMRequestError` (HTTP 500) preserving the upstream status. |
+   | `ollama` | HTTP POST to `${OLLAMA_URL || http://localhost:11434}/api/chat` (non-streaming) | `qwen3:8b` | none (local) | Connection refused → `LLMUnreachableError` (HTTP 503) with install hint `"brew install ollama && ollama serve"`. Non-2xx → `LLMRequestError`. |
+
+   Both providers are constructed via `getProvider(name)`; the HTTP layer translates the typed errors to status codes so the macOS client can render them differently (config issue vs. local LLM not running).
+
+4. **Saved reports store (`daemon/src/report-store.ts`)** — a SQLite table on the existing `~/.claude/manager/db.sqlite`:
+
+   ```
+   reports(id PK, title, audience_preset, audience_freetext, period_since, period_until,
+           workstream_ids_json, provider, model, body_md, status, generated_at, saved_at)
+   ```
+
+   Status flow: `draft` → `saved` (sets `saved_at`) → `archived` (soft-delete, hidden from default list). The `workstream_ids` column is a JSON-encoded array — kept inline rather than normalised to a join table since the cardinality is small and reports are immutable bodies.
+
+5. **Scheduler (`daemon/src/scheduler.ts`)** — in-process loop wrapping the `croner` package. Persists per-job config to `~/.claude/manager/scheduler.json`:
+
+   ```json
+   {
+     "weekly_report":  {"enabled": false, "cron": "0 8 * * 1", "audience_preset": "executive", "provider": "claude"},
+     "monthly_report": {"enabled": false, "cron": "0 8 1 * *", "audience_preset": "executive", "provider": "claude"}
+   }
+   ```
+
+   On boot the scheduler reads the file (seeding defaults if absent), computes each enabled job's next fire time relative to *now* (no backfill of fires the daemon was offline for), and arms a 60-second tick that fires due jobs and advances their next-fire time to the next future tick. A fired job calls `assembleReport` for every `status='active'` workstream, generates via the configured provider/preset, and persists the result with `status='draft'` so the human reviews before sharing.
+
+   Trade-offs accepted in v1.1:
+   - **No backfill on missed ticks.** A daemon offline over a Monday morning will not retroactively generate the missed weekly report — the next fire is the *next* Monday at the configured time. Predictable and avoids hammering the LLM after a long downtime; v1.2 may add an opt-in catch-up.
+   - **Same input, different output.** Saved reports are immutable bodies — regenerating produces a new row rather than overwriting.
+   - **API key never logged.** `ANTHROPIC_API_KEY` is read from the process environment and passed only to the SDK constructor; v1.2 may add per-machine encrypted storage.
 
 ## Open architectural questions
 

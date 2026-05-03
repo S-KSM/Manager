@@ -10,8 +10,20 @@ import type {
   InterventionPayload,
   InterventionQueue,
 } from './intervention-queue.js';
+import {
+  type LLMProvider,
+  type LLMProviderName,
+  LLMConfigError,
+  LLMUnreachableError,
+  getProvider as defaultGetProvider,
+} from './llm/index.js';
 import type { MemoryStore } from './memory-store.js';
 import { projectFromEvents } from './projections.js';
+import { assembleReport } from './report-engine.js';
+import { renderUserPrompt } from './report-prompt.js';
+import { PRESETS, getPreset, resolveSystemPrompt } from './report-presets.js';
+import type { ReportStatus, ReportStore } from './report-store.js';
+import type { Scheduler, SchedulerJobUpdate } from './scheduler.js';
 import type { SkillProposalsStore } from './skill-proposals.js';
 import type {
   Workstream,
@@ -27,7 +39,15 @@ interface BuildOptions {
   interventionQueue: InterventionQueue;
   handbookStore: HandbookStore;
   skillProposalsStore: SkillProposalsStore;
+  reportStore: ReportStore;
+  scheduler: Scheduler;
+  /** Override the LLM provider factory; used by tests to inject mocks. */
+  getProvider?: (name: LLMProviderName) => LLMProvider;
 }
+
+const VALID_REPORT_STATUSES: ReadonlySet<ReportStatus> = new Set(['draft', 'saved', 'archived']);
+const VALID_PROVIDERS: ReadonlySet<LLMProviderName> = new Set(['claude', 'ollama']);
+const REPORT_DEFAULT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 const WORKSTREAM_STATUSES: ReadonlySet<WorkstreamStatus> = new Set(['active', 'paused', 'retired']);
 
@@ -76,7 +96,10 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     interventionQueue,
     handbookStore,
     skillProposalsStore,
+    reportStore,
+    scheduler,
   } = opts;
+  const getProvider = opts.getProvider ?? defaultGetProvider;
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
@@ -507,6 +530,286 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     res.json(updated);
   });
 
+  // ---- Reports + presets + scheduler --------------------------------------
+
+  app.get('/report-presets', (_req: Request, res: Response) => {
+    res.json(PRESETS);
+  });
+
+  /**
+   * Generate a new report. Validates inputs, builds the deterministic context
+   * via `assembleReport`, picks the system prompt (preset or freetext
+   * override), calls the chosen LLM provider, and persists the result. The
+   * persisted row is returned regardless of whether `save: true` (status =
+   * 'saved') or `save: false` (status = 'draft') so the client always has an
+   * id to reference.
+   */
+  app.post('/reports/generate', async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as {
+      workstream_ids?: unknown;
+      since?: unknown;
+      until?: unknown;
+      audience_preset?: unknown;
+      audience_freetext?: unknown;
+      provider?: unknown;
+      model?: unknown;
+      save?: unknown;
+      title?: unknown;
+    };
+
+    const provider =
+      typeof body.provider === 'string' ? (body.provider as LLMProviderName) : undefined;
+    if (!provider || !VALID_PROVIDERS.has(provider)) {
+      res.status(400).json({ error: "provider must be 'claude' or 'ollama'" });
+      return;
+    }
+
+    const audiencePreset =
+      typeof body.audience_preset === 'string' && body.audience_preset.length > 0
+        ? body.audience_preset
+        : null;
+    if (audiencePreset !== null && !getPreset(audiencePreset)) {
+      res.status(400).json({ error: `unknown audience_preset: ${audiencePreset}` });
+      return;
+    }
+    const audienceFreetext =
+      typeof body.audience_freetext === 'string' && body.audience_freetext.trim().length > 0
+        ? body.audience_freetext.trim()
+        : null;
+    const systemPrompt = resolveSystemPrompt({
+      preset_id: audiencePreset,
+      freetext: audienceFreetext,
+    });
+    if (!systemPrompt) {
+      res.status(400).json({ error: 'audience_preset or audience_freetext required' });
+      return;
+    }
+
+    // Resolve workstream_ids: caller-supplied (validated) or all active.
+    let workstreamIds: string[];
+    if (Array.isArray(body.workstream_ids)) {
+      workstreamIds = body.workstream_ids.filter(
+        (x): x is string => typeof x === 'string' && x.length > 0,
+      );
+      if (workstreamIds.length === 0) {
+        res.status(400).json({ error: 'workstream_ids must be a non-empty array of strings' });
+        return;
+      }
+    } else {
+      workstreamIds = registry
+        .list()
+        .filter((w) => w.status === 'active')
+        .map((w) => w.id);
+    }
+
+    // Resolve window.
+    const now = new Date();
+    let since: Date;
+    let until: Date;
+    if (typeof body.since === 'string' && body.since.length > 0) {
+      const parsed = new Date(body.since);
+      if (Number.isNaN(parsed.getTime())) {
+        res.status(400).json({ error: 'since must be ISO-8601' });
+        return;
+      }
+      since = parsed;
+    } else {
+      since = new Date(now.getTime() - REPORT_DEFAULT_WINDOW_MS);
+    }
+    if (typeof body.until === 'string' && body.until.length > 0) {
+      const parsed = new Date(body.until);
+      if (Number.isNaN(parsed.getTime())) {
+        res.status(400).json({ error: 'until must be ISO-8601' });
+        return;
+      }
+      until = parsed;
+    } else {
+      until = now;
+    }
+
+    const ctx = await assembleReport(
+      { registry, eventStore, memoryStore },
+      { workstream_ids: workstreamIds, since, until },
+    );
+
+    const audienceLabel = audienceFreetext ?? getPreset(audiencePreset ?? '')?.name ?? 'team';
+    const periodLabel = derivePeriodLabel(since, until);
+    const userPrompt = renderUserPrompt({
+      ctx,
+      audience_label: audienceLabel,
+      period_label: periodLabel,
+    });
+
+    const model = typeof body.model === 'string' && body.model.length > 0 ? body.model : null;
+    let bodyMd: string;
+    try {
+      const llm = getProvider(provider);
+      bodyMd = await llm.generate({
+        system: systemPrompt,
+        user: userPrompt,
+        ...(model ? { model } : {}),
+      });
+    } catch (err) {
+      if (err instanceof LLMUnreachableError) {
+        res.status(503).json({ error: err.message, code: err.code });
+        return;
+      }
+      if (err instanceof LLMConfigError) {
+        res.status(500).json({ error: err.message, code: err.code });
+        return;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ error: `LLM generation failed: ${message}` });
+      return;
+    }
+
+    const save = body.save === true;
+    const title =
+      typeof body.title === 'string' && body.title.length > 0
+        ? body.title
+        : `${periodLabel} — ${until.toISOString().slice(0, 10)}`;
+    const stored = reportStore.create({
+      title,
+      audience_preset: audiencePreset,
+      audience_freetext: audienceFreetext,
+      period_since: since.toISOString(),
+      period_until: until.toISOString(),
+      workstream_ids: workstreamIds,
+      provider,
+      model,
+      body_md: bodyMd,
+      status: save ? 'saved' : 'draft',
+    });
+    res.status(201).json(stored);
+  });
+
+  app.get('/reports', (req: Request, res: Response) => {
+    const status =
+      typeof req.query['status'] === 'string' ? (req.query['status'] as ReportStatus) : undefined;
+    if (status !== undefined && !VALID_REPORT_STATUSES.has(status)) {
+      res.status(400).json({ error: 'status must be one of draft, saved, archived' });
+      return;
+    }
+    const reports = status ? reportStore.list({ status }) : reportStore.list();
+    res.json(reports);
+  });
+
+  app.get('/reports/:id', (req: Request, res: Response) => {
+    const id = String(req.params['id']);
+    const r = reportStore.get(id);
+    if (!r) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.json(r);
+  });
+
+  app.patch('/reports/:id', (req: Request, res: Response) => {
+    const id = String(req.params['id']);
+    const body = (req.body ?? {}) as { title?: unknown; body_md?: unknown; status?: unknown };
+    const fields: { title?: string; body_md?: string; status?: ReportStatus } = {};
+    if (body.title !== undefined) {
+      if (typeof body.title !== 'string' || body.title.length === 0) {
+        res.status(400).json({ error: 'title must be a non-empty string' });
+        return;
+      }
+      fields.title = body.title;
+    }
+    if (body.body_md !== undefined) {
+      if (typeof body.body_md !== 'string') {
+        res.status(400).json({ error: 'body_md must be a string' });
+        return;
+      }
+      fields.body_md = body.body_md;
+    }
+    if (body.status !== undefined) {
+      if (
+        typeof body.status !== 'string' ||
+        !VALID_REPORT_STATUSES.has(body.status as ReportStatus)
+      ) {
+        res.status(400).json({ error: 'status must be one of draft, saved, archived' });
+        return;
+      }
+      fields.status = body.status as ReportStatus;
+    }
+    const updated = reportStore.update(id, fields);
+    if (!updated) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.json(updated);
+  });
+
+  /** Soft-delete via status=archived; returns the updated row, not 204. */
+  app.delete('/reports/:id', (req: Request, res: Response) => {
+    const id = String(req.params['id']);
+    const updated = reportStore.update(id, { status: 'archived' });
+    if (!updated) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.json(updated);
+  });
+
+  app.get('/scheduler/jobs', (_req: Request, res: Response) => {
+    res.json(scheduler.listJobs());
+  });
+
+  app.patch('/scheduler/jobs/:id', async (req: Request, res: Response) => {
+    const id = String(req.params['id']);
+    const body = (req.body ?? {}) as {
+      enabled?: unknown;
+      cron?: unknown;
+      audience_preset?: unknown;
+      provider?: unknown;
+      model?: unknown;
+    };
+    const fields: SchedulerJobUpdate = {};
+    if (body.enabled !== undefined) fields.enabled = !!body.enabled;
+    if (body.cron !== undefined) {
+      if (typeof body.cron !== 'string' || body.cron.length === 0) {
+        res.status(400).json({ error: 'cron must be a non-empty string' });
+        return;
+      }
+      fields.cron = body.cron;
+    }
+    if (body.audience_preset !== undefined) {
+      if (typeof body.audience_preset !== 'string' || !getPreset(body.audience_preset)) {
+        res.status(400).json({ error: 'audience_preset must be a known preset id' });
+        return;
+      }
+      fields.audience_preset = body.audience_preset;
+    }
+    if (body.provider !== undefined) {
+      if (
+        typeof body.provider !== 'string' ||
+        !VALID_PROVIDERS.has(body.provider as LLMProviderName)
+      ) {
+        res.status(400).json({ error: "provider must be 'claude' or 'ollama'" });
+        return;
+      }
+      fields.provider = body.provider as LLMProviderName;
+    }
+    if (body.model !== undefined) {
+      if (body.model !== null && typeof body.model !== 'string') {
+        res.status(400).json({ error: 'model must be a string or null' });
+        return;
+      }
+      fields.model = body.model as string | null;
+    }
+    try {
+      const updated = await scheduler.updateJob(id, fields);
+      res.json(updated);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.startsWith('unknown scheduler job')) {
+        res.status(404).json({ error: message });
+        return;
+      }
+      res.status(400).json({ error: message });
+    }
+  });
+
   // ---- WebSocket: live event stream ---------------------------------------
 
   const httpServer = createServer(app);
@@ -558,6 +861,18 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
         });
       }),
   };
+}
+
+/**
+ * Heuristic period label used when the caller doesn't supply a title. Picks
+ * "Weekly", "Monthly", or "Custom" based on the window size.
+ */
+function derivePeriodLabel(since: Date, until: Date): string {
+  const ms = until.getTime() - since.getTime();
+  const days = ms / (24 * 60 * 60 * 1000);
+  if (days >= 6.5 && days <= 8.5) return 'Weekly update';
+  if (days >= 27 && days <= 32) return 'Monthly update';
+  return 'Update';
 }
 
 function parseSkillSource(raw: unknown): SkillSource | undefined {
