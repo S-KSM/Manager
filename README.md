@@ -11,6 +11,20 @@ Today's tooling pushes you into one of two modes:
 
 Real human managers do something neither covers: they track *methodology*, intervene mid-flight to course-correct, and propagate newly-learned skills across the team. Manager brings that experience to AI agent teams.
 
+## Install for daily use
+
+    bash bin/install.sh
+
+Builds the daemon and the macOS app, copies the app to /Applications,
+installs the lifecycle hooks into ~/.claude/settings.json, wires the
+Manager MCP into Claude Code (user scope), and registers a launchd
+agent so the daemon starts at login.
+
+The script is idempotent and asks before each step. Pass `--yes` to skip
+prompts, `--skip-app` to leave `/Applications/Manager.app` alone.
+
+Uninstall: `bash bin/uninstall.sh`.
+
 ## Capabilities
 
 - **Live multi-agent monitoring** — glanceable home view across all active workstreams.

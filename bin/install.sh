@@ -1,0 +1,308 @@
+#!/usr/bin/env sh
+# Manager — one-command install.
+#
+# Idempotent. Builds the daemon and the macOS app, copies the app to
+# /Applications, installs lifecycle hooks into ~/.claude/settings.json, wires
+# the manager MCP into Claude Code (user scope), and registers a launchd agent
+# so the daemon starts at login.
+#
+# Usage:
+#   bash bin/install.sh           # interactive (confirms each step)
+#   bash bin/install.sh --yes     # skip confirmations
+#   bash bin/install.sh --force   # rebuild even if dist is newer than src
+#   bash bin/install.sh --skip-app    # skip the macOS app build/copy
+#   bash bin/install.sh --app-dest /tmp/Manager.app   # override copy target
+#
+# Never sudoes. If a step needs elevated permissions (e.g. /Applications)
+# the script prints a clear error and instructs the user.
+
+set -u
+
+# ---------------- helpers ---------------------------------------------------
+
+ASSUME_YES=0
+FORCE_BUILD=0
+SKIP_APP=0
+APP_DEST="/Applications/Manager.app"
+
+for arg in "$@"; do
+  case "$arg" in
+    -y|--yes) ASSUME_YES=1 ;;
+    --force) FORCE_BUILD=1 ;;
+    --skip-app) SKIP_APP=1 ;;
+    --app-dest=*) APP_DEST="${arg#--app-dest=}" ;;
+    --app-dest)
+      echo "error: --app-dest requires =PATH form, e.g. --app-dest=/tmp/Manager.app" >&2
+      exit 2 ;;
+    -h|--help)
+      sed -n '2,18p' "$0"
+      exit 0 ;;
+    *)
+      echo "unknown arg: $arg (use --help)" >&2
+      exit 2 ;;
+  esac
+done
+
+# Color-ish output. No emoji. Skip when stdout isn't a tty.
+if [ -t 1 ]; then
+  C_BOLD=$(printf '\033[1m')
+  C_DIM=$(printf '\033[2m')
+  C_RED=$(printf '\033[31m')
+  C_YELLOW=$(printf '\033[33m')
+  C_GREEN=$(printf '\033[32m')
+  C_RESET=$(printf '\033[0m')
+else
+  C_BOLD=""; C_DIM=""; C_RED=""; C_YELLOW=""; C_GREEN=""; C_RESET=""
+fi
+
+step() { printf '\n%s== %s ==%s\n' "$C_BOLD" "$1" "$C_RESET"; }
+info() { printf '%s%s%s\n' "$C_DIM" "$1" "$C_RESET"; }
+warn() { printf '%swarn:%s %s\n' "$C_YELLOW" "$C_RESET" "$1" >&2; }
+ok()   { printf '%sok:%s %s\n' "$C_GREEN" "$C_RESET" "$1"; }
+die()  { printf '%serror:%s %s\n' "$C_RED" "$C_RESET" "$1" >&2; exit 1; }
+
+confirm() {
+  prompt="$1"
+  if [ "$ASSUME_YES" = "1" ]; then
+    return 0
+  fi
+  printf '%s [y/N] ' "$prompt"
+  read -r reply || return 1
+  case "$reply" in
+    y|Y|yes|YES) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+require_cmd() {
+  cmd="$1"
+  hint="${2:-}"
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    if [ -n "$hint" ]; then
+      die "missing required command: $cmd ($hint)"
+    else
+      die "missing required command: $cmd"
+    fi
+  fi
+}
+
+# Resolve repo root from this script's path: $REPO/bin/install.sh
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+REPO=$(cd "$SCRIPT_DIR/.." && pwd)
+USER_NAME="$(id -un)"
+HOME_DIR="${HOME:-/Users/$USER_NAME}"
+
+# ---------------- preflight -------------------------------------------------
+
+step "Preflight"
+info "repo: $REPO"
+info "user: $USER_NAME"
+require_cmd node "install Node 20+ from https://nodejs.org or via brew"
+require_cmd npm
+require_cmd jq "brew install jq"
+require_cmd launchctl
+require_cmd curl
+ok "preflight"
+
+# ---------------- 1. build daemon ------------------------------------------
+
+step "Build daemon"
+DAEMON_DIST="$REPO/daemon/dist/index.js"
+NEEDS_BUILD=1
+if [ "$FORCE_BUILD" != "1" ] && [ -f "$DAEMON_DIST" ]; then
+  # Cheap mtime check: rebuild only if any src/*.ts is newer than dist/index.js.
+  newer=$(find "$REPO/daemon/src" -type f -name '*.ts' -newer "$DAEMON_DIST" 2>/dev/null | head -n 1)
+  if [ -z "$newer" ]; then
+    NEEDS_BUILD=0
+    info "daemon/dist is up to date (use --force to rebuild)"
+  fi
+fi
+if [ "$NEEDS_BUILD" = "1" ]; then
+  if confirm "Run 'npm install && npm run build' in daemon/?"; then
+    (cd "$REPO/daemon" && npm install && npm run build) || die "daemon build failed"
+    ok "daemon built"
+  else
+    warn "skipped daemon build"
+  fi
+else
+  ok "daemon already built"
+fi
+
+# ---------------- 2. build macOS app ----------------------------------------
+
+if [ "$SKIP_APP" = "1" ]; then
+  step "macOS app (skipped via --skip-app)"
+else
+  step "Build macOS app"
+  if [ ! -d "$REPO/client-macos" ]; then
+    warn "client-macos/ not found; skipping app build"
+  elif ! command -v xcodebuild >/dev/null 2>&1; then
+    warn "xcodebuild not found; skipping app build (install Xcode command-line tools)"
+  else
+    if confirm "Build client-macos via xcodebuild and copy to $APP_DEST?"; then
+      (cd "$REPO/client-macos" && xcodebuild \
+          -project Manager.xcodeproj \
+          -scheme Manager \
+          -destination 'platform=macOS' \
+          -derivedDataPath build/ \
+          build) || die "xcodebuild failed"
+      APP_SRC="$REPO/client-macos/build/Build/Products/Debug/Manager.app"
+      if [ ! -d "$APP_SRC" ]; then
+        die "built app not found at $APP_SRC"
+      fi
+      if [ -e "$APP_DEST" ]; then
+        if ! confirm "Overwrite existing $APP_DEST?"; then
+          warn "leaving existing $APP_DEST in place"
+          APP_SRC=""
+        fi
+      fi
+      if [ -n "$APP_SRC" ]; then
+        # Try cp first; if it fails on /Applications surface a clear error.
+        if rm -rf "$APP_DEST" 2>/dev/null && cp -R "$APP_SRC" "$APP_DEST" 2>/dev/null; then
+          ok "installed app to $APP_DEST"
+        else
+          warn "could not write to $APP_DEST (permission denied)."
+          warn "manually copy with: sudo cp -R '$APP_SRC' '$APP_DEST'"
+        fi
+      fi
+    else
+      warn "skipped macOS app build"
+    fi
+  fi
+fi
+
+# ---------------- 3. install hooks ------------------------------------------
+
+step "Install lifecycle hooks"
+if [ ! -f "$REPO/hooks/install.sh" ]; then
+  die "hooks/install.sh missing"
+fi
+if confirm "Run hooks/install.sh (merges into ~/.claude/settings.json)?"; then
+  # The child script asks its own y/N. Auto-confirm for a smooth parent flow.
+  if printf 'y\n' | sh "$REPO/hooks/install.sh"; then
+    ok "hooks installed"
+  else
+    warn "hooks/install.sh exited non-zero"
+  fi
+else
+  warn "skipped hook install"
+fi
+
+# ---------------- 4. wire MCP -----------------------------------------------
+
+step "Wire Manager MCP into Claude Code"
+SETTINGS_FILE="$HOME_DIR/.claude/settings.json"
+MCP_INSTALLED=0
+
+if command -v claude >/dev/null 2>&1; then
+  # Claude Code CLI is on PATH; prefer its declarative API.
+  if claude mcp list 2>/dev/null | grep -qE '^manager(\s|:|$)'; then
+    info "manager MCP already registered in claude (skipping)"
+    MCP_INSTALLED=1
+  else
+    if confirm "Run 'claude mcp add manager --scope user -- node $REPO/daemon/dist/index.js mcp'?"; then
+      if claude mcp add manager --scope user -- node "$REPO/daemon/dist/index.js" mcp; then
+        ok "manager MCP added via claude CLI"
+        MCP_INSTALLED=1
+      else
+        warn "claude mcp add failed; will fall back to settings.json merge"
+      fi
+    else
+      warn "skipped claude mcp add"
+    fi
+  fi
+fi
+
+if [ "$MCP_INSTALLED" = "0" ]; then
+  if confirm "Merge manager MCP entry into $SETTINGS_FILE directly?"; then
+    mkdir -p "$(dirname "$SETTINGS_FILE")"
+    [ -f "$SETTINGS_FILE" ] || echo "{}" > "$SETTINGS_FILE"
+    TMP=$(mktemp)
+    jq \
+      --arg cmd "node" \
+      --arg arg0 "$REPO/daemon/dist/index.js" \
+      --arg arg1 "mcp" \
+      '.mcpServers = ((.mcpServers // {}) + {
+         "manager": {
+           "type": "stdio",
+           "command": $cmd,
+           "args": [$arg0, $arg1]
+         }
+       })' "$SETTINGS_FILE" > "$TMP" || { rm -f "$TMP"; die "jq merge failed"; }
+    mv "$TMP" "$SETTINGS_FILE"
+    ok "wrote MCP entry to $SETTINGS_FILE"
+  else
+    warn "skipped MCP wiring"
+  fi
+fi
+
+# ---------------- 5. launchd plist ------------------------------------------
+
+step "Generate launchd plist"
+PLIST_TPL="$REPO/bin/com.manager.daemon.plist.template"
+PLIST_DEST="$HOME_DIR/Library/LaunchAgents/com.manager.daemon.plist"
+if [ ! -f "$PLIST_TPL" ]; then
+  die "missing plist template: $PLIST_TPL"
+fi
+mkdir -p "$(dirname "$PLIST_DEST")"
+mkdir -p "$HOME_DIR/Library/Logs"
+# sed escape: REPO and USER_NAME must not contain unescaped slashes/ampersands
+# in plain English contexts. Use a `|` delimiter to dodge typical macOS paths.
+sed \
+  -e "s|__REPO__|$REPO|g" \
+  -e "s|__USER__|$USER_NAME|g" \
+  "$PLIST_TPL" > "$PLIST_DEST.tmp"
+mv "$PLIST_DEST.tmp" "$PLIST_DEST"
+ok "wrote $PLIST_DEST"
+
+# ---------------- 6. load launchd -------------------------------------------
+
+step "Load launchd agent"
+UID_VAL=$(id -u)
+LABEL="com.manager.daemon"
+DOMAIN="gui/$UID_VAL"
+
+# If already loaded, bootout first (idempotent reinstall).
+if launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
+  info "agent already loaded; booting out before reload"
+  launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+fi
+
+if confirm "Bootstrap $LABEL into $DOMAIN now?"; then
+  if launchctl bootstrap "$DOMAIN" "$PLIST_DEST"; then
+    ok "agent loaded"
+    # Health probe.
+    sleep 2
+    PORT="${MANAGER_PORT:-9876}"
+    if curl -s --max-time 2 "http://127.0.0.1:$PORT/health" | grep -q '"ok":true'; then
+      ok "daemon healthy on port $PORT"
+    else
+      warn "could not reach daemon /health on port $PORT (may still be starting; check ~/Library/Logs/manager.daemon.err.log)"
+    fi
+  else
+    warn "launchctl bootstrap failed (run 'launchctl print $DOMAIN/$LABEL' to inspect)"
+  fi
+else
+  warn "skipped launchd load"
+fi
+
+# ---------------- 7. summary ------------------------------------------------
+
+step "Done"
+cat <<EOF
+Logs:
+  $HOME_DIR/Library/Logs/manager.daemon.out.log
+  $HOME_DIR/Library/Logs/manager.daemon.err.log
+
+App:
+  $APP_DEST
+
+To register a workstream and launch a Claude Code session under it:
+
+  node "$REPO/daemon/dist/index.js" register my-proj "My Project"
+  cd /path/to/my-proj && MANAGER_WORKSTREAM=my-proj claude
+
+Uninstall:
+
+  bash "$REPO/bin/uninstall.sh"
+EOF

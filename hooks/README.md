@@ -49,6 +49,28 @@ export MANAGER_WORKSTREAM=frontend-refactor
 
 The hooks pick these up on every invocation. No reinstall needed.
 
+## SessionStart system-prompt nudge
+
+`session-start.sh` does two things:
+
+1. POSTs the SessionStart hook payload to the daemon (v0 behavior — registers the session under the workstream).
+2. v0.5.2 — emits Claude Code's `hookSpecificOutput.additionalContext` JSON on stdout. The `additionalContext` is a short paragraph telling the agent it has the manager MCP tools (`emit_decision`, `emit_subgoal`, `emit_confidence`, `flag_blocked`, `update_memory`, `read_memory`) and when to use them. This is what turns the MCP wiring from "available" into "actually used" — without this nudge the agent never thinks to call the tools.
+
+**When it fires:** every SessionStart that has `MANAGER_WORKSTREAM` set in the environment AND `jq` available. Without either, the hook silently degrades to v0 behavior (notify-only). Always exits 0.
+
+**Output shape on success** (canonical Claude Code 4.x form):
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "You are running inside a Manager-supervised session.\n\nYou have manager MCP tools available:\n..."
+  }
+}
+```
+
+The full additionalContext text lives in `session-start.sh`. Edit it there if you want to change the phrasing the agent sees.
+
 ## v0.5 — UserPromptSubmit intervention drain
 
 On every user prompt, after notifying the daemon, `user-prompt-submit.sh` also drains the per-workstream intervention queue so a human nudge / redirect / rollback typed in the macOS app shows up as `additionalContext` on the next agent turn.
@@ -171,4 +193,10 @@ curl -s localhost:9876/workstreams/demo/interventions/pending
 
 ## Uninstall
 
-Edit `~/.claude/settings.json` and remove the entries under `.hooks`. There is no automated uninstaller in v0.
+Easiest path: run the repo-level uninstaller, which scrubs the manager hook entries (and the launchd agent and MCP wiring) in one pass:
+
+```sh
+bash bin/uninstall.sh
+```
+
+If you want to leave everything else alone and only remove the hook entries, edit `~/.claude/settings.json` by hand and drop any `hooks[].hooks[]` whose `command` points into this repo's `hooks/` directory.

@@ -21,13 +21,21 @@ This produces `dist/index.js`. The package also exposes a `manager` bin once lin
 
 ## Run
 
-The HTTP/WS API is the always-on surface. The MCP server is opt-in via flag (Claude Code launches it over stdio).
+Two modes, two processes:
 
 ```sh
-# HTTP/WS only — what you want for development and the macOS client.
+# Long-running daemon: HTTP/WS API for the macOS client. Started at login by
+# the launchd agent that bin/install.sh installs.
 node dist/index.js start
 
-# HTTP/WS + MCP over stdio — what Claude Code launches.
+# Per-session MCP stdio server. What Claude Code launches each session via
+# its `mcpServers` config (see "Wiring MCP to Claude Code" below). Binds NO
+# HTTP port — shares on-disk state with the long-running daemon via SQLite
+# WAL + JSONL append.
+node dist/index.js mcp
+
+# Legacy / testing only: HTTP + MCP in the same process. Will fight for the
+# port if a long-running daemon is already up. Prefer `mcp` above.
 node dist/index.js start --mcp-stdio
 ```
 
@@ -53,11 +61,40 @@ State is written to `~/.claude/manager/` by default:
 ## CLI
 
 ```sh
-node dist/index.js start                       # boot the daemon
+node dist/index.js start                       # boot the long-running daemon (HTTP/WS)
+node dist/index.js mcp                         # MCP stdio only (per-session, what Claude Code launches)
 node dist/index.js register <id> <title>       # create a workstream
 node dist/index.js list                        # tabulate workstreams
 node dist/index.js attach <workstream-id>      # print env vars for a session
 ```
+
+## Wiring MCP to Claude Code
+
+The `manager mcp` subcommand is the production wiring. Register it once, user-scoped, so every Claude Code session gets the manager tools:
+
+```sh
+claude mcp add manager --scope user -- node /absolute/path/to/manager/daemon/dist/index.js mcp
+```
+
+`bin/install.sh` does this automatically. After it lands, the agent has the following tools available in every session:
+
+| Tool | Purpose |
+|---|---|
+| `emit_decision(considered, choice, rationale, confidence, parent_id?)` | Structured decision point — the unit the methodology timeline is built from. |
+| `emit_subgoal(goal, parent_id?)` | Push a sub-goal. |
+| `emit_confidence(value, note?)` | Spot-update confidence outside a decision. |
+| `flag_blocked(reason)` | Escalate to the human VP when stuck. |
+| `update_memory(section, content)` | Write into the workstream Markdown memory. |
+| `read_memory(section?)` | Read it back. |
+
+Before launching `claude` in a project, set `MANAGER_WORKSTREAM` so the MCP server knows which workstream to write into:
+
+```sh
+export MANAGER_WORKSTREAM=my-proj
+claude
+```
+
+The `SessionStart` hook (installed by `hooks/install.sh`) emits an `additionalContext` paragraph each session telling the agent it has these tools and when to use them.
 
 ## HTTP API (v0)
 
@@ -78,7 +115,7 @@ node dist/index.js attach <workstream-id>      # print env vars for a session
 
 ## MCP tools (v0)
 
-Exposed only when started with `--mcp-stdio`. Names and shapes match `docs/ARCHITECTURE.md`:
+Exposed by `manager mcp` (production) or `manager start --mcp-stdio` (legacy/test). Names and shapes match `docs/ARCHITECTURE.md`:
 
 `emit_decision`, `emit_subgoal`, `emit_confidence`, `flag_blocked`, `update_memory`, `read_memory`.
 

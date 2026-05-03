@@ -1,4 +1,6 @@
 import { mkdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import { Command } from 'commander';
 import { getConfig } from './config.js';
 import { EventStore } from './event-store.js';
@@ -12,8 +14,11 @@ import { WorkstreamRegistry } from './workstream.js';
  * Whether to launch an MCP stdio server in `manager start`.
  * Off by default so a daemon launched as a long-running background process
  * doesn't try to read from a non-existent stdin (which would EOF immediately).
- * Claude Code launches the daemon with this flag set so the MCP transport binds
- * to its stdin/stdout pipe.
+ *
+ * Note: in v0.5.2 the production wiring is `manager mcp` (stdio-only, no HTTP),
+ * which Claude Code launches per session. The `--mcp-stdio` flag on `start`
+ * is kept for backward compat / testing only — it binds BOTH HTTP and MCP, so
+ * if a long-running daemon is already up they will fight for the port.
  */
 const MCP_STDIO_FLAG = '--mcp-stdio';
 
@@ -27,9 +32,19 @@ export function buildCli(): Command {
   program
     .command('start')
     .description('Boot HTTP/WS API. Optionally also bind an MCP server to stdio.')
-    .option(MCP_STDIO_FLAG, 'Bind the MCP server to stdio (for Claude Code).')
+    .option(
+      MCP_STDIO_FLAG,
+      'Bind the MCP server to stdio (testing only — production uses `manager mcp`).',
+    )
     .action(async (opts: { mcpStdio?: boolean }) => {
       await runStart({ mcpStdio: !!opts.mcpStdio });
+    });
+
+  program
+    .command('mcp')
+    .description('Run MCP stdio server only (no HTTP). What Claude Code launches per session.')
+    .action(async () => {
+      await runMcp();
     });
 
   program
@@ -87,6 +102,7 @@ export function buildCli(): Command {
     .action((workstreamId: string) => {
       const cfg = getConfig();
       const sessionId = `sess-${Date.now().toString(36)}`;
+      const repo = resolveRepoRoot();
       process.stdout.write(
         [
           '# Add these to your shell before launching Claude Code:',
@@ -94,17 +110,33 @@ export function buildCli(): Command {
           `export MANAGER_SESSION_ID=${shellQuote(sessionId)}`,
           `export MANAGER_PORT=${cfg.httpPort}`,
           '',
-          '# Then install the lifecycle hooks:',
+          '# Install the lifecycle hooks (one-time, user-scoped):',
           '#   bash hooks/install.sh',
           '',
-          '# The MCP server can be added to ~/.claude/settings.json under',
-          '# "mcpServers" with command="node" args=["<this-repo>/daemon/dist/index.js","start","--mcp-stdio"].',
+          "# Wire Claude Code's MCP to manager (one-time, user-scoped):",
+          `#   claude mcp add manager --scope user -- node "${repo}/daemon/dist/index.js" mcp`,
         ].join('\n'),
       );
       process.stdout.write('\n');
     });
 
   return program;
+}
+
+/**
+ * Resolve the absolute path to the repo root from this module's URL. Walks up
+ * from `daemon/dist/cli.js` (production) or `daemon/src/cli.ts` (dev via tsx).
+ * Falls back to process.cwd() if URL resolution fails.
+ */
+function resolveRepoRoot(): string {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    // here is .../daemon/dist (built) or .../daemon/src (dev). Repo root is
+    // two levels up in either case.
+    return resolve(here, '..', '..');
+  } catch {
+    return process.cwd();
+  }
 }
 
 async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
@@ -151,6 +183,42 @@ async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
   if (!mcpRunning) {
     // Express/HTTP server keeps the loop alive; nothing more to do.
   }
+}
+
+/**
+ * MCP-only mode: stdio MCP server, NO HTTP. Reads/writes the same on-disk
+ * state as the long-running `manager start` daemon (SQLite WAL + JSONL append
+ * make this concurrent-safe). Logs only to stderr — stdout is reserved for
+ * MCP JSON-RPC traffic.
+ */
+async function runMcp(): Promise<void> {
+  const cfg = getConfig();
+  await Promise.all([
+    mkdir(cfg.eventsDir, { recursive: true }),
+    mkdir(cfg.memoryDir, { recursive: true }),
+    mkdir(cfg.queuesDir, { recursive: true }),
+  ]);
+  const registry = new WorkstreamRegistry(cfg.dbPath);
+  const eventStore = new EventStore(cfg.eventsDir);
+  const memoryStore = new MemoryStore(cfg.memoryDir);
+  const interventionQueue = new InterventionQueue(cfg.dbPath);
+  const mcp = buildMcpServer({ eventStore, memoryStore, registry });
+  await startMcpStdio(mcp);
+  process.stderr.write(`[manager] MCP stdio bound; state at ${cfg.home}\n`);
+
+  const shutdown = async (): Promise<void> => {
+    process.stderr.write('[manager] shutting down MCP\n');
+    try {
+      registry.close();
+      interventionQueue.close();
+    } catch (e) {
+      process.stderr.write(`[manager] shutdown error: ${(e as Error).message}\n`);
+    }
+    process.exit(0);
+  };
+  process.on('SIGINT', () => void shutdown());
+  process.on('SIGTERM', () => void shutdown());
+  // The stdio transport keeps the loop alive on its own.
 }
 
 function pad(s: string, w: number): string {

@@ -68,6 +68,19 @@ Responsibilities:
 
 State location: `~/.claude/manager/` (events/, memory/, db.sqlite, queues/).
 
+#### Two-process model
+
+In v0.5.2 the daemon role is split across two process shapes that share the on-disk state directory:
+
+| Process | Command | Lifecycle | Surface |
+|---|---|---|---|
+| Long-running daemon | `manager start` | Started at login by the launchd agent in `~/Library/LaunchAgents/com.manager.daemon.plist` | HTTP/WS on `:9876` for the macOS client (and future remote clients). |
+| Per-session MCP | `manager mcp` | Spawned by Claude Code per session via its `mcpServers` config; lives for the lifetime of one Claude Code session | MCP JSON-RPC over stdio. Binds **no** HTTP port. |
+
+Both read and write `~/.claude/manager/` concurrently. SQLite is opened in WAL mode so cross-process readers/writers don't block each other; JSONL appends are atomic on POSIX (`O_APPEND`). The one race that remains is concurrent edits to the workstream memory Markdown — `MemoryStore.perWorkstreamLock` is per-process, so two MCP children writing the same section in the same millisecond is theoretically last-writer-wins. We accept this in v0.5.2 because memory edits are rare and human-paced; v1 will add an advisory file lock.
+
+The legacy `manager start --mcp-stdio` mode (HTTP + MCP in one process) is kept for testing only — running it alongside the long-running daemon causes a port collision.
+
 #### HTTP + WebSocket API contract
 
 Localhost-only in v0/v0.5/v1; auth + remote binding land in v1.5. Default port 9876, override via `MANAGER_PORT`. Responses are naked JSON (no envelope wrapping); errors are `{error: string}` with the HTTP status code. All Workstream payloads use the snake_case wire format documented under "Workstream" below.
