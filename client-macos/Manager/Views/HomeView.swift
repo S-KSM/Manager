@@ -310,48 +310,54 @@ struct WorkstreamCard: View {
     let workstream: Workstream
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(workstream.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                if workstream.status == .paused {
-                    Image(systemName: "pause.fill")
-                        .imageScale(.small)
-                        .foregroundStyle(.yellow)
-                        .help("Paused")
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(workstream.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                    if workstream.status == .paused {
+                        Image(systemName: "pause.fill")
+                            .imageScale(.small)
+                            .foregroundStyle(.yellow)
+                            .help("Paused")
+                    }
+                    Spacer()
+                    StatusPill(workstream: workstream)
                 }
-                Spacer()
-                StatusPill(workstream: workstream)
-            }
 
-            Text(workstream.id)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Text(workstream.id)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-            if let goal = workstream.currentSubgoal {
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: "arrow.turn.down.right")
-                        .imageScale(.small)
-                        .foregroundStyle(.tertiary)
-                    Text(goal)
-                        .font(.callout)
-                        .lineLimit(2)
+                if let goal = workstream.currentSubgoal {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "arrow.turn.down.right")
+                            .imageScale(.small)
+                            .foregroundStyle(.tertiary)
+                        Text(goal)
+                            .font(.callout)
+                            .lineLimit(2)
+                    }
+                }
+
+                HStack {
+                    if let c = workstream.latestConfidence {
+                        ConfidenceBar(value: c)
+                    }
+                    Spacer()
+                    if workstream.needsAttention {
+                        Label("Needs you", systemImage: "exclamationmark.bubble.fill")
+                            .font(.caption.weight(.semibold))
+                            .labelStyle(.titleAndIcon)
+                            .foregroundStyle(.orange)
+                    }
                 }
             }
-
-            HStack {
-                if let c = workstream.latestConfidence {
-                    ConfidenceBar(value: c)
-                }
-                Spacer()
-                if workstream.needsAttention {
-                    Label("Needs you", systemImage: "exclamationmark.bubble.fill")
-                        .font(.caption.weight(.semibold))
-                        .labelStyle(.titleAndIcon)
-                        .foregroundStyle(.orange)
-                }
-            }
+            // Robot mascot on the right side of the card. State derives from
+            // the workstream projection (last_event_at, needs_attention, status).
+            RobotMascot(workstream: workstream, size: 40)
+                .padding(.top, 2)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)

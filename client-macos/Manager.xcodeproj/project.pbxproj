@@ -37,6 +37,7 @@
 		A100000000000000000003A4 /* ReportViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000003B4 /* ReportViewer.swift */; };
 		A100000000000000000003A5 /* SchedulerSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000003B5 /* SchedulerSettings.swift */; };
 		A100000000000000000003A6 /* ReportCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000003B6 /* ReportCodableTests.swift */; };
+		A100000000000000000004A1 /* RobotMascot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000004B1 /* RobotMascot.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -80,6 +81,7 @@
 		A100000000000000000003B4 /* ReportViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportViewer.swift; sourceTree = "<group>"; };
 		A100000000000000000003B5 /* SchedulerSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulerSettings.swift; sourceTree = "<group>"; };
 		A100000000000000000003B6 /* ReportCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportCodableTests.swift; sourceTree = "<group>"; };
+		A100000000000000000004B1 /* RobotMascot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RobotMascot.swift; sourceTree = "<group>"; };
 		A100000000000000000000C0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A100000000000000000000C1 /* Manager.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Manager.entitlements; sourceTree = "<group>"; };
 		A100000000000000000000C2 /* Manager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Manager.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -186,6 +188,7 @@
 				A100000000000000000003B3 /* GenerateReportSheet.swift */,
 				A100000000000000000003B4 /* ReportViewer.swift */,
 				A100000000000000000003B5 /* SchedulerSettings.swift */,
+				A100000000000000000004B1 /* RobotMascot.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -329,6 +332,7 @@
 				A100000000000000000003A3 /* GenerateReportSheet.swift in Sources */,
 				A100000000000000000003A4 /* ReportViewer.swift in Sources */,
 				A100000000000000000003A5 /* SchedulerSettings.swift in Sources */,
+				A100000000000000000004A1 /* RobotMascot.swift in Sources */,
 				A100000000000000000000AB /* MockData.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

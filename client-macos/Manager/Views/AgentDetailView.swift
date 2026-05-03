@@ -101,7 +101,10 @@ struct AgentDetailView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .center, spacing: 12) {
+            // Big animated mascot for the agent detail header — works /
+            // thinks / blocks / sleeps based on the workstream's projection.
+            RobotMascot(workstream: workstream, size: 56)
             VStack(alignment: .leading, spacing: 2) {
                 Text(workstream.title).font(.title2.weight(.semibold))
                 Text(workstream.id).font(.caption).foregroundStyle(.secondary)
