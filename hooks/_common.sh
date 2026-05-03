@@ -77,3 +77,42 @@ manager_post() {
   # Always succeed.
   return 0
 }
+
+# manager_get <path> — GET against the Manager daemon. Mirrors manager_post's
+# fail-soft discipline: curl -s --max-time 1, never blocks the agent. Prints
+# the response body on stdout when curl reports success; returns non-zero on
+# transport failure (caller should treat that as "no data, do nothing").
+manager_get() {
+  path="$1"
+  if [ -z "$path" ]; then
+    echo "[manager-hook] manager_get: missing path" >&2
+    return 1
+  fi
+  url="http://${MANAGER_HOST}:${MANAGER_PORT}${path}"
+  body=$(curl -s --max-time 1 "$url" 2>/dev/null) || {
+    echo "[manager-hook] GET $url: transport error" >&2
+    return 1
+  }
+  printf '%s' "$body"
+  return 0
+}
+
+# manager_post_json <path> <body> — POST a pre-built JSON body. Same fail-soft
+# discipline as manager_post but skips the stdin/enrichment step. Used for
+# small machine-built requests like the intervention ack.
+manager_post_json() {
+  path="$1"
+  body="$2"
+  if [ -z "$path" ]; then
+    echo "[manager-hook] manager_post_json: missing path" >&2
+    return 1
+  fi
+  url="http://${MANAGER_HOST}:${MANAGER_PORT}${path}"
+  if ! curl -s --max-time 1 -X POST "$url" \
+        -H 'content-type: application/json' \
+        -d "$body" >/dev/null 2>&1; then
+    echo "[manager-hook] POST $url: daemon unreachable" >&2
+    return 1
+  fi
+  return 0
+}
