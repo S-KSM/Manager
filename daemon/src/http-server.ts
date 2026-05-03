@@ -3,6 +3,11 @@ import { createServer, type Server as HttpServer, type IncomingMessage } from 'n
 import express, { type Express, type Request, type Response } from 'express';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { EventStore, ManagerEvent, ManagerEventType } from './event-store.js';
+import type {
+  InterventionKind,
+  InterventionPayload,
+  InterventionQueue,
+} from './intervention-queue.js';
 import type { MemoryStore } from './memory-store.js';
 import type { Workstream, WorkstreamRegistry, WorkstreamWithSessions } from './workstream.js';
 
@@ -10,7 +15,14 @@ interface BuildOptions {
   eventStore: EventStore;
   memoryStore: MemoryStore;
   registry: WorkstreamRegistry;
+  interventionQueue: InterventionQueue;
 }
+
+const INTERVENTION_KINDS: ReadonlySet<InterventionKind> = new Set([
+  'nudge',
+  'redirect',
+  'rollback',
+]);
 
 /**
  * Hooks intake: each `/hooks/<event>` endpoint accepts a JSON payload and
@@ -42,7 +54,7 @@ export interface HttpServerHandle {
 }
 
 export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
-  const { eventStore, memoryStore, registry } = opts;
+  const { eventStore, memoryStore, registry, interventionQueue } = opts;
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
@@ -162,20 +174,96 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     });
   }
 
-  // ---- Interventions (v0.5 stub) ------------------------------------------
+  // ---- Interventions -------------------------------------------------------
 
   app.post('/interventions', (req: Request, res: Response) => {
-    // TODO(v0.5): persist into per-workstream queue and deliver via UserPromptSubmit hook.
-    const body = req.body as { workstreamId?: string; kind?: string; payload?: unknown };
-    if (!body?.workstreamId || !body?.kind) {
-      res.status(400).json({ error: 'workstreamId and kind required' });
+    // Wire format is snake_case (`workstream_id`); the v0 stub used camelCase
+    // (`workstreamId`). Accept either for one release as backwards-compat;
+    // clients should migrate to snake_case to match every other endpoint.
+    const body = (req.body ?? {}) as {
+      workstream_id?: unknown;
+      workstreamId?: unknown;
+      kind?: unknown;
+      payload?: unknown;
+    };
+    const workstreamId =
+      typeof body.workstream_id === 'string' && body.workstream_id
+        ? body.workstream_id
+        : typeof body.workstreamId === 'string' && body.workstreamId
+          ? body.workstreamId
+          : '';
+    const kind = typeof body.kind === 'string' ? body.kind : '';
+    if (!workstreamId) {
+      res.status(400).json({ error: 'workstream_id required' });
       return;
     }
-    res.status(202).json({
-      accepted: true,
-      note: 'intervention queue is a v0.5 feature; payload received but not delivered',
-      received: body,
-    });
+    if (!INTERVENTION_KINDS.has(kind as InterventionKind)) {
+      res.status(400).json({ error: 'kind must be one of nudge, redirect, rollback' });
+      return;
+    }
+    if (!registry.get(workstreamId)) {
+      res.status(404).json({ error: 'workstream not found' });
+      return;
+    }
+    const payload =
+      body.payload && typeof body.payload === 'object'
+        ? (body.payload as InterventionPayload)
+        : ({} as InterventionPayload);
+    if (kind === 'rollback' && !payload.rollback_to_decision_id) {
+      res.status(400).json({ error: 'payload.rollback_to_decision_id required for rollback' });
+      return;
+    }
+    const intervention = interventionQueue.enqueue(workstreamId, kind as InterventionKind, payload);
+    res.status(201).json(intervention);
+  });
+
+  app.get('/workstreams/:id/interventions/pending', (req: Request, res: Response) => {
+    const id = String(req.params['id']);
+    if (!registry.get(id)) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.json(interventionQueue.listPending(id));
+  });
+
+  app.post('/workstreams/:id/interventions/ack', async (req: Request, res: Response) => {
+    const id = String(req.params['id']);
+    if (!registry.get(id)) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const body = (req.body ?? {}) as { ids?: unknown };
+    if (!Array.isArray(body.ids) || body.ids.length === 0) {
+      res.status(400).json({ error: 'ids must be a non-empty array' });
+      return;
+    }
+    const ids = body.ids.filter((x): x is string => typeof x === 'string' && x.length > 0);
+    if (ids.length === 0) {
+      res.status(400).json({ error: 'ids must be a non-empty array of strings' });
+      return;
+    }
+    const updated = interventionQueue.ackDelivered(ids);
+    for (const intv of updated) {
+      const eventPayload: Record<string, unknown> = {
+        intervention_id: intv.id,
+        kind: intv.kind,
+      };
+      if (intv.payload.message !== undefined) {
+        eventPayload['message'] = intv.payload.message;
+      }
+      if (intv.payload.rollback_to_decision_id !== undefined) {
+        eventPayload['rollback_to_decision_id'] = intv.payload.rollback_to_decision_id;
+      }
+      const event: ManagerEvent = {
+        ts: intv.delivered_at ?? new Date().toISOString(),
+        workstream_id: intv.workstream_id,
+        type: 'intervention_delivered',
+        id: `intd_${randomUUID().slice(0, 8)}`,
+        payload: eventPayload,
+      };
+      await eventStore.appendEvent(intv.workstream_id, event);
+    }
+    res.json(updated);
   });
 
   // ---- WebSocket: live event stream ---------------------------------------

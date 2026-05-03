@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { getConfig } from './config.js';
 import { EventStore } from './event-store.js';
 import { buildHttpServer } from './http-server.js';
+import { InterventionQueue } from './intervention-queue.js';
 import { buildMcpServer, startMcpStdio } from './mcp-server.js';
 import { MemoryStore } from './memory-store.js';
 import { WorkstreamRegistry } from './workstream.js';
@@ -116,7 +117,8 @@ async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
   const registry = new WorkstreamRegistry(cfg.dbPath);
   const eventStore = new EventStore(cfg.eventsDir);
   const memoryStore = new MemoryStore(cfg.memoryDir);
-  const http = buildHttpServer({ eventStore, memoryStore, registry });
+  const interventionQueue = new InterventionQueue(cfg.dbPath);
+  const http = buildHttpServer({ eventStore, memoryStore, registry, interventionQueue });
   const port = await http.listen(cfg.httpPort);
   // stderr so JSON-over-stdout MCP traffic stays clean.
   process.stderr.write(`[manager] HTTP/WS listening on http://127.0.0.1:${port}\n`);
@@ -135,6 +137,7 @@ async function runStart(opts: { mcpStdio: boolean }): Promise<void> {
     try {
       await http.close();
       registry.close();
+      interventionQueue.close();
     } catch (e) {
       process.stderr.write(`[manager] shutdown error: ${(e as Error).message}\n`);
     }

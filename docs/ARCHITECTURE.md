@@ -82,7 +82,9 @@ Localhost-only in v0/v0.5/v1; auth + remote binding land in v1.5. Default port 9
 | `GET` | `/workstreams/:id/events` | Array of Event JSON objects. Optional `?since=<byteOffset>`. |
 | `WS`  | `/workstreams/:id/events/stream` | Live event stream. Optional `?since=<byteOffset>` to resume. |
 | `POST` | `/hooks/<event>` | Hook intake; `<event>` ∈ {session-start, stop, pre-tool-use, post-tool-use, user-prompt-submit}. |
-| `POST` | `/interventions` | Body `{workstreamId, kind, payload}`. Stub in v0; queue + delivery land in v0.5. |
+| `POST` | `/interventions` | Body `{workstream_id, kind, payload}`. Persists into the per-workstream queue. Returns 201 with the persisted Intervention. (Accepts legacy `workstreamId` for one release.) |
+| `GET` | `/workstreams/:id/interventions/pending` | Pending interventions (not yet delivered to the agent). |
+| `POST` | `/workstreams/:id/interventions/ack` | Body `{ids: string[]}`. Marks delivered, appends `intervention_delivered` events. |
 
 ### Agent-side instrumentation (Claude Code, v0)
 
@@ -198,6 +200,8 @@ Owned by the agent, edited via `update_memory`. Human can edit directly; next ag
   "delivered_at": null
 }
 ```
+
+Field names are snake_case on the wire (matching every other endpoint). `delivered_at` stays `null` until the agent's `UserPromptSubmit` hook acks delivery via `POST /workstreams/:id/interventions/ack`. The hook drains in two steps — `GET .../interventions/pending` then `POST .../interventions/ack` — so a transport failure on ack does not lose interventions: they remain pending and re-emit on the next turn. The small accepted risk is duplicate context if the ack fails after the agent has already received the pending list; v1 may add an idempotency token to suppress re-emission. `intervention_delivered` events are appended to the JSONL event store on each successful ack so the methodology timeline shows when the intervention was picked up.
 
 ## Event flow: agent emits, manager renders, human nudges
 
