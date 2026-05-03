@@ -23,6 +23,7 @@ set -u
 ASSUME_YES=0
 FORCE_BUILD=0
 SKIP_APP=0
+CHECK_ONLY=0
 APP_DEST="/Applications/Manager.app"
 
 for arg in "$@"; do
@@ -30,6 +31,7 @@ for arg in "$@"; do
     -y|--yes) ASSUME_YES=1 ;;
     --force) FORCE_BUILD=1 ;;
     --skip-app) SKIP_APP=1 ;;
+    --check-only) CHECK_ONLY=1 ;;
     --app-dest=*) APP_DEST="${arg#--app-dest=}" ;;
     --app-dest)
       echo "error: --app-dest requires =PATH form, e.g. --app-dest=/tmp/Manager.app" >&2
@@ -94,14 +96,90 @@ HOME_DIR="${HOME:-/Users/$USER_NAME}"
 
 # ---------------- preflight -------------------------------------------------
 
+# Detailed prereq check. Returns 0 if everything required is present, non-zero
+# if anything blocking is missing. Prints a one-line install hint per missing
+# tool. claude CLI is informational (we fall back to direct settings.json merge).
+check_prereqs() {
+  pre_fail=0
+
+  if [ "$(uname -s 2>/dev/null)" != "Darwin" ]; then
+    warn "Manager only supports macOS for v1; current uname=$(uname -s)"
+    pre_fail=1
+  else
+    ok "macOS detected"
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    nv=$(node --version 2>/dev/null | sed 's/^v//')
+    nmajor=$(printf '%s' "$nv" | cut -d. -f1)
+    if [ "${nmajor:-0}" -lt 20 ] 2>/dev/null; then
+      warn "node $nv found but Manager needs Node 20+. Upgrade with: brew install node"
+      pre_fail=1
+    else
+      ok "node $nv"
+    fi
+  else
+    warn "node missing. Install with: brew install node"
+    pre_fail=1
+  fi
+
+  if command -v npm >/dev/null 2>&1; then
+    ok "npm $(npm --version 2>/dev/null)"
+  else
+    warn "npm missing (usually bundled with node). Install with: brew install node"
+    pre_fail=1
+  fi
+
+  if xcode-select -p >/dev/null 2>&1; then
+    ok "xcode CLT at $(xcode-select -p)"
+  else
+    warn "xcode command line tools missing. Install with: xcode-select --install"
+    pre_fail=1
+  fi
+
+  if command -v jq >/dev/null 2>&1; then
+    ok "jq $(jq --version 2>/dev/null)"
+  else
+    warn "jq missing. Install with: brew install jq"
+    pre_fail=1
+  fi
+
+  if command -v launchctl >/dev/null 2>&1; then
+    ok "launchctl"
+  else
+    warn "launchctl missing — required to register the daemon at login"
+    pre_fail=1
+  fi
+
+  if command -v curl >/dev/null 2>&1; then
+    ok "curl"
+  else
+    warn "curl missing"
+    pre_fail=1
+  fi
+
+  if command -v claude >/dev/null 2>&1; then
+    ok "claude CLI on PATH"
+  else
+    info "claude CLI not on PATH — install will fall back to direct ~/.claude/settings.json merge for the MCP wiring"
+  fi
+
+  return $pre_fail
+}
+
 step "Preflight"
 info "repo: $REPO"
 info "user: $USER_NAME"
-require_cmd node "install Node 20+ from https://nodejs.org or via brew"
-require_cmd npm
-require_cmd jq "brew install jq"
-require_cmd launchctl
-require_cmd curl
+if ! check_prereqs; then
+  if [ "$CHECK_ONLY" = "1" ]; then
+    die "prereq check failed — install the missing tools above and re-run"
+  fi
+  die "missing prerequisites — install the tools listed above (with the hinted commands) and re-run. Use --check-only to re-check without installing."
+fi
+if [ "$CHECK_ONLY" = "1" ]; then
+  ok "all prerequisites satisfied"
+  exit 0
+fi
 ok "preflight"
 
 # ---------------- 1. build daemon ------------------------------------------

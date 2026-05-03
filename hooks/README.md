@@ -49,6 +49,19 @@ export MANAGER_WORKSTREAM=frontend-refactor
 
 The hooks pick these up on every invocation. No reinstall needed.
 
+## Auto-workstream from cwd (v1.1.1)
+
+When `MANAGER_WORKSTREAM` isn't set in the environment, `_common.sh` derives a workstream id from the current directory:
+
+1. `git rev-parse --show-toplevel` → basename of the git repo root.
+2. Otherwise, basename of `$PWD`.
+
+The result is **slugified**: lowercase, non-`[a-z0-9-]` characters become `-`, repeated `-` collapse, leading/trailing `-` trimmed. Empty result falls back to `default`.
+
+Daemon endpoints `POST /hooks/<event>` already auto-register an unknown workstream, so a fresh slug Just Works — a card appears in the macOS app on the next session_start.
+
+Override at any time: `MANAGER_WORKSTREAM=explicit-name claude` (or `export` it in a project-local `.envrc` for `direnv` users). Set `MANAGER_DEBUG=1` to see a stderr breadcrumb each time the slug is derived.
+
 ## SessionStart system-prompt nudge
 
 `session-start.sh` does three things:

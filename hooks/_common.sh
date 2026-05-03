@@ -18,6 +18,40 @@ manager__json_escape() {
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e ':a;N;$!ba;s/\n/\\n/g' -e 's/\r/\\r/g' -e 's/\t/\\t/g'
 }
 
+# Slugify a string into a workstream id: lowercase, non-[a-z0-9-] → '-',
+# collapse repeated '-', trim leading/trailing '-'. Empty result → 'default'.
+manager__slugify() {
+  out=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9-]/-/g' -e 's/-\{2,\}/-/g' -e 's/^-//' -e 's/-$//')
+  if [ -z "$out" ]; then
+    out="default"
+  fi
+  printf '%s' "$out"
+}
+
+# Derive a workstream id when MANAGER_WORKSTREAM isn't set.
+# 1) git repo basename if inside a git work tree, else
+# 2) basename of $PWD.
+# Slugified per `manager__slugify` rules.
+derive_workstream() {
+  if [ -n "${MANAGER_WORKSTREAM:-}" ]; then
+    printf '%s' "$MANAGER_WORKSTREAM"
+    return 0
+  fi
+  root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+  if [ -n "$root" ]; then
+    src=$(basename "$root")
+    reason="git-root"
+  else
+    src=$(basename "$PWD")
+    reason="cwd"
+  fi
+  slug=$(manager__slugify "$src")
+  if [ "${MANAGER_DEBUG:-}" = "1" ]; then
+    echo "[manager-hook] workstream auto-derived as '$slug' from $reason ($src)" >&2
+  fi
+  printf '%s' "$slug"
+}
+
 manager_post() {
   hook_name="$1"
   if [ -z "$hook_name" ]; then
@@ -34,7 +68,7 @@ manager_post() {
     payload="{}"
   fi
 
-  workstream="${MANAGER_WORKSTREAM:-default}"
+  workstream=$(derive_workstream)
   session="${MANAGER_SESSION_ID:-}"
 
   # Enrich the payload. Prefer jq for robust JSON merging; fall back to a
