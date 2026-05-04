@@ -81,9 +81,9 @@ Detailed design in [`/Users/shobeir/.claude/plans/read-specs-md-and-try-refactor
 
 ### v1.4 doc updates
 
-- [ ] `docs/ARCHITECTURE.md` — new "Orchestrator" section + updated mermaid diagram showing observation vs autonomous modes sharing the telemetry path.
-- [ ] `CLAUDE.md` — add orchestrator/observation duality to the Locked Architectural Decisions list.
-- [ ] `README.md` — quickstart adds an "Autonomous mode (optional)" section showing a minimal `WORKFLOW.md`.
+- [x] `docs/ARCHITECTURE.md` — new "Orchestrator (v1.4 — autonomous mode)" section covering state machine / tracker adapter / workflow loader / workspace manager / agent runner + telemetry equivalence + approval bridge + minimal WORKFLOW.md schema. Top-level system mermaid replaced with a dual-mode diagram showing observation + autonomous paths sharing the telemetry layer; added `intervention_enqueued` to the event-types list and documented the `subgoal_push.payload.source = "synthesized"` + `synth_anchor` extensions; added a "LLM-driven enrichment (Headliner + SubgoalSynthesizer)" section.
+- [x] `CLAUDE.md` — orchestrator/observation duality already lives in the Locked Architectural Decisions list ("Two operational modes share one telemetry path (v1.4+)…"). No change needed.
+- [x] `README.md` — Quickstart now links to a new "Autonomous mode (optional, v1.4)" section that shows a minimal WORKFLOW.md, the `dispatch start --workflow` invocation, the `--dry-run` + `--mock-tracker` knobs, and the approval-strip behaviour.
 
 ---
 

@@ -29,6 +29,47 @@ New here? See [`docs/TUTORIAL.md`](docs/TUTORIAL.md) for a 30-minute walk-throug
 To dry-run prereqs without installing: `bash bin/install.sh --check-only`.
 To uninstall: `bash bin/uninstall.sh`.
 
+## Autonomous mode (optional, v1.4)
+
+By default Dispatch is purely *observational* — you launch `claude`, Dispatch watches. With a `WORKFLOW.md` it also drives: the orchestrator polls a tracker (Linear or a mock JSON file), claims tickets, and spawns `claude` per turn inside a per-issue workspace. The same hooks + MCP server feed the same event store, so Radar / Trace / Intercept work identically for orchestrator-spawned agents.
+
+Minimal `WORKFLOW.md`:
+
+```markdown
+---
+tracker:
+  kind: linear
+  project_slug: my-project
+  api_key: $LINEAR_TOKEN          # env var indirection
+  active_states: [Todo, In Progress]
+polling:
+  interval_ms: 30000
+workspace:
+  root: ~/Code/dispatch-workspaces
+agent:
+  runtime: claude-code
+  max_concurrent_agents: 3
+---
+
+You are working on {{ issue.identifier }}: {{ issue.title }}.
+
+{% if attempt %}This is attempt #{{ attempt }} after a previous failure.{% endif %}
+
+Description:
+{{ issue.description }}
+```
+
+Run with the workflow attached:
+
+```sh
+export LINEAR_TOKEN=lin_api_...
+dispatch start --workflow ~/dispatch/WORKFLOW.md
+```
+
+Dry-run (claim/release decisions logged but no agent spawn): add `--dry-run`. Want to drive it from a JSON fixture instead of Linear? Use `tracker.kind: mock` and `--mock-tracker <path-to-issues.json>`. Full schema, error categories, and the WORKFLOW.md renderer surface are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) under "Orchestrator (v1.4 — autonomous mode)".
+
+When an autonomous agent needs human authorization for a destructive action, an `approval_required` intervention surfaces as an Approve / Deny strip in the agent detail view. Approving emits an `intervention_delivered` event with `approved: true` so the agent's next turn knows it was cleared.
+
 ## The Dispatch lexicon
 
 | Capability | Dispatch term | What it is |

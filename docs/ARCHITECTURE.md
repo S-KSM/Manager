@@ -25,25 +25,36 @@ This document describes the components, data flow, and contracts that make **Dis
 
 ## System overview
 
+Dispatch supports **two operational modes** that share one telemetry path (v1.4+):
+
+- **Observation mode** — the human launches `claude` themselves; lifecycle hooks + the MCP server feed events into the daemon. This is the v0 mode and remains the default when no `WORKFLOW.md` is configured.
+- **Autonomous mode** — the orchestrator polls a tracker (Linear / mock), claims tickets, spawns `claude` per turn inside a per-issue workspace. The *same* hooks + MCP server feed the *same* event store, so Radar / Trace / Intercept work identically regardless of who launched the session.
+
 ```mermaid
 graph LR
-    subgraph "Agent runtime (v0: Claude Code)"
-        CC1[Session A]
-        CC2[Session B]
+    subgraph "Agent runtime (Claude Code)"
+        CC1[Session A — human-launched]
+        CC2[Session B — orchestrator-spawned]
         H1[Lifecycle hooks]
     end
 
-    subgraph "Manager Daemon (local, long-running)"
-        MCP[MCP server<br/>emit_decision, emit_subgoal,<br/>emit_confidence, flag_blocked,<br/>update_memory, read_memory]
+    subgraph "Dispatch Daemon (local, long-running)"
+        ORCH["Orchestrator (v1.4)<br/>tracker poll · workspace · agent runner<br/>active only when --workflow is set"]
+        MCP[MCP server<br/>emit_decision, emit_subgoal,<br/>emit_confidence, flag_blocked,<br/>update_memory, read_memory,<br/>propose_skill]
         API[HTTP / WebSocket API<br/>for clients]
+        HEAD["Headliner + SubgoalSynthesizer<br/>local LLM enrichment (qwen3:4b via Ollama)"]
         ES[(Event store<br/>JSONL append-only)]
-        MEM[(Workstream memory<br/>Markdown per workstream)]
-        Q[(Intervention queue<br/>per workstream)]
+        MEM[(Workstream Dossier<br/>Markdown per workstream)]
+        Q[(Intercept queue<br/>per workstream — SQLite)]
+    end
+
+    subgraph "External"
+        TRK[Tracker — Linear or mock]
     end
 
     subgraph "Clients"
         MAC[macOS app<br/>SwiftUI]
-        IOS[iOS app<br/>future]
+        IOS[iOS app<br/>future v1.5]
         WEB[Web client<br/>future]
     end
 
@@ -56,6 +67,10 @@ graph LR
     Q -- delivered via pre-turn hook --> CC1
     Q -- delivered via pre-turn hook --> CC2
 
+    ORCH -- claim / release / refresh --> TRK
+    ORCH -- spawns per turn --> CC2
+    HEAD -- reads ES, writes synthesized subgoal_push --> ES
+
     MAC <-- HTTP / WS --> API
     IOS -.future.-> API
     WEB -.future.-> API
@@ -63,6 +78,7 @@ graph LR
     API --> ES
     API --> MEM
     API --> Q
+    API --> ORCH
 ```
 
 ## Components
@@ -162,6 +178,68 @@ Agent prompt (system message added at workstream start) instructs the agent to c
 
 **iOS / web (future):** same API contract, different rendering. The daemon exposes its API on localhost only in v0; v1.5 adds authenticated remote access for mobile.
 
+### Orchestrator (v1.4 — autonomous mode)
+
+The orchestrator is the second runtime path into the daemon. Activated only when `dispatch start --workflow <path>` is passed; without that flag the daemon stays purely observational. The architecture follows OpenAI's [Symphony](https://github.com/openai/symphony) spec; we adopted §7–§11 verbatim and bolted them onto our existing telemetry path so observation features (Radar, Trace, Intercept, Protocol) work for orchestrator-spawned agents with zero new code on the presentation side.
+
+Five components, all in `daemon/src/`:
+
+| Component | File | Responsibility |
+|---|---|---|
+| **State machine** | `orchestrator.ts` | Symphony §7 — per-issue lifecycle (`Unclaimed → Claimed → Running → RetryQueued / Released`). Symphony §8 candidate selection + sort. §8.4 retry/backoff. §8.5 reconciliation tick. |
+| **Tracker adapter** | `trackers/{linear,mock}.ts` | Pluggable. Symphony §11 GraphQL for Linear; the mock reads a JSON file for tests. Common interface: `listIssues`, `claim`, `release`, `setState`. |
+| **Workflow loader** | `workflow-loader.ts` | Reads `WORKFLOW.md` — YAML front matter + Markdown prompt template. Env var indirection (`api_key: $LINEAR_TOKEN`). Dynamic reload via `fs.watch` + 60-second backstop poll. |
+| **Workspace manager** | `workspaces.ts` | Symphony §9 — one directory per claimed issue under `workspace.root`. Sanitized key `[A-Za-z0-9._-]`, safety invariants (path containment, refusal to delete outside root). Pre/post hooks via `bash -lc` with timeout. Reuses the dir across runs of the same issue. |
+| **Agent runner** | `agent-runner.ts` | Spawns `claude` per turn inside the workspace (option A of Symphony §10). Sets `DISPATCH_WORKSTREAM` + `DISPATCH_SESSION_ID` so the existing hooks + MCP route events to the right workstream — no parallel telemetry path. Captures stderr tail, maps exit codes to Symphony §10.6 error categories (`turn_timeout`, `turn_failed`, `codex_not_found`, `spawn_error`). |
+
+**Telemetry equivalence.** The orchestrator does not emit any new event types. A spawned `claude` session writes the same `session_start` / `tool_use` / `decision` / `subgoal_push` / etc. that a human-launched session writes — because it *is* the same `claude`, with the same hooks installed and the same MCP server attached. The only orchestration-specific surface is `GET /orchestrator/state` (Symphony §13.7.2 snapshot) for the macOS client to render an "autonomous" badge on cards spawned by the orchestrator.
+
+**Approval bridge (v1.4.4).** When an autonomous agent needs human authorization for a destructive or out-of-scope action it enqueues an `approval_required` intervention. The macOS `AgentDetailView` renders an `ApprovalStrip` between the header and the timeline; tapping Approve / Deny calls `POST /workstreams/:id/interventions/:intId/decide`, which atomically merges the decision into the queue and emits `intervention_delivered` with `approved: bool`. The agent-side trigger (an MCP tool that enqueues approval requests) is deferred to v1.4.5; until then the queue + API + UI infra ships ahead of any source that fills it.
+
+**WORKFLOW.md schema (minimum viable):**
+
+```markdown
+---
+tracker:
+  kind: linear              # or `mock` for tests
+  project_slug: my-project
+  api_key: $LINEAR_TOKEN    # env var indirection — loader resolves at boot
+  active_states: [Todo, In Progress]
+  terminal_states: [Done, Cancelled]
+polling:
+  interval_ms: 30000
+workspace:
+  root: ~/Code/dispatch-workspaces
+agent:
+  runtime: claude-code
+  max_concurrent_agents: 3
+hooks:
+  pre_turn:  "git fetch && git checkout -b ds/{{ issue.identifier | lower }}"
+  post_turn: "git status -s"
+  timeout_ms: 60000
+---
+
+You are working on {{ issue.identifier }}: {{ issue.title }}.
+
+{% if attempt %}This is attempt #{{ attempt }} after a previous failure.{% endif %}
+
+Description:
+{{ issue.description }}
+```
+
+The Markdown body is the **prompt template** rendered per turn with the issue context. The minimal renderer supports `{{ issue.* }}` substitution and a single `{% if attempt %}` conditional — no full Liquid/Jinja runtime.
+
+### LLM-driven enrichment (Headliner + SubgoalSynthesizer)
+
+Two background tickers in the daemon run a small local model (default `qwen3:4b` via Ollama) to add narrative on top of the raw event log:
+
+- **Headliner** (`daemon/src/headliner.ts`) — every ~30s, regenerates a one-sentence "Currently:" summary per workstream from the recent event window. Surfaced as `Workstream.activity_headline`. The macOS HomeView card prefers it over `latest_activity`.
+- **SubgoalSynthesizer** (`daemon/src/subgoal-synthesizer.ts`) — same cadence, watches each workstream for runs of ≥8 consecutive `post-tool-use` events with no agent-emitted narration in between (no `decision`, `subgoal_push`, `blocked`, …). Each such window is summarized as a single present-progressive sentence and **written back to the event log as a `subgoal_push` event** with two extra payload fields: `source: "synthesized"` and `synth_anchor: "<firstId>..<lastId>"`. The anchor is read back from the log on every tick so the same window is never summarized twice — synthesis is idempotent across daemon restarts. Disabled with `DISPATCH_SUBGOAL_SYNTH_ENABLED=0`.
+
+Both tickers degrade silently when the LLM endpoint is unreachable; the deterministic projections (`latest_activity`, raw `tool_use` rows) remain the fallback.
+
+The macOS timeline renders synthesized sub-goals with a 🤖 prefix and collapses runs of raw `tool_use` rows into an "N actions ▸" pill so the human sees story + sub-story rather than a list of bash calls — see `client-macos/Dispatch/Views/AgentDetailView.swift`.
+
 ## Data model
 
 ### Workstream
@@ -209,7 +287,9 @@ In v0.5.1 these are recomputed by re-reading the per-workstream events file on e
 }
 ```
 
-Event types: `session_start`, `session_end`, `decision`, `subgoal_push`, `subgoal_pop`, `confidence`, `tool_use`, `blocked`, `memory_update`, `intervention_delivered`, `workstream_updated`, `skill_proposed`, `skill_promoted`.
+Event types: `session_start`, `session_end`, `decision`, `subgoal_push`, `subgoal_pop`, `confidence`, `tool_use`, `blocked`, `memory_update`, `intervention_enqueued`, `intervention_delivered`, `workstream_updated`, `skill_proposed`, `skill_promoted`.
+
+**Payload extensions.** A `subgoal_push` event with `payload.source = "synthesized"` was written by the SubgoalSynthesizer rather than the agent itself; `payload.synth_anchor` carries the deterministic window key (`<firstToolUseId>..<lastToolUseId>`) used for cross-restart idempotency. The macOS client uses `source` to render a 🤖 marker on the row; everything else (timeline ordering, intercept eligibility, projection inputs) treats the event identically to an agent-emitted sub-goal.
 
 ### Workstream memory (Markdown)
 
