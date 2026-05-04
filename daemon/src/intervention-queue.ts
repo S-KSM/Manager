@@ -185,6 +185,26 @@ export class InterventionQueue {
     return this.rowToWire(updated);
   }
 
+  /**
+   * Count pending (undelivered) interventions for a workstream, optionally
+   * scoped to a single kind. Used by the digest projection so workstreams
+   * with a pending `approval_required` count toward `needs_attention` even
+   * if they have no `blocked` event.
+   */
+  countPending(workstreamId: string, kind?: InterventionKind): number {
+    const stmt = kind
+      ? this.db.prepare(
+          'SELECT COUNT(*) AS n FROM interventions WHERE workstream_id = ? AND kind = ? AND delivered_at IS NULL',
+        )
+      : this.db.prepare(
+          'SELECT COUNT(*) AS n FROM interventions WHERE workstream_id = ? AND delivered_at IS NULL',
+        );
+    const row = (kind ? stmt.get(workstreamId, kind) : stmt.get(workstreamId)) as
+      | { n: number }
+      | undefined;
+    return row?.n ?? 0;
+  }
+
   /** Test/UI helper: every intervention for a workstream, oldest first. */
   all(workstreamId: string, limit?: number): Intervention[] {
     const stmt = limit

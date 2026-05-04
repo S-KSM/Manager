@@ -43,6 +43,20 @@ struct HomeView: View {
         case editTitle
     }
 
+    /// Radar filter driven by the digest strip. Tapping a stat sets the
+    /// filter; tapping it again clears back to `.all`. The team floor
+    /// applies the predicate to its visible workstreams.
+    enum RadarFilter: Hashable {
+        case all
+        case shipped
+        case blocked
+        case needsYou
+        case active
+    }
+
+    @State private var filter: RadarFilter = .all
+    @State private var lastBuckets: DigestBuckets = DigestBuckets()
+
     /// True when we have nothing to render on the team floor and the live
     /// daemon is the source of truth — i.e. the user genuinely has zero
     /// active/paused workstreams yet, not "we couldn't reach the daemon
@@ -63,6 +77,40 @@ struct HomeView: View {
         resolver.mode == .mock
     }
 
+    /// Apply the active digest-strip filter to the team-floor cards.
+    /// `.all` is identity. Other buckets prefer the daemon-supplied id list
+    /// (exact membership) and fall back to model-level predicates when the
+    /// list is empty (e.g. older daemons that don't ship `buckets` yet).
+    private var filteredWorkstreams: [Workstream] {
+        switch filter {
+        case .all:
+            return workstreams
+        case .blocked:
+            if !lastBuckets.blocked.isEmpty {
+                let set = Set(lastBuckets.blocked)
+                return workstreams.filter { set.contains($0.id) }
+            }
+            return workstreams.filter { $0.needsAttention }
+        case .needsYou:
+            if !lastBuckets.needsAttention.isEmpty {
+                let set = Set(lastBuckets.needsAttention)
+                return workstreams.filter { set.contains($0.id) }
+            }
+            return workstreams.filter { $0.needsAttention }
+        case .active:
+            if !lastBuckets.active.isEmpty {
+                let set = Set(lastBuckets.active)
+                return workstreams.filter { set.contains($0.id) }
+            }
+            return workstreams.filter { $0.status == .active }
+        case .shipped:
+            // No reliable model-level predicate for "shipped in window";
+            // depend on the daemon-supplied bucket. Empty list → empty floor.
+            let set = Set(lastBuckets.shipped)
+            return workstreams.filter { set.contains($0.id) }
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if showMockBanner {
@@ -74,7 +122,9 @@ struct HomeView: View {
             DigestRailView(
                 client: client,
                 workstreams: workstreams,
-                onHighlightSelect: onSelect
+                onHighlightSelect: onSelect,
+                filter: $filter,
+                onBucketsUpdate: { lastBuckets = $0 }
             )
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
@@ -88,9 +138,11 @@ struct HomeView: View {
                         RadarEmptyStateView()
                     } else {
                         TeamFloorView(
-                            workstreams: workstreams,
+                            workstreams: filteredWorkstreams,
                             onSelect: onSelect,
-                            onLifecycleAction: onLifecycleAction
+                            onLifecycleAction: onLifecycleAction,
+                            activeFilter: filter,
+                            onClearFilter: { filter = .all }
                         )
                     }
                 }
@@ -347,6 +399,12 @@ struct DigestRailView: View {
     let client: DaemonClientProtocol
     let workstreams: [Workstream]
     let onHighlightSelect: (Workstream) -> Void
+    /// Two-way binding to the parent's RadarFilter — taps on a `DigestStat`
+    /// set/clear the filter. `.all` is the cleared state.
+    @Binding var filter: HomeView.RadarFilter
+    /// Notifies the parent when `digest.buckets` updates so it can build
+    /// exact-membership predicates for the filtered team floor.
+    var onBucketsUpdate: (DigestBuckets) -> Void
 
     @State private var digest: Digest?
     @State private var loading = true
@@ -371,25 +429,33 @@ struct DigestRailView: View {
                         label: "Shipped",
                         value: "\(totals.shipped)",
                         systemImage: "checkmark.seal",
-                        tint: .blue
+                        tint: .blue,
+                        isSelected: filter == .shipped,
+                        onTap: { toggle(.shipped) }
                     )
                     DigestStat(
                         label: "Blocked",
                         value: "\(totals.blocked)",
                         systemImage: "exclamationmark.octagon.fill",
-                        tint: .red
+                        tint: .red,
+                        isSelected: filter == .blocked,
+                        onTap: { toggle(.blocked) }
                     )
                     DigestStat(
                         label: "Needs you",
                         value: "\(totals.needsAttention)",
                         systemImage: "exclamationmark.bubble.fill",
-                        tint: .orange
+                        tint: .orange,
+                        isSelected: filter == .needsYou,
+                        onTap: { toggle(.needsYou) }
                     )
                     DigestStat(
                         label: "Active",
                         value: "\(totals.active)",
                         systemImage: "bolt.horizontal.fill",
-                        tint: .green
+                        tint: .green,
+                        isSelected: filter == .active,
+                        onTap: { toggle(.active) }
                     )
                 } else if loading {
                     ProgressView().controlSize(.small)
@@ -431,6 +497,24 @@ struct DigestRailView: View {
                 await refreshOnce()
             }
         }
+        // Live refresh: ContentView already debounces a workstream-list
+        // re-fetch on every WS event (intervention_enqueued / blocked /
+        // session_end / etc.). Piggy-back on that signal so the digest
+        // counters track real-time instead of waiting up to 5 minutes for
+        // the polling tick.
+        .onChange(of: refreshKey) {
+            Task { await refreshOnce() }
+        }
+    }
+
+    /// Token that flips whenever any workstream-level state the digest cares
+    /// about changes. Includes status + needsAttention + the new headline so
+    /// transient tool_use bursts don't churn — but blocked flips, status
+    /// changes, and lifecycle events do.
+    private var refreshKey: String {
+        workstreams
+            .map { "\($0.id):\($0.status.rawValue):\($0.needsAttention ? 1 : 0):\($0.activityHeadlineAt?.timeIntervalSince1970 ?? 0)" }
+            .joined(separator: "|")
     }
 
     private var highlights: [DigestHighlight] {
@@ -455,11 +539,17 @@ struct DigestRailView: View {
         do {
             let next = try await client.getDigest(since: nil)
             digest = next
+            onBucketsUpdate(next.buckets)
             lastError = nil
         } catch {
             lastError = (error as? LocalizedError)?.errorDescription
                 ?? "Could not load digest."
         }
+    }
+
+    /// Tap → set this filter; tap again on the same one → clear back to .all.
+    private func toggle(_ tapped: HomeView.RadarFilter) {
+        filter = (filter == tapped) ? .all : tapped
     }
 }
 
@@ -468,23 +558,40 @@ private struct DigestStat: View {
     let value: String
     let systemImage: String
     let tint: Color
+    let isSelected: Bool
+    let onTap: () -> Void
 
     var body: some View {
-        VStack(alignment: .center, spacing: 2) {
-            HStack(spacing: 4) {
-                Image(systemName: systemImage)
-                    .imageScale(.small)
-                    .foregroundStyle(tint)
-                Text(value)
-                    .font(.title2.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(tint)
+        Button(action: onTap) {
+            VStack(alignment: .center, spacing: 2) {
+                HStack(spacing: 4) {
+                    Image(systemName: systemImage)
+                        .imageScale(.small)
+                        .foregroundStyle(tint)
+                    Text(value)
+                        .font(.title2.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(tint)
+                }
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
             }
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
+            .frame(minWidth: 64)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? tint.opacity(0.15) : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isSelected ? tint.opacity(0.55) : Color.clear, lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
-        .frame(minWidth: 56)
+        .buttonStyle(.plain)
+        .help(isSelected ? "Tap to clear filter" : "Filter Radar to \(label)")
     }
 }
 
@@ -524,6 +631,10 @@ struct TeamFloorView: View {
     let workstreams: [Workstream]
     let onSelect: (Workstream) -> Void
     let onLifecycleAction: (Workstream, HomeView.LifecycleAction) -> Void
+    /// Active digest-strip filter (`.all` when no filter is applied). Used
+    /// only to render the "Filtered to X — Clear" pill above the grid.
+    var activeFilter: HomeView.RadarFilter = .all
+    var onClearFilter: (() -> Void)? = nil
 
     private let columns = [
         GridItem(.adaptive(minimum: 280, maximum: 360), spacing: 16, alignment: .top)
@@ -537,22 +648,75 @@ struct TeamFloorView: View {
 
     var body: some View {
         ScrollView {
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                ForEach(visibleWorkstreams) { ws in
-                    Button {
-                        onSelect(ws)
-                    } label: {
-                        WorkstreamCard(workstream: ws)
+            VStack(alignment: .leading, spacing: 12) {
+                if activeFilter != .all {
+                    filterPill
+                }
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                    ForEach(visibleWorkstreams) { ws in
+                        Button {
+                            onSelect(ws)
+                        } label: {
+                            WorkstreamCard(workstream: ws)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            cardMenu(for: ws)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        cardMenu(for: ws)
-                    }
+                }
+                if visibleWorkstreams.isEmpty && activeFilter != .all {
+                    emptyFilterMessage
                 }
             }
             .padding(20)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var filterLabel: String {
+        switch activeFilter {
+        case .all:      return ""
+        case .shipped:  return "Shipped"
+        case .blocked:  return "Blocked"
+        case .needsYou: return "Needs you"
+        case .active:   return "Active"
+        }
+    }
+
+    @ViewBuilder
+    private var filterPill: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                .imageScale(.small)
+                .foregroundStyle(.secondary)
+            Text("Filtered to ").font(.caption).foregroundStyle(.secondary)
+            + Text(filterLabel).font(.caption.weight(.semibold))
+            Spacer()
+            Button("Clear") { onClearFilter?() }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.gray.opacity(0.08))
+        )
+    }
+
+    @ViewBuilder
+    private var emptyFilterMessage: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "tray")
+                .imageScale(.large)
+                .foregroundStyle(.tertiary)
+            Text("Nothing in this bucket right now.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
     }
 
     @ViewBuilder

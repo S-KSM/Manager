@@ -381,7 +381,7 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
 
   // ---- Interventions -------------------------------------------------------
 
-  app.post('/interventions', (req: Request, res: Response) => {
+  app.post('/interventions', async (req: Request, res: Response) => {
     // Wire format is snake_case (`workstream_id`); the v0 stub used camelCase
     // (`workstreamId`). Accept either for one release as backwards-compat;
     // clients should migrate to snake_case to match every other endpoint.
@@ -421,6 +421,20 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
       return;
     }
     const intervention = interventionQueue.enqueue(workstreamId, kind as InterventionKind, payload);
+    // Mirror the enqueue into the event store so per-workstream WS streams
+    // broadcast it. The Radar's digest counter and the AgentDetailView's
+    // ApprovalStrip both refresh off these events instead of polling.
+    const enqueuedEvent: ManagerEvent = {
+      ts: intervention.created_at,
+      workstream_id: workstreamId,
+      type: 'intervention_enqueued',
+      id: `intq_${randomUUID().slice(0, 8)}`,
+      payload: {
+        intervention_id: intervention.id,
+        kind: intervention.kind,
+      },
+    };
+    await eventStore.appendEvent(workstreamId, enqueuedEvent);
     res.status(201).json(intervention);
   });
 
@@ -530,7 +544,7 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     } else {
       since = new Date(Date.now() - DIGEST_DEFAULT_WINDOW_MS);
     }
-    const digest = await buildDigest({ registry, eventStore }, since);
+    const digest = await buildDigest({ registry, eventStore, interventionQueue }, since);
     res.json(digest);
   });
 

@@ -1,12 +1,34 @@
 import type { EventStore, ManagerEvent } from './event-store.js';
+import type { InterventionQueue } from './intervention-queue.js';
 import { projectFromEvents } from './projections.js';
 import type { WorkstreamRegistry } from './workstream.js';
 
 export interface DigestTotals {
   shipped: number;
   blocked: number;
+  /**
+   * Workstreams that need a human action — superset of `blocked`. A
+   * workstream counts as `needs_attention` when:
+   *   - it has an unresolved `blocked` event, OR
+   *   - the InterventionQueue has at least one pending `approval_required`
+   *     intervention for it (v1.4.4 approval bridge).
+   * Per-workstream dedupe: a workstream that is *both* blocked and awaiting
+   * approval still counts as one.
+   */
   needs_attention: number;
   active: number;
+}
+
+/**
+ * Per-bucket workstream-id membership. Same buckets as `DigestTotals` —
+ * `<bucket>.length === totals.<bucket>`. Lets the macOS client filter the
+ * Radar to a single bucket without re-implementing the predicate.
+ */
+export interface DigestBuckets {
+  shipped: string[];
+  blocked: string[];
+  needs_attention: string[];
+  active: string[];
 }
 
 export interface DigestHighlight {
@@ -18,12 +40,20 @@ export interface DigestHighlight {
 export interface Digest {
   since: string;
   totals: DigestTotals;
+  buckets: DigestBuckets;
   highlights: DigestHighlight[];
 }
 
 interface BuildDeps {
   registry: WorkstreamRegistry;
   eventStore: EventStore;
+  /**
+   * Optional. When supplied, workstreams with a pending `approval_required`
+   * intervention also count toward `needs_attention`. Absent in legacy
+   * call sites that don't yet pass the queue (tests, etc.) — those keep
+   * the pre-v1.4.4 blocked-only semantics.
+   */
+  interventionQueue?: InterventionQueue;
 }
 
 interface PerWorkstreamSummary {
@@ -32,6 +62,8 @@ interface PerWorkstreamSummary {
   eventsInWindow: number;
   decisionsInWindow: number;
   needsAttention: boolean;
+  blocked: boolean;
+  pendingApprovals: number;
   summary: string;
 }
 
@@ -45,13 +77,18 @@ interface PerWorkstreamSummary {
  * fields (current sub-goal, latest confidence) for human-readable detail.
  */
 export async function buildDigest(deps: BuildDeps, since: Date): Promise<Digest> {
-  const { registry, eventStore } = deps;
+  const { registry, eventStore, interventionQueue } = deps;
   const sinceIso = since.toISOString();
   const summaries: PerWorkstreamSummary[] = [];
 
   let shippedCount = 0;
+  let blockedCount = 0;
   let needsAttentionCount = 0;
   let activeCount = 0;
+  const shippedIds: string[] = [];
+  const blockedIds: string[] = [];
+  const needsAttentionIds: string[] = [];
+  const activeIds: string[] = [];
 
   for (const ws of registry.list()) {
     const { events } = await eventStore.readEvents(ws.id);
@@ -60,11 +97,28 @@ export async function buildDigest(deps: BuildDeps, since: Date): Promise<Digest>
     const decisionsInWindow = eventsInWindow.filter((e) => e.type === 'decision');
     const wasShipped = decisionsInWindow.length > 0;
     const wasActive = eventsInWindow.length > 0;
-    const needsAttention = projection.needs_attention;
+    const blocked = projection.needs_attention;
+    const pendingApprovals = interventionQueue
+      ? interventionQueue.countPending(ws.id, 'approval_required')
+      : 0;
+    const needsAttention = blocked || pendingApprovals > 0;
 
-    if (wasShipped) shippedCount += 1;
-    if (needsAttention) needsAttentionCount += 1;
-    if (wasActive) activeCount += 1;
+    if (wasShipped) {
+      shippedCount += 1;
+      shippedIds.push(ws.id);
+    }
+    if (blocked) {
+      blockedCount += 1;
+      blockedIds.push(ws.id);
+    }
+    if (needsAttention) {
+      needsAttentionCount += 1;
+      needsAttentionIds.push(ws.id);
+    }
+    if (wasActive) {
+      activeCount += 1;
+      activeIds.push(ws.id);
+    }
 
     const summary = buildSummary({
       events,
@@ -72,6 +126,8 @@ export async function buildDigest(deps: BuildDeps, since: Date): Promise<Digest>
       decisionsInWindow,
       projection,
       needsAttention,
+      blocked,
+      pendingApprovals,
       wasShipped,
       wasActive,
     });
@@ -82,6 +138,8 @@ export async function buildDigest(deps: BuildDeps, since: Date): Promise<Digest>
       eventsInWindow: eventsInWindow.length,
       decisionsInWindow: decisionsInWindow.length,
       needsAttention,
+      blocked,
+      pendingApprovals,
       summary,
     });
   }
@@ -105,9 +163,15 @@ export async function buildDigest(deps: BuildDeps, since: Date): Promise<Digest>
     since: sinceIso,
     totals: {
       shipped: shippedCount,
-      blocked: needsAttentionCount,
+      blocked: blockedCount,
       needs_attention: needsAttentionCount,
       active: activeCount,
+    },
+    buckets: {
+      shipped: shippedIds,
+      blocked: blockedIds,
+      needs_attention: needsAttentionIds,
+      active: activeIds,
     },
     highlights,
   };
@@ -127,17 +191,32 @@ interface SummaryArgs {
     needs_attention: boolean;
   };
   needsAttention: boolean;
+  blocked: boolean;
+  pendingApprovals: number;
   wasShipped: boolean;
   wasActive: boolean;
 }
 
 function buildSummary(args: SummaryArgs): string {
-  const { eventsInWindow, decisionsInWindow, projection, needsAttention, wasShipped, wasActive } =
-    args;
+  const {
+    eventsInWindow,
+    decisionsInWindow,
+    projection,
+    needsAttention,
+    blocked,
+    pendingApprovals,
+    wasShipped,
+    wasActive,
+  } = args;
 
   if (needsAttention) {
-    const reason = latestBlockedReason(eventsInWindow.length > 0 ? eventsInWindow : args.events);
-    return reason ? `blocked: ${reason}` : 'blocked';
+    if (blocked) {
+      const reason = latestBlockedReason(eventsInWindow.length > 0 ? eventsInWindow : args.events);
+      return reason ? `blocked: ${reason}` : 'blocked';
+    }
+    return pendingApprovals === 1
+      ? 'awaiting approval'
+      : `awaiting ${pendingApprovals} approvals`;
   }
 
   if (wasShipped) {

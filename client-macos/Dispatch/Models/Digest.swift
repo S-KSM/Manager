@@ -47,14 +47,73 @@ struct DigestHighlight: Codable, Sendable, Identifiable, Hashable {
     }
 }
 
+/// Per-bucket workstream-id membership matching `DigestTotals`. Daemon side
+/// in `daemon/src/digest.ts` (`DigestBuckets`). Lets the client filter the
+/// Radar to a single bucket without re-implementing the predicate.
+///
+/// Optional fields default to empty arrays so a daemon that hasn't been
+/// upgraded yet still decodes (the client just falls back to its
+/// model-level predicates when the array is empty).
+struct DigestBuckets: Codable, Sendable, Hashable {
+    let shipped: [String]
+    let blocked: [String]
+    let needsAttention: [String]
+    let active: [String]
+
+    init(shipped: [String] = [], blocked: [String] = [], needsAttention: [String] = [], active: [String] = []) {
+        self.shipped = shipped
+        self.blocked = blocked
+        self.needsAttention = needsAttention
+        self.active = active
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case shipped
+        case blocked
+        case active
+        case needsAttention = "needs_attention"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.shipped = try c.decodeIfPresent([String].self, forKey: .shipped) ?? []
+        self.blocked = try c.decodeIfPresent([String].self, forKey: .blocked) ?? []
+        self.needsAttention = try c.decodeIfPresent([String].self, forKey: .needsAttention) ?? []
+        self.active = try c.decodeIfPresent([String].self, forKey: .active) ?? []
+    }
+}
+
 struct Digest: Codable, Sendable, Hashable {
     let since: Date
     let totals: DigestTotals
+    let buckets: DigestBuckets
     let highlights: [DigestHighlight]
 
-    init(since: Date, totals: DigestTotals, highlights: [DigestHighlight]) {
+    init(
+        since: Date,
+        totals: DigestTotals,
+        buckets: DigestBuckets = DigestBuckets(),
+        highlights: [DigestHighlight]
+    ) {
         self.since = since
         self.totals = totals
+        self.buckets = buckets
         self.highlights = highlights
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case since
+        case totals
+        case buckets
+        case highlights
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.since = try c.decode(Date.self, forKey: .since)
+        self.totals = try c.decode(DigestTotals.self, forKey: .totals)
+        // Backwards-compat: pre-bucket daemon responses won't include this.
+        self.buckets = try c.decodeIfPresent(DigestBuckets.self, forKey: .buckets) ?? DigestBuckets()
+        self.highlights = try c.decode([DigestHighlight].self, forKey: .highlights)
     }
 }

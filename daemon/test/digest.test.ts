@@ -4,20 +4,24 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildDigest } from '../src/digest.js';
 import { EventStore, type ManagerEvent } from '../src/event-store.js';
+import { InterventionQueue } from '../src/intervention-queue.js';
 import { WorkstreamRegistry } from '../src/workstream.js';
 
 describe('buildDigest', () => {
   let dir: string;
   let registry: WorkstreamRegistry;
   let eventStore: EventStore;
+  let interventionQueue: InterventionQueue;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'manager-digest-'));
     registry = new WorkstreamRegistry(join(dir, 'db.sqlite'));
     eventStore = new EventStore(join(dir, 'events'));
+    interventionQueue = new InterventionQueue(join(dir, 'db.sqlite'));
   });
 
   afterEach(() => {
+    interventionQueue.close();
     registry.close();
     rmSync(dir, { recursive: true, force: true });
   });
@@ -175,5 +179,57 @@ describe('buildDigest', () => {
     const since = new Date('2026-05-01T00:00:00Z');
     const digest = await buildDigest({ registry, eventStore }, since);
     expect(digest.since).toBe('2026-05-01T00:00:00.000Z');
+  });
+
+  it('pending approval_required intervention counts toward needs_attention but not blocked', async () => {
+    registry.create('a', 'A');
+    interventionQueue.enqueue('a', 'approval_required', {
+      approval_request: { summary: 'run rm -rf', tool: 'Bash' },
+    });
+
+    const digest = await buildDigest(
+      { registry, eventStore, interventionQueue },
+      new Date(Date.now() - 60_000),
+    );
+    expect(digest.totals.blocked).toBe(0);
+    expect(digest.totals.needs_attention).toBe(1);
+    expect(digest.highlights[0]!.summary).toBe('awaiting approval');
+  });
+
+  it('blocked + pending approval on the same workstream dedupes to 1 in needs_attention', async () => {
+    registry.create('a', 'A');
+    const t = new Date(Date.now() - 1000).toISOString();
+    await eventStore.appendEvent(
+      'a',
+      ev('a', 'blocked', {
+        ts: t,
+        session_id: 's1',
+        id: 'blk_a',
+        payload: { reason: 'cant write' },
+      }),
+    );
+    interventionQueue.enqueue('a', 'approval_required', { approval_request: { summary: 'x' } });
+
+    const digest = await buildDigest(
+      { registry, eventStore, interventionQueue },
+      new Date(Date.now() - 60_000),
+    );
+    expect(digest.totals.blocked).toBe(1);
+    expect(digest.totals.needs_attention).toBe(1);
+    // blocked summary takes precedence over pending-approval wording
+    expect(digest.highlights[0]!.summary).toContain('blocked');
+  });
+
+  it('non-approval pending interventions (nudge/redirect) do NOT trigger needs_attention', async () => {
+    registry.create('a', 'A');
+    interventionQueue.enqueue('a', 'nudge', { message: 'consider X' });
+    interventionQueue.enqueue('a', 'redirect', { message: 'first do Y' });
+
+    const digest = await buildDigest(
+      { registry, eventStore, interventionQueue },
+      new Date(Date.now() - 60_000),
+    );
+    expect(digest.totals.needs_attention).toBe(0);
+    expect(digest.totals.blocked).toBe(0);
   });
 });

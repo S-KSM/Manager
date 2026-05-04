@@ -29,6 +29,7 @@ export type ManagerEventType =
   | 'tool_use'
   | 'blocked'
   | 'memory_update'
+  | 'intervention_enqueued'
   | 'intervention_delivered'
   | 'workstream_updated'
   | 'skill_proposed'
