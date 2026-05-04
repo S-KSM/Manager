@@ -16,6 +16,11 @@ fi
 REPO_ROOT="${SRCROOT}/.."
 SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
 DIRTY=""
+# Refresh the index first — Xcode's build environment can touch tracked
+# files' mtimes (causing stat-dirty entries) without changing content.
+# Without --refresh, diff-index would falsely report "dirty" right after a
+# clean commit + immediate package run.
+git -C "$REPO_ROOT" update-index --refresh >/dev/null 2>&1 || true
 if ! git -C "$REPO_ROOT" diff-index --quiet HEAD -- 2>/dev/null; then
   DIRTY="-dirty"
 fi
