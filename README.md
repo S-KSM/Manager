@@ -8,6 +8,29 @@ Air-traffic-control for AI agents. Agents are pilots; you're the head dispatcher
 
 ## Quickstart (60 seconds)
 
+**Two install paths — pick one.**
+
+### Path A — DMG (recommended for app users, Apple Silicon only)
+
+```sh
+# 1. Build a signed-for-local-use DMG. Apple Silicon (M-series) only.
+git clone git@github.com:S-KSM/Manager.git ~/Code/Manager
+bash ~/Code/Manager/bin/package.sh
+open ~/Code/Manager/dist/Dispatch-*-arm64.dmg
+
+# 2. Drag Dispatch.app → Applications. First launch will prompt:
+#    right-click Dispatch.app → Open → Open (ad-hoc signed, no notarization).
+#    The app self-installs its launchd agent on first launch — no install.sh.
+
+# 3. (Optional) wire Claude Code lifecycle hooks + MCP server so the daemon
+#    sees agent activity. The hooks bit still lives in install.sh:
+bash ~/Code/Manager/bin/install.sh --skip-app
+```
+
+The .app ships its own daemon at `Dispatch.app/Contents/Resources/daemon/bundle.cjs`. First launch writes a launchd plist that points at it; moving the .app re-points the agent on next launch.
+
+### Path B — Source build (devs / Intel users)
+
 ```sh
 # 1. Clone + install (idempotent; asks before each step)
 git clone git@github.com:S-KSM/Manager.git ~/Code/Manager

@@ -99,8 +99,10 @@ final class DaemonResolver: ObservableObject {
             logger.info("DaemonResolver: live daemon at \(self.liveBaseURL.absoluteString) is healthy — using LiveDaemonClient.")
             switchTo(.live, reason: .liveHealthy, client: live)
         } else {
-            logger.notice("DaemonResolver: no live daemon at \(self.liveBaseURL.absoluteString) after \(self.healthProbeAttempts) attempts — falling back to MockDaemonClient.")
-            switchTo(.mock, reason: .liveUnreachable, client: MockDaemonClient())
+            // Empty mock — not the demo fixtures. The first-launch UX is a
+            // welcome screen with a Retry button, not five fake workstreams.
+            logger.notice("DaemonResolver: no live daemon at \(self.liveBaseURL.absoluteString) after \(self.healthProbeAttempts) attempts — using empty client.")
+            switchTo(.mock, reason: .liveUnreachable, client: MockDaemonClient.empty())
         }
     }
 

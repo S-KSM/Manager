@@ -49,6 +49,24 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         self.simulatedLatency = simulatedLatency
     }
 
+    /// Empty-state factory: mock with no workstreams / events / fixtures.
+    /// Used by `DaemonResolver` when the live daemon is unreachable, so the
+    /// UI reads "no data yet" instead of the demo cards. Distinct from the
+    /// default initializer (which seeds the demo fixtures used for previews
+    /// and the explicit Cmd-Shift-M toggle).
+    static func empty() -> MockDaemonClient {
+        MockDaemonClient(
+            workstreams: [],
+            eventsByWorkstream: [:],
+            memoryByWorkstream: [:],
+            proposedSkills: [],
+            handbook: "",
+            reports: [],
+            schedulerJobs: [],
+            reportPresets: MockData.reportPresets
+        )
+    }
+
     /// Read-only snapshot of every intervention this mock has accepted, in
     /// insertion order. Test-only helper; not part of the protocol.
     var interventions: [Intervention] {

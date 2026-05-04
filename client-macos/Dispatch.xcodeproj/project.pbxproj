@@ -38,6 +38,10 @@
 		A100000000000000000003A5 /* SchedulerSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000003B5 /* SchedulerSettings.swift */; };
 		A100000000000000000003A6 /* ReportCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000003B6 /* ReportCodableTests.swift */; };
 		A100000000000000000004A1 /* RobotMascot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000004B1 /* RobotMascot.swift */; };
+		A100000000000000000005A1 /* LaunchdInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005B1 /* LaunchdInstaller.swift */; };
+		A100000000000000000005A2 /* PreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005B2 /* PreferencesView.swift */; };
+		A100000000000000000005A3 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005B3 /* WelcomeView.swift */; };
+		A100000000000000000005A4 /* AppRelocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005B4 /* AppRelocator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -82,6 +86,10 @@
 		A100000000000000000003B5 /* SchedulerSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulerSettings.swift; sourceTree = "<group>"; };
 		A100000000000000000003B6 /* ReportCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportCodableTests.swift; sourceTree = "<group>"; };
 		A100000000000000000004B1 /* RobotMascot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RobotMascot.swift; sourceTree = "<group>"; };
+		A100000000000000000005B1 /* LaunchdInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchdInstaller.swift; sourceTree = "<group>"; };
+		A100000000000000000005B2 /* PreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesView.swift; sourceTree = "<group>"; };
+		A100000000000000000005B3 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
+		A100000000000000000005B4 /* AppRelocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRelocator.swift; sourceTree = "<group>"; };
 		A100000000000000000000C0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A100000000000000000000C1 /* Dispatch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Dispatch.entitlements; sourceTree = "<group>"; };
 		A100000000000000000000C2 /* Dispatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dispatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -172,6 +180,8 @@
 				A100000000000000000000B6 /* DaemonClient.swift */,
 				A100000000000000000000B7 /* MockDaemonClient.swift */,
 				A100000000000000000000B8 /* DaemonResolver.swift */,
+				A100000000000000000005B1 /* LaunchdInstaller.swift */,
+				A100000000000000000005B4 /* AppRelocator.swift */,
 			);
 			path = Daemon;
 			sourceTree = "<group>";
@@ -189,6 +199,8 @@
 				A100000000000000000003B4 /* ReportViewer.swift */,
 				A100000000000000000003B5 /* SchedulerSettings.swift */,
 				A100000000000000000004B1 /* RobotMascot.swift */,
+				A100000000000000000005B2 /* PreferencesView.swift */,
+				A100000000000000000005B3 /* WelcomeView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -229,6 +241,7 @@
 				A1000000000000000000D201 /* Sources */,
 				A1000000000000000000E001 /* Frameworks */,
 				A1000000000000000000D301 /* Resources */,
+				A1000000000000000000D502 /* Embed Daemon */,
 				A1000000000000000000D501 /* Stamp App Version */,
 			);
 			buildRules = (
@@ -308,6 +321,25 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		A1000000000000000000D502 /* Embed Daemon */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Embed Daemon";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "exec \"${SRCROOT}/../bin/embed-daemon.sh\"\n";
+		};
 		A1000000000000000000D501 /* Stamp App Version */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -356,6 +388,10 @@
 				A100000000000000000003A4 /* ReportViewer.swift in Sources */,
 				A100000000000000000003A5 /* SchedulerSettings.swift in Sources */,
 				A100000000000000000004A1 /* RobotMascot.swift in Sources */,
+				A100000000000000000005A1 /* LaunchdInstaller.swift in Sources */,
+				A100000000000000000005A2 /* PreferencesView.swift in Sources */,
+				A100000000000000000005A3 /* WelcomeView.swift in Sources */,
+				A100000000000000000005A4 /* AppRelocator.swift in Sources */,
 				A100000000000000000000AB /* MockData.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

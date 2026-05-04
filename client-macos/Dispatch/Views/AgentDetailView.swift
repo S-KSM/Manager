@@ -303,10 +303,12 @@ struct ApprovalStrip: View {
                     Button("Deny") { onDecide(intv, false) }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .help("Reject this request — the agent is told not to proceed")
                     Button("Approve") { onDecide(intv, true) }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .keyboardShortcut(.defaultAction)
+                        .help("Allow this request — the agent proceeds on its next turn")
                 }
             }
         }
@@ -649,6 +651,9 @@ private struct ToolRunPill: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help(isExpanded
+                  ? "Collapse this run of tool calls"
+                  : "Expand to see each tool call in this run")
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 6) {

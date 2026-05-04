@@ -5,9 +5,16 @@
 
 # Xcode / SwiftUI client
 client-macos/build/
+client-macos/build-release/
 client-macos/DerivedData/
 client-macos/*.xcuserstate
 *.xcuserdatad/
+
+# Packaged release artifacts (DMG / zipped .app)
+dist/
+
+# Vendored Node arm64 binary (~110 MB) — re-fetched by bin/fetch-node.sh
+vendor/
 
 # Node / TypeScript daemon
 daemon/node_modules/

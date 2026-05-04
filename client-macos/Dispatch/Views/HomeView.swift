@@ -57,24 +57,40 @@ struct HomeView: View {
     @State private var filter: RadarFilter = .all
     @State private var lastBuckets: DigestBuckets = DigestBuckets()
 
-    /// True when we have nothing to render on the team floor and the live
-    /// daemon is the source of truth — i.e. the user genuinely has zero
-    /// active/paused workstreams yet, not "we couldn't reach the daemon
-    /// so there's nothing here." TeamFloorView already filters retired
-    /// out so we use the same predicate here. In mock fallback mode we
-    /// still show the demo cards (with a banner explaining what they
-    /// are) rather than a misleading empty state.
-    private var showLiveEmptyState: Bool {
-        guard resolver.mode == .live else { return false }
-        return !workstreams.contains(where: { $0.status != .retired })
+    /// What occupies the team-floor area. Three exclusive states:
+    /// - `.cards`: render the workstream grid.
+    /// - `.welcome`: live daemon up, zero workstreams — onboarding card.
+    /// - `.daemonDown`: probe failed — recovery card with Retry button.
+    private enum FloorState {
+        case cards
+        case welcome
+        case daemonDown
     }
 
-    /// True when the user is currently looking at mock data — either
-    /// because the daemon is unreachable, an env var forced it, or they
-    /// flipped the toggle. Worth a banner in all three cases so the
-    /// "Mock data" toolbar dot isn't the only signal.
+    private var floorState: FloorState {
+        let hasReal = workstreams.contains(where: { $0.status != .retired })
+        switch resolver.modeReason {
+        case .liveHealthy:
+            return hasReal ? .cards : .welcome
+        case .liveUnreachable:
+            return .daemonDown
+        case .envOverride, .userToggled, .forced:
+            return hasReal ? .cards : .welcome
+        case .unknown:
+            // Pre-resolve, render whatever cards exist (none on first call).
+            return hasReal ? .cards : .welcome
+        }
+    }
+
+    /// MockModeBanner is now reserved for the "you explicitly asked for mock"
+    /// cases — env override, manual toggle, preview override. The
+    /// liveUnreachable case is owned by the WelcomeView.daemonDown card and
+    /// doesn't need a redundant banner on top.
     private var showMockBanner: Bool {
-        resolver.mode == .mock
+        switch resolver.modeReason {
+        case .envOverride, .userToggled, .forced: return true
+        case .liveHealthy, .liveUnreachable, .unknown: return false
+        }
     }
 
     /// Apply the active digest-strip filter to the team-floor cards.
@@ -134,9 +150,14 @@ struct HomeView: View {
 
             HStack(alignment: .top, spacing: 0) {
                 Group {
-                    if showLiveEmptyState {
-                        RadarEmptyStateView()
-                    } else {
+                    switch floorState {
+                    case .welcome:
+                        WelcomeView(mode: .welcome)
+                    case .daemonDown:
+                        WelcomeView(mode: .daemonDown(retry: {
+                            Task { await resolver.retryConnection() }
+                        }))
+                    case .cards:
                         TeamFloorView(
                             workstreams: filteredWorkstreams,
                             onSelect: onSelect,
@@ -148,10 +169,11 @@ struct HomeView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                Divider()
-
-                LiveTickerView(client: client, workstreams: workstreams)
-                    .frame(width: 320)
+                if floorState == .cards {
+                    Divider()
+                    LiveTickerView(client: client, workstreams: workstreams)
+                        .frame(minWidth: 240, idealWidth: 320, maxWidth: 380)
+                }
             }
         }
         .navigationTitle("Dispatch")
@@ -203,6 +225,7 @@ private struct MockModeBanner: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .disabled(retrying)
+                .help("Try to reach the live daemon and switch off mock data")
             }
         }
         .padding(.horizontal, 16)
@@ -622,6 +645,7 @@ private struct HighlightRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help("Jump to this workstream's detail view")
     }
 }
 
@@ -660,6 +684,7 @@ struct TeamFloorView: View {
                             WorkstreamCard(workstream: ws)
                         }
                         .buttonStyle(.plain)
+                        .help("Open this workstream's timeline and memory")
                         .contextMenu {
                             cardMenu(for: ws)
                         }
@@ -696,6 +721,7 @@ struct TeamFloorView: View {
             Button("Clear") { onClearFilter?() }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .help("Clear the radar filter and show every workstream again")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)

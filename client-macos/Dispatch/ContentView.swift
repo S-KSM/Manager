@@ -207,8 +207,10 @@ struct ContentView: View {
         do {
             workstreams = try await resolver.client.listWorkstreams()
         } catch {
-            // On any error, fall back to the in-process mock so the UI is never empty.
-            workstreams = MockData.workstreams
+            // Daemon not reachable. Render the welcome screen via HomeView's
+            // empty-state path — never substitute demo fixtures, since the
+            // user can't tell those from real workstreams.
+            workstreams = []
         }
     }
 
