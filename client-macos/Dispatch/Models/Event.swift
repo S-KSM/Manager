@@ -129,7 +129,24 @@ enum EventPayload: Hashable, Sendable {
 
     struct Subgoal: Codable, Hashable, Sendable {
         let goal: String
-        init(goal: String) { self.goal = goal }
+        /// "synthesized" when the daemon's local-LLM synthesizer inferred this
+        /// sub-goal from a stretch of tool_use events the agent didn't narrate.
+        /// Nil/missing means the agent emitted it directly via `emit_subgoal`.
+        let source: String?
+        /// Stable id of the synthesizer window so identical regenerations
+        /// don't double-write. Nil for agent-emitted sub-goals.
+        let synthAnchor: String?
+
+        init(goal: String, source: String? = nil, synthAnchor: String? = nil) {
+            self.goal = goal
+            self.source = source
+            self.synthAnchor = synthAnchor
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case goal, source
+            case synthAnchor = "synth_anchor"
+        }
     }
 
     struct SubgoalPop: Codable, Hashable, Sendable {

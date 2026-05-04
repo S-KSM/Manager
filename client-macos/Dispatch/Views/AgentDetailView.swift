@@ -240,19 +240,19 @@ struct AgentDetailView: View {
         async let evs: [Event]   = (try? await client.getEvents(workstreamID: workstream.id)) ?? []
         async let mem: String    = (try? await client.getMemory(workstreamID: workstream.id)) ?? ""
         let (e, m) = await (evs, mem)
-        events = e.sorted { $0.ts < $1.ts }
+        events = e.sorted { $0.ts > $1.ts }
         memoryRaw = m
         loadingEvents = false
         loadingMemory = false
     }
 
     /// Append a live-streamed event into `events`, skipping duplicates by id
-    /// and re-sorting by ts so the timeline stays in chronological order.
+    /// and re-sorting by ts so newest stays on top.
     private func appendLive(event: Event) {
         if events.contains(where: { $0.id == event.id }) { return }
         var next = events
         next.append(event)
-        next.sort { $0.ts < $1.ts }
+        next.sort { $0.ts > $1.ts }
         events = next
     }
 
@@ -343,20 +343,29 @@ struct MethodologyTimelineView: View {
                     .padding(20)
                 } else {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(events) { event in
-                            TimelineRow(
-                                event: event,
-                                indent: indent(for: event),
-                                isExpanded: expandedIDs.contains(event.id),
-                                onToggle: { toggle(event.id) },
-                                onPromote: onPromoteDecision.map { handler in
-                                    {
-                                        if case .decision(let d) = event.payload {
-                                            handler(d, event.id)
+                        ForEach(timelineItems) { item in
+                            switch item {
+                            case .event(let event):
+                                TimelineRow(
+                                    event: event,
+                                    indent: indent(for: event),
+                                    isExpanded: expandedIDs.contains(event.id),
+                                    onToggle: { toggle(event.id) },
+                                    onPromote: onPromoteDecision.map { handler in
+                                        {
+                                            if case .decision(let d) = event.payload {
+                                                handler(d, event.id)
+                                            }
                                         }
                                     }
-                                }
-                            )
+                                )
+                            case .toolRun(let id, let runEvents):
+                                ToolRunPill(
+                                    runEvents: runEvents,
+                                    isExpanded: expandedIDs.contains("run-\(id)"),
+                                    onToggle: { toggle("run-\(id)") }
+                                )
+                            }
                         }
                     }
                     .padding(.horizontal, 18)
@@ -370,6 +379,31 @@ struct MethodologyTimelineView: View {
     private func toggle(_ id: String) {
         if expandedIDs.contains(id) { expandedIDs.remove(id) }
         else                        { expandedIDs.insert(id) }
+    }
+
+    /// Group consecutive `tool_use` events into a single `toolRun` item so
+    /// the timeline reads as a story (decisions / sub-goals / blocks) with
+    /// the low-level tool calls collapsed into a count pill the user can
+    /// expand on demand. Operates on `events` in their current display
+    /// order (newest first).
+    private var timelineItems: [TimelineItem] {
+        var items: [TimelineItem] = []
+        var run: [Event] = []
+        for ev in events {
+            if case .toolUse = ev.payload {
+                run.append(ev)
+            } else {
+                if !run.isEmpty {
+                    items.append(.toolRun(id: run[0].id, events: run))
+                    run = []
+                }
+                items.append(.event(ev))
+            }
+        }
+        if !run.isEmpty {
+            items.append(.toolRun(id: run[0].id, events: run))
+        }
+        return items
     }
 
     /// Visual indent based on `parent_id` chain depth. Bounded so deep trees
@@ -506,7 +540,8 @@ private struct TimelineRow: View {
         case .decision(let d):
             return "Decision: \(d.choice)"
         case .subgoalPush(let s):
-            return "Sub-goal pushed: \(s.goal)"
+            let prefix = s.source == "synthesized" ? "🤖 " : ""
+            return "\(prefix)Sub-goal pushed: \(s.goal)"
         case .subgoalPop(let s):
             return "Sub-goal popped\(s.goal.map { ": \($0)" } ?? "")"
         case .confidence(let c):
@@ -544,6 +579,68 @@ private struct TimelineRow: View {
             return m.summary
         default:
             return nil
+        }
+    }
+}
+
+// MARK: - Tool-run grouping
+
+/// One entry in the rendered timeline. Either a story-level event (decision,
+/// sub-goal, blocked, …) or a contiguous run of `tool_use` events collapsed
+/// into a single expandable pill so the user sees narrative, not bash calls.
+private enum TimelineItem: Identifiable {
+    case event(Event)
+    case toolRun(id: String, events: [Event])
+
+    var id: String {
+        switch self {
+        case .event(let e):           return e.id
+        case .toolRun(let id, _):     return "run-\(id)"
+        }
+    }
+}
+
+/// Compact "12 actions ▸" row that hides a contiguous run of `tool_use`
+/// events. Tapping the row expands the run into individual TimelineRows
+/// indented underneath.
+private struct ToolRunPill: View {
+    let runEvents: [Event]
+    let isExpanded: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button(action: onToggle) {
+                HStack(spacing: 8) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .imageScale(.small)
+                        .foregroundStyle(.tertiary)
+                    Image(systemName: "wrench.adjustable")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                    Text("\(runEvents.count) action\(runEvents.count == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(runEvents) { ev in
+                        TimelineRow(
+                            event: ev,
+                            indent: 1,
+                            isExpanded: false,
+                            onToggle: {},
+                            onPromote: nil
+                        )
+                    }
+                }
+            }
         }
     }
 }

@@ -69,6 +69,12 @@ Scope:
 - **`/dispatcher <ws>` Claude Code slash command + URL scheme**: register `dispatch://workstream/<id>` in the macOS app; ship `~/.claude/commands/dispatcher.md` so a session can `open dispatch://workstream/...` to surface the matching card in the app.
 - **Remove `MANAGER_*` env-var fallbacks** introduced in v1.2 (the deprecation breadcrumb has fired for one release; old installs will have migrated by now).
 
+Shipped ahead of v1.3 (already on `main`):
+
+- **Activity headline** — `Headliner` ticker drives the per-workstream "Currently:" line via local `qwen3:4b`.
+- **Story-level subgoal synthesis** — `SubgoalSynthesizer` turns runs of un-narrated `tool_use` events into synthesized `subgoal_push` events (`payload.source: "synthesized"`, idempotent across restart via `synth_anchor`). The macOS timeline now reads as story + sub-story; raw tool calls collapse into an "N actions ▸" pill rendered between story rows; synthesized sub-goals are visually distinguished with a 🤖 prefix so the human knows when the manager is filling in narration the agent didn't emit.
+- **Build-stamped app version** — every Xcode build re-stamps `CFBundleShortVersionString` + `CFBundleVersion` with the current git short SHA + UTC date, so About Dispatch shows the actual binary the user is running.
+
 ## v1.4 — Autonomous dispatch (adopt OpenAI Symphony orchestration) ✅
 
 **Status: shipped substeps 0–4.** See [`TODO.md`](../TODO.md) for which items inside each substep landed and which are deferred.

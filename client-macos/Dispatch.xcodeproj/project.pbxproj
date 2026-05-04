@@ -229,6 +229,7 @@
 				A1000000000000000000D201 /* Sources */,
 				A1000000000000000000E001 /* Frameworks */,
 				A1000000000000000000D301 /* Resources */,
+				A1000000000000000000D501 /* Stamp App Version */,
 			);
 			buildRules = (
 			);
@@ -305,6 +306,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A1000000000000000000D501 /* Stamp App Version */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Stamp App Version";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "exec \"${SRCROOT}/../bin/stamp-app-version.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		A1000000000000000000D201 /* Sources */ = {
@@ -491,6 +514,7 @@
 				DEVELOPMENT_ASSET_PATHS = "\"Dispatch/Preview Content\"";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Dispatch/Resources/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -520,6 +544,7 @@
 				DEVELOPMENT_ASSET_PATHS = "\"Dispatch/Preview Content\"";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Dispatch/Resources/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";

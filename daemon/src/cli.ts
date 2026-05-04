@@ -7,6 +7,7 @@ import { EventStore } from './event-store.js';
 import { HandbookStore } from './handbook-store.js';
 import { HeadlineStore } from './headline-store.js';
 import { Headliner } from './headliner.js';
+import { SubgoalSynthesizer } from './subgoal-synthesizer.js';
 import { buildHttpServer } from './http-server.js';
 import { Orchestrator, type DispatchOutcome } from './orchestrator.js';
 import { MockTracker } from './trackers/mock.js';
@@ -224,6 +225,11 @@ async function runStart(opts: {
   if (process.env['DISPATCH_HEADLINE_ENABLED'] !== '0') {
     headliner.start();
     process.stderr.write('[dispatch] headliner started\n');
+  }
+  if (process.env['DISPATCH_SUBGOAL_SYNTH_ENABLED'] !== '0') {
+    const synth = new SubgoalSynthesizer({ registry, eventStore });
+    synth.start();
+    process.stderr.write('[dispatch] subgoal synthesizer started\n');
   }
 
   // v1.4.x: optional orchestrator. Built from either --workflow (full path) or
