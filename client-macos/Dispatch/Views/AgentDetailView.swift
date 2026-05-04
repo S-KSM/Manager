@@ -386,23 +386,29 @@ struct MethodologyTimelineView: View {
     /// the low-level tool calls collapsed into a count pill the user can
     /// expand on demand. Operates on `events` in their current display
     /// order (newest first).
+    ///
+    /// `user-prompt-submit` events are *also* `tool_use` on the wire (the
+    /// hook layer routes them through the same envelope), but they carry
+    /// the human/system prompt that triggered the next turn — story-level
+    /// signal, not bash noise. Render them as their own row.
     private var timelineItems: [TimelineItem] {
         var items: [TimelineItem] = []
         var run: [Event] = []
+        let flush = {
+            if !run.isEmpty {
+                items.append(.toolRun(id: run[0].id, events: run))
+                run = []
+            }
+        }
         for ev in events {
-            if case .toolUse = ev.payload {
+            if case .toolUse(let t) = ev.payload, t.phase != "user-prompt-submit" {
                 run.append(ev)
             } else {
-                if !run.isEmpty {
-                    items.append(.toolRun(id: run[0].id, events: run))
-                    run = []
-                }
+                flush()
                 items.append(.event(ev))
             }
         }
-        if !run.isEmpty {
-            items.append(.toolRun(id: run[0].id, events: run))
-        }
+        flush()
         return items
     }
 
@@ -515,7 +521,8 @@ private struct TimelineRow: View {
         case .subgoalPush:            return "arrow.down.circle"
         case .subgoalPop:             return "arrow.up.circle"
         case .confidence:             return "gauge.with.dots.needle.bottom.50percent"
-        case .toolUse:                return "wrench.adjustable"
+        case .toolUse(let t):
+            return t.phase == "user-prompt-submit" ? "text.bubble" : "wrench.adjustable"
         case .blocked:                return "exclamationmark.octagon.fill"
         case .memoryUpdate:           return "doc.text"
         case .sessionStart:           return "play.circle"
@@ -531,6 +538,8 @@ private struct TimelineRow: View {
         case .confidence:             return .blue
         case .memoryUpdate:           return .purple
         case .interventionDelivered:  return .pink
+        case .toolUse(let t):
+            return t.phase == "user-prompt-submit" ? .accentColor : .secondary
         default:                      return .secondary
         }
     }
@@ -547,10 +556,19 @@ private struct TimelineRow: View {
         case .confidence(let c):
             return "Confidence \(Int((c.value * 100).rounded()))%"
         case .toolUse(let t):
+            if t.phase == "user-prompt-submit" {
+                let body = (t.summary?.isEmpty == false ? t.summary! : t.tool)
+                let oneLine = body
+                    .replacingOccurrences(of: "\n", with: " ")
+                    .trimmingCharacters(in: .whitespaces)
+                let truncated = oneLine.count > 120
+                    ? oneLine.prefix(119) + "…"
+                    : Substring(oneLine)
+                return "Prompt: \(truncated)"
+            }
             let verb: String
             switch t.phase {
             case "post-tool-use", "post":           verb = "ran"
-            case "user-prompt-submit":              verb = "received prompt for"
             default:                                verb = "uses"
             }
             return "\(verb) \(t.tool)"
@@ -572,11 +590,15 @@ private struct TimelineRow: View {
         case .decision(let d):
             return d.rationale
         case .toolUse(let t):
-            return t.summary
+            // The prompt body already became the headline for
+            // user-prompt-submit rows — no need to repeat it as subline.
+            return t.phase == "user-prompt-submit" ? nil : t.summary
         case .confidence(let c):
             return c.note
         case .memoryUpdate(let m):
             return m.summary
+        case .sessionEnd(let s):
+            return s.lastAssistantMessage
         default:
             return nil
         }

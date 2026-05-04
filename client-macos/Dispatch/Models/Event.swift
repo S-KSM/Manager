@@ -111,7 +111,20 @@ enum EventPayload: Hashable, Sendable {
 
     struct SessionEnd: Codable, Hashable, Sendable {
         let reason: String?
-        init(reason: String? = nil) { self.reason = reason }
+        /// Final agent message captured by the Stop hook — the natural-language
+        /// wrap-up the human sees in claude. Surfaced as the row subline so the
+        /// timeline ends each session with the agent's own summary.
+        let lastAssistantMessage: String?
+
+        init(reason: String? = nil, lastAssistantMessage: String? = nil) {
+            self.reason = reason
+            self.lastAssistantMessage = lastAssistantMessage
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case reason
+            case lastAssistantMessage = "last_assistant_message"
+        }
     }
 
     struct Decision: Codable, Hashable, Sendable {
@@ -183,7 +196,7 @@ enum EventPayload: Hashable, Sendable {
         }
 
         enum CodingKeys: String, CodingKey {
-            case tool, phase, summary, hook
+            case tool, phase, summary, hook, prompt
             case toolName = "tool_name"
             case toolInput = "tool_input"
         }
@@ -204,6 +217,12 @@ enum EventPayload: Hashable, Sendable {
                       ?? (try? c.decode(String.self, forKey: .hook))
             if let summary = try? c.decode(String.self, forKey: .summary) {
                 self.summary = summary
+            } else if let prompt = try? c.decode(String.self, forKey: .prompt) {
+                // UserPromptSubmit hook payload puts the prompt at the top
+                // level (not under tool_input). Surface it directly so the
+                // timeline can render the human/system input that triggered
+                // the next turn.
+                self.summary = prompt
             } else if let input = try? c.nestedContainer(keyedBy: InputKeys.self, forKey: .toolInput) {
                 self.summary = Self.humanize(from: input)
             } else {
