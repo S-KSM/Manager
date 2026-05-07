@@ -6,7 +6,7 @@ Air-traffic-control for AI agents. Agents are pilots; you're the head dispatcher
 
 > **New here?** Walk through [`docs/TUTORIAL.md`](docs/TUTORIAL.md) (also available in-app under **Help → Tutorial**, alongside Local model setup, Architecture, and the GitHub repo).
 
-> Originally codenamed **Manager**; rebranded to Dispatch in v1.1.x and the code-layer rename landed in v1.2 (binary `dispatch`, `DISPATCH_*` env vars, state at `~/.claude/dispatch/`). Legacy `MANAGER_*` env vars are still read as a backwards-compat fallback for one release and removed in v1.3.
+> Originally codenamed **Manager**; rebranded to Dispatch in v1.1.x. Code-layer rename landed in v1.2 (binary `dispatch`, `DISPATCH_*` env vars, state at `~/.claude/dispatch/`). The legacy `MANAGER_*` env-var fallback was removed in v1.3 — `DISPATCH_*` only.
 
 ## Quickstart (60 seconds)
 
@@ -48,6 +48,8 @@ claude
 ```
 
 A card for `some-project` appears on the **Radar** within seconds. Decision events from the agent flow into **The Trace** live. Open an **Intercept** (nudge / redirect / rollback) from the app to course-correct mid-flight.
+
+While inside `claude`, type **`/dispatcher`** to jump straight to the matching card in the Dispatch app — the slash command derives the workstream slug from the current git root (or `$PWD`) and runs `open dispatch://workstream/<slug>`.
 
 New here? See [`docs/TUTORIAL.md`](docs/TUTORIAL.md) for a 30-minute walk-through, or [`docs/LOCAL_MODELS.md`](docs/LOCAL_MODELS.md) for local-LLM setup.
 

@@ -14,12 +14,12 @@
 
 That paragraph kicked off the project. The sections below summarize what got built against it.
 
-## Current state (v1.1.x)
+## Current state (v1.3+)
 
-Four pieces, all local. Code-layer artifacts (binary name, env vars, state dir) still use the old `manager` codename — a rename is queued, see "What's queued" below.
+Four pieces, all local. Code-layer rename to `dispatch` shipped in v1.2; the legacy `MANAGER_*` env-var fallback was removed in v1.3 — `DISPATCH_*` only.
 
-1. **Daemon** (TypeScript / Node, long-running) — owns all state at `~/.claude/manager/`. Hosts an HTTP + WebSocket API on `localhost:9876` for clients and a per-session stdio MCP server (`manager mcp`) for Claude Code.
-2. **Lifecycle hooks** (POSIX shell) — installed into `~/.claude/settings.json`. Capture `SessionStart` / `Stop` / `PreToolUse` / `PostToolUse` / `UserPromptSubmit` events, derive a workstream id from `cwd` if `MANAGER_WORKSTREAM` is unset, drain pending Intercepts on every user prompt, and inline the team Protocol handbook on session start.
+1. **Daemon** (TypeScript / Node, long-running) — owns all state at `~/.claude/dispatch/`. Hosts an HTTP + WebSocket API on `localhost:9876` for clients and a per-session stdio MCP server (`dispatch mcp`) for Claude Code.
+2. **Lifecycle hooks** (POSIX shell) — installed into `~/.claude/settings.json`. Capture `SessionStart` / `Stop` / `PreToolUse` / `PostToolUse` / `UserPromptSubmit` events, derive a workstream id from `cwd` if `DISPATCH_WORKSTREAM` is unset, drain pending Intercepts on every user prompt, and inline the team Protocol handbook on session start.
 3. **MCP server** (inside the daemon) — exposes `emit_decision`, `emit_subgoal`, `emit_confidence`, `flag_blocked`, `update_memory`, `read_memory`, `propose_skill` to the agent.
 4. **macOS app** (SwiftUI) — thin client over the daemon's API. Sidebar w/ Radar (home), workstreams, Protocol handbook, Updates. Live ticker + Trace timeline subscribe via WebSocket.
 
@@ -37,7 +37,7 @@ What the original vision asked for, mapped to what shipped:
 
 ## What's queued
 
-- **v1.2 — Code-layer Dispatch rename + new icon**: rename the daemon binary `manager` → `dispatch`, env vars `MANAGER_*` → `DISPATCH_*`, state dir `~/.claude/manager/` → `~/.claude/dispatch/`, launchd label `com.manager.daemon` → `com.dispatch.daemon`, Xcode project + Swift module + bundle identifier + `CFBundleDisplayName` from `Manager` to `Dispatch`. Ship the new brutalist "D" app icon (heavy, glitchy, with a pixelated signal trail). Existing installs migrate via a one-shot script invoked by `bin/install.sh` on upgrade. Brand-layer rename in the docs is already done.
+- ✅ **v1.2 — Code-layer Dispatch rename + new icon**: shipped. Daemon binary `dispatch`, env vars `DISPATCH_*`, state dir `~/.claude/dispatch/`, launchd label `com.dispatch.daemon`, Xcode project + Swift module + bundle id + `CFBundleDisplayName` are all `Dispatch`. Brutalist "D" app icon shipped. The one-shot state-dir migration `~/.claude/manager → ~/.claude/dispatch` lives in `bin/install.sh`. The legacy `MANAGER_*` env-var fallback was removed in v1.3.
 - **v1.2 — Kanban board** for workstreams: 4 columns (Backlog / Active / Paused / Retired) with drag-and-drop status changes. Replaces the team-floor grid for organization-at-scale.
 - **v1.2 — Linear.app integration**: link a workstream to a Linear issue (`workstream_links` table + GraphQL client). Status changes flow Linear ↔ Dispatch; high-confidence decisions land as comments on the linked issue.
 - **v1.5 — Remote / mobile**: daemon binds to non-localhost with token auth; iOS thin client (read-only first, then Intercept from mobile).

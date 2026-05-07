@@ -59,15 +59,15 @@ Scope:
 
 What this proves: the rebrand can land cleanly without breaking installed copies; the daemon-as-brain split makes external integrations (Linear) cheap to add.
 
-## v1.3 — MLX local LLM + `/dispatcher` slash command + tooltip & UX polish
+## v1.3 — MLX local LLM + `/dispatcher` slash command + MANAGER_* removal ✅
 
 **Goal:** lean harder into the macOS-native angle for on-device LLM, and tighten the Claude-Code → app loop.
 
 Scope:
 
-- **MLX-backed local LLM**: replace the Ollama-only path with a generic OpenAI-compatible provider (`DISPATCH_LLM_BASE_URL`). The recommended local default becomes `mlx_lm.server` — Apple's MLX framework is faster on M-series silicon than the llama.cpp engine Ollama wraps. Ollama keeps working since it speaks the same surface. Trade-off: `mlx_lm.server` needs Python; a pure-Swift MLX path (inference inside the macOS app via `mlx-swift-examples`) is a stretch goal.
-- **`/dispatcher <ws>` Claude Code slash command + URL scheme**: register `dispatch://workstream/<id>` in the macOS app; ship `~/.claude/commands/dispatcher.md` so a session can `open dispatch://workstream/...` to surface the matching card in the app.
-- **Remove `MANAGER_*` env-var fallbacks** introduced in v1.2 (the deprecation breadcrumb has fired for one release; old installs will have migrated by now).
+- ✅ **MLX-backed local LLM**: replaced the Ollama-only path with a generic OpenAI-compatible provider keyed on `${baseUrl}/v1/chat/completions`. Base URL precedence: `DISPATCH_LLM_BASE_URL` > settings.json `ollamaUrl` > `OLLAMA_URL` > `http://localhost:8080/v1` (mlx_lm.server). Ollama keeps working — bare `http://localhost:11434` and any URL without `/v1` get auto-promoted to `/v1`. Stretch goal of a pure-Swift MLX path inside the macOS app remains deferred.
+- ✅ **`/dispatcher` Claude Code slash command + URL scheme**: macOS app registers `dispatch://` in `CFBundleURLTypes`. `commands/dispatcher.md` derives a workstream slug from the current git root using the same rules as `hooks/_common.sh:dispatch__slugify` and shells out to `open dispatch://workstream/<slug>`. `bin/install.sh` copies the slash-command file into `~/.claude/commands/` and runs `lsregister -f` after the `.app` lands so the URL scheme is live immediately.
+- ✅ **Remove `MANAGER_*` env-var fallbacks**: `readEnvWithLegacy` helper deleted; six daemon read sites + the POSIX-shell `dispatch__legacy_env` helper + the macOS `MANAGER_DAEMON` lookup all removed. Filesystem state migration `~/.claude/manager → ~/.claude/dispatch` in `bin/install.sh` is preserved (file path, not env var).
 
 Shipped ahead of v1.3 (already on `main`):
 

@@ -4,6 +4,34 @@ Versions are anchored on the macOS app's `CFBundleShortVersionString` (the Info.
 
 ---
 
+## v1.3 — 2026-05-07 — MLX local LLM + /dispatcher URL scheme + MANAGER_* removal
+
+Three deliverables. Wire schema additive; the env-var removal is a hard break for anyone still relying on `MANAGER_*` (`bin/install.sh` has been emitting a deprecation breadcrumb since v1.2).
+
+### MLX-backed local LLM (generic OpenAI-compatible)
+
+The local-LLM provider transport switched from Ollama's native `/api/chat` to OpenAI-compatible `/v1/chat/completions`, so the daemon can talk to Apple's `mlx_lm.server` (the recommended default on M-series silicon) as readily as to Ollama, llama.cpp, or any other server speaking the chat-completions API. The provider name stays `ollama` as the family name for "any OpenAI-compatible local server". New env var `DISPATCH_LLM_BASE_URL` overrides the default `http://localhost:8080/v1`; the legacy `OLLAMA_URL` is honored as a fallback. Bare `http://localhost:11434` and any URL whose path doesn't include `/v1` get auto-normalized so existing v1.2 Ollama setups upgrade transparently. The macOS Settings → Providers tab relabels the field to "Local LLM URL"; the reachability probe swaps `/api/tags` for `GET /models` with a TCP-ish fallback for non-API endpoints. See `docs/LOCAL_MODELS.md` for the rewritten setup guide.
+
+### `/dispatcher` slash command + `dispatch://` URL scheme
+
+`commands/dispatcher.md` ships a Claude Code slash command that derives a workstream slug from the current git root (or `$PWD`) using the same rules as `hooks/_common.sh:dispatch__slugify`, then runs `open dispatch://workstream/<slug>`. The macOS app registers `dispatch://` in `CFBundleURLTypes` and routes the URL through a new `URLRouter` ObservableObject into `ContentView`'s selection state. Strict parser on both sides (`daemon/src/url-scheme.ts` + `client-macos/Dispatch/Daemon/DispatchURLParser.swift`) — `[a-z0-9-]` only, path traversal rejected. ContentView surfaces a one-line banner if the URL targets a workstream id the daemon hasn't seen yet ("open `claude` here to register"). `bin/install.sh` copies the slash-command file into `~/.claude/commands/` and runs `lsregister -f` after the `.app` lands so the URL scheme is live immediately, no logout required.
+
+### `MANAGER_*` env-var fallback removed
+
+The deprecation breadcrumb fired for one release. `readEnvWithLegacy` helper deleted; six daemon read sites (`config.ts`, `headliner.ts`, `subgoal-synthesizer.ts`, `settings-store.ts`, `http-server.ts`, `mcp-server.ts`) inlined to direct `process.env['DISPATCH_*']`. POSIX-shell `dispatch__legacy_env` helper deleted; `hooks/_common.sh` and the two scripts that called it now read `${DISPATCH_*:-}` directly. `bin/install.sh` PORT line drops the legacy fallback. macOS `DaemonResolver` no longer honors `MANAGER_DAEMON`; the env-mode pickup was extracted into a `nonisolated static pickModeFromEnv(_ env:)` helper that's covered by the new `DaemonResolverTests`. Filesystem state migration `~/.claude/manager → ~/.claude/dispatch` in `bin/install.sh` is preserved (file path, not env var).
+
+### Tests
+
+- 240/240 daemon tests pass (236 + 4 new `config.test.ts` cases; `url-scheme.test.ts` adds 8; `openai-compat.test.ts` adds 6; `ollama.test.ts` revised in place).
+- macOS `DispatchURLParserTests` (8) + `DaemonResolverTests` (5) added; tests build clean. The XCTest runner in this build environment couldn't launch the GUI host app, but `xcodebuild build-for-testing` succeeds.
+
+### Migration
+
+- If you were still relying on `MANAGER_*` env vars, set `DISPATCH_*` instead. (`bin/install.sh` has emitted a deprecation breadcrumb since v1.2.)
+- If your `OLLAMA_URL` pointed at a bare `http://localhost:11434`, no action — auto-promoted to `/v1`. Otherwise, point `DISPATCH_LLM_BASE_URL` at the right OpenAI-compat URL.
+
+---
+
 ## v1.2 — 2026-05-07 — Kanban board + Linear-link UI
 
 (Note: v1.2 ships *after* v1.4.5 calendar-wise — the v1.2 milestone is the Kanban + Linear-link UI roadmap entry from `TODO.md`, originally deferred while v1.4 autonomous-mode work landed first. Daemon and macOS app stay on `MARKETING_VERSION = 1.4.5`; v1.2 here refers to the milestone, not the binary version.)

@@ -2,7 +2,7 @@
 
 This document describes the components, data flow, and contracts that make **Dispatch** work. It is the source of truth for the wire contract.
 
-> Dispatch was codenamed Manager through v1.1.x; runtime artifacts (binary `manager`, env vars `MANAGER_*`, state dir `~/.claude/manager/`, launchd label `com.manager.daemon`, Xcode `Manager` project / Swift module) still use the original name. They get renamed in v1.2 — see [`ROADMAP.md`](ROADMAP.md). Internal contract identifiers below (event types, MCP tool names, SQLite columns) are stable and do not change with the rebrand.
+> Dispatch was codenamed Manager through v1.1.x. The runtime rename landed in v1.2: binary is `dispatch`, env vars are `DISPATCH_*`, state dir is `~/.claude/dispatch/`, launchd label `com.dispatch.daemon`, Xcode project `Dispatch`, Swift module `DispatchApp`. The legacy `MANAGER_*` env-var fallback was removed in v1.3 — `DISPATCH_*` only. Internal contract identifiers below (event types, MCP tool names, SQLite columns) are stable and were not renamed.
 
 ## Dispatch lexicon → contract terms
 
@@ -95,7 +95,7 @@ Responsibilities:
 - Own the **workstream memory** — one Markdown file per workstream, owned by the agent (via `update_memory`) and editable by the human.
 - Own the **intervention queue** — per-workstream FIFO. Pre-turn hook on the agent side drains it.
 
-State location: `~/.claude/manager/` (events/, memory/, db.sqlite, queues/, handbook.md, scheduler.json). The SQLite file holds the `workstreams`, `sessions`, `interventions`, `skill_proposals`, and `reports` tables; `scheduler.json` is a small JSON file written by the in-process scheduler.
+State location: `~/.claude/dispatch/` (events/, memory/, db.sqlite, queues/, handbook.md, scheduler.json). The SQLite file holds the `workstreams`, `sessions`, `interventions`, `skill_proposals`, and `reports` tables; `scheduler.json` is a small JSON file written by the in-process scheduler.
 
 #### Two-process model
 
@@ -103,16 +103,16 @@ In v0.5.2 the daemon role is split across two process shapes that share the on-d
 
 | Process | Command | Lifecycle | Surface |
 |---|---|---|---|
-| Long-running daemon | `manager start` | Started at login by the launchd agent in `~/Library/LaunchAgents/com.manager.daemon.plist` | HTTP/WS on `:9876` for the macOS client (and future remote clients). |
-| Per-session MCP | `manager mcp` | Spawned by Claude Code per session via its `mcpServers` config; lives for the lifetime of one Claude Code session | MCP JSON-RPC over stdio. Binds **no** HTTP port. |
+| Long-running daemon | `dispatch start` | Started at login by the launchd agent in `~/Library/LaunchAgents/com.dispatch.daemon.plist` | HTTP/WS on `:9876` for the macOS client (and future remote clients). |
+| Per-session MCP | `dispatch mcp` | Spawned by Claude Code per session via its `mcpServers` config; lives for the lifetime of one Claude Code session | MCP JSON-RPC over stdio. Binds **no** HTTP port. |
 
-Both read and write `~/.claude/manager/` concurrently. SQLite is opened in WAL mode so cross-process readers/writers don't block each other; JSONL appends are atomic on POSIX (`O_APPEND`). The one race that remains is concurrent edits to the workstream memory Markdown — `MemoryStore.perWorkstreamLock` is per-process, so two MCP children writing the same section in the same millisecond is theoretically last-writer-wins. We accept this in v0.5.2 because memory edits are rare and human-paced; v1 will add an advisory file lock.
+Both read and write `~/.claude/dispatch/` concurrently. SQLite is opened in WAL mode so cross-process readers/writers don't block each other; JSONL appends are atomic on POSIX (`O_APPEND`). The one race that remains is concurrent edits to the workstream memory Markdown — `MemoryStore.perWorkstreamLock` is per-process, so two MCP children writing the same section in the same millisecond is theoretically last-writer-wins. We accept this in v0.5.2 because memory edits are rare and human-paced; v1 will add an advisory file lock.
 
-The legacy `manager start --mcp-stdio` mode (HTTP + MCP in one process) is kept for testing only — running it alongside the long-running daemon causes a port collision.
+The legacy `dispatch start --mcp-stdio` mode (HTTP + MCP in one process) is kept for testing only — running it alongside the long-running daemon causes a port collision.
 
 #### HTTP + WebSocket API contract
 
-Localhost-only in v0/v0.5/v1; auth + remote binding land in v1.5. Default port 9876, override via `MANAGER_PORT`. Responses are naked JSON (no envelope wrapping); errors are `{error: string}` with the HTTP status code. All Workstream payloads use the snake_case wire format documented under "Workstream" below.
+Localhost-only in v0/v0.5/v1; auth + remote binding land in v1.5. Default port 9876, override via `DISPATCH_PORT`. Responses are naked JSON (no envelope wrapping); errors are `{error: string}` with the HTTP status code. All Workstream payloads use the snake_case wire format documented under "Workstream" below.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -143,7 +143,7 @@ Localhost-only in v0/v0.5/v1; auth + remote binding land in v1.5. Default port 9
 | `PATCH` | `/reports/:id` | Body `{title?, body_md?, status?}`. Updating `status` to `'saved'` sets `saved_at = now()`. |
 | `DELETE` | `/reports/:id` | Soft-delete: sets `status='archived'` and returns 200 + the updated Report. |
 | `GET` | `/scheduler/jobs` | Naked array of `{id, enabled, cron, audience_preset, provider, model, next_fire_at}`. |
-| `PATCH` | `/scheduler/jobs/:id` | Body `{enabled?, cron?, audience_preset?, provider?, model?}`. Validates the cron expression eagerly, persists the change to `~/.claude/manager/scheduler.json`, recomputes `next_fire_at`, and returns the updated job. 404 on unknown id; 400 on invalid cron / preset / provider. |
+| `PATCH` | `/scheduler/jobs/:id` | Body `{enabled?, cron?, audience_preset?, provider?, model?}`. Validates the cron expression eagerly, persists the change to `~/.claude/dispatch/scheduler.json`, recomputes `next_fire_at`, and returns the updated job. 404 on unknown id; 400 on invalid cron / preset / provider. |
 | `GET` | `/workstreams/:id/link` | v1.2 — `WorkstreamLink \| null`. The `null` body distinguishes "linked nothing yet" from "workstream not found" (404). |
 | `PUT` | `/workstreams/:id/link` | v1.2 — Body `{tracker_kind: 'linear', issue_identifier: string}`. Resolves via `LinearTracker.fetchIssueByIdentifier` and persists. 503 with `code: 'linear_api_key_missing'` when no key is configured; 400 with `code: 'linear_unknown_identifier'` when the tracker can't find the issue; 404 when the workstream doesn't exist. |
 | `DELETE` | `/workstreams/:id/link` | v1.2 — Idempotent unlink. Returns 200 even when no prior link existed. |
@@ -181,6 +181,10 @@ Agent prompt (system message added at workstream start) instructs the agent to c
 **macOS app (v0):** SwiftUI. Talks to the daemon over `localhost` HTTP/WebSocket. Renders the home view (digest rail, team floor, ticker) and agent detail (timeline, memory pane, intervention controls).
 
 **iOS / web (future):** same API contract, different rendering. The daemon exposes its API on localhost only in v0; v1.5 adds authenticated remote access for mobile.
+
+#### URL scheme (v1.3+)
+
+The macOS app registers `dispatch://` in its `CFBundleURLTypes`. Today only one shape is recognized: `dispatch://workstream/<slug>` selects the matching workstream in the Radar (or surfaces a "not found — open `claude` here to register" banner if the daemon hasn't seen that id yet). The Claude Code `/dispatcher` slash command (`commands/dispatcher.md`) derives a slug from the current git root using the same rules as `hooks/_common.sh:dispatch__slugify` and shells out to `open dispatch://workstream/<slug>` so the agent can drop the human into the matching card. Parser implementations: `daemon/src/url-scheme.ts` (canonical) and `client-macos/Dispatch/Daemon/DispatchURLParser.swift` (Swift port; same accept/reject set).
 
 ### Orchestrator (v1.4 — autonomous mode)
 
@@ -235,7 +239,7 @@ The Markdown body is the **prompt template** rendered per turn with the issue co
 
 ### LLM-driven enrichment (Headliner + SubgoalSynthesizer)
 
-Two background tickers in the daemon run a small local model (default `qwen3:4b` via Ollama) to add narrative on top of the raw event log:
+Two background tickers in the daemon run a small local model (default `qwen3:4b` against any OpenAI-compatible local server — `mlx_lm.server`, Ollama, llama.cpp; pointed at via `DISPATCH_LLM_BASE_URL`, default `http://localhost:8080/v1`) to add narrative on top of the raw event log:
 
 - **Headliner** (`daemon/src/headliner.ts`) — every ~30s, regenerates a one-sentence "Currently:" summary per workstream from the recent event window. Surfaced as `Workstream.activity_headline`. The macOS HomeView card prefers it over `latest_activity`.
 - **SubgoalSynthesizer** (`daemon/src/subgoal-synthesizer.ts`) — same cadence, watches each workstream for runs of ≥8 consecutive `post-tool-use` events with no agent-emitted narration in between (no `decision`, `subgoal_push`, `blocked`, …). Each such window is summarized as a single present-progressive sentence and **written back to the event log as a `subgoal_push` event** with two extra payload fields: `source: "synthesized"` and `synth_anchor: "<firstId>..<lastId>"`. The anchor is read back from the log on every tick so the same window is never summarized twice — synthesis is idempotent across daemon restarts. Disabled with `DISPATCH_SUBGOAL_SYNTH_ENABLED=0`.
@@ -290,7 +294,7 @@ workstream_id      : string (slug, e.g. "frontend-refactor")
 title              : string
 created_at         : ISO 8601 timestamp
 status             : backlog | active | paused | retired
-memory_path        : absolute path to ~/.claude/manager/memory/<workstream_id>.md
+memory_path        : absolute path to ~/.claude/dispatch/memory/<workstream_id>.md
 sessions           : [session_id, ...]   # all Claude Code sessions that ran under this workstream
 current_subgoal    : string | null       # head of the goal stack, or null if none
 latest_confidence  : number | null       # 0-1, from the most recent decision/confidence event
@@ -440,7 +444,7 @@ graph LR
 
 ## Skill broadcast
 
-A team handbook (`~/.claude/manager/handbook.md`) is the shared knowledge surface for every workstream's agent. The propose → promote → adopt loop:
+A team handbook (`~/.claude/dispatch/handbook.md`) is the shared knowledge surface for every workstream's agent. The propose → promote → adopt loop:
 
 1. **Agent proposes.** Mid-session, an agent calls the `propose_skill(title, body, source_decision_id?)` MCP tool when it discovers a pattern other workstreams should reuse. The daemon persists the proposal into the SQLite-backed `SkillProposalsStore` (`status='proposed'`) and appends a `skill_proposed` event to the originating workstream's JSONL log.
 2. **Manager reviews.** The macOS app polls `GET /skills/proposed` and renders pending proposals. The human clicks **Promote** or **Dismiss**.
@@ -475,11 +479,11 @@ The reports surface lets the human (or the scheduler) generate written updates s
    | Provider | Transport | Default model | Credentials | Failure modes |
    |---|---|---|---|---|
    | `claude` | `@anthropic-ai/sdk` (`messages.create`) | `claude-sonnet-4-7` | `ANTHROPIC_API_KEY` env var | Missing key → `LLMConfigError` (HTTP 500). SDK errors → `LLMRequestError` (HTTP 500) preserving the upstream status. |
-   | `ollama` | HTTP POST to `${OLLAMA_URL || http://localhost:11434}/api/chat` (non-streaming) | `qwen3:8b` | none (local) | Connection refused → `LLMUnreachableError` (HTTP 503) with install hint `"brew install ollama && ollama serve"`. Non-2xx → `LLMRequestError`. |
+   | `ollama` | HTTP POST to `${baseUrl}/chat/completions` (OpenAI-compat, non-streaming). Base URL is `DISPATCH_LLM_BASE_URL` → settings.json `ollamaUrl` → `OLLAMA_URL` (legacy alias) → `http://localhost:8080/v1` (mlx_lm.server). Bare `http://localhost:11434` and any URL without `/v1` in the path get `/v1` auto-appended for backwards compatibility with v1.2 Ollama setups. | `qwen3:8b` | none (local) | Connection refused → `LLMUnreachableError` (HTTP 503) with install hint `"pip install mlx-lm && mlx_lm.server --port 8080"` or `"brew install ollama && ollama serve"`. Non-2xx → `LLMRequestError`. |
 
-   Both providers are constructed via `getProvider(name)`; the HTTP layer translates the typed errors to status codes so the macOS client can render them differently (config issue vs. local LLM not running).
+   The `ollama` provider name is the family name for "any OpenAI-compatible local server" — mlx_lm.server (Apple's MLX engine, the recommended default on M-series silicon as of v1.3), Ollama, llama.cpp, etc. Both providers are constructed via `getProvider(name, overrides?)`; the HTTP layer translates the typed errors to status codes so the macOS client can render them differently (config issue vs. local LLM not running).
 
-4. **Saved reports store (`daemon/src/report-store.ts`)** — a SQLite table on the existing `~/.claude/manager/db.sqlite`:
+4. **Saved reports store (`daemon/src/report-store.ts`)** — a SQLite table on the existing `~/.claude/dispatch/db.sqlite`:
 
    ```
    reports(id PK, title, audience_preset, audience_freetext, period_since, period_until,
@@ -488,7 +492,7 @@ The reports surface lets the human (or the scheduler) generate written updates s
 
    Status flow: `draft` → `saved` (sets `saved_at`) → `archived` (soft-delete, hidden from default list). The `workstream_ids` column is a JSON-encoded array — kept inline rather than normalised to a join table since the cardinality is small and reports are immutable bodies.
 
-5. **Scheduler (`daemon/src/scheduler.ts`)** — in-process loop wrapping the `croner` package. Persists per-job config to `~/.claude/manager/scheduler.json`:
+5. **Scheduler (`daemon/src/scheduler.ts`)** — in-process loop wrapping the `croner` package. Persists per-job config to `~/.claude/dispatch/scheduler.json`:
 
    ```json
    {

@@ -15,13 +15,15 @@ Read first:
 
 ## Status
 
-v1.2 code-layer rename shipped. Daemon binary is `dispatch`, env vars are `DISPATCH_*` (with one-release `MANAGER_*` fallback + deprecation breadcrumb, removed in v1.3), state dir is `~/.claude/dispatch/` (one-shot migration in `bin/install.sh` from `~/.claude/manager/`), launchd label `com.dispatch.daemon`, Xcode project `Dispatch.xcodeproj`, bundle id `com.dispatch.app`, app file `/Applications/Dispatch.app`, custom logo shipped. Swift module name is `DispatchApp` (not `Dispatch`) to avoid colliding with system libdispatch.
+v1.2 code-layer rename shipped. Daemon binary is `dispatch`, env vars are `DISPATCH_*` (legacy `MANAGER_*` fallback removed in v1.3 — `DISPATCH_*` only), state dir is `~/.claude/dispatch/` (one-shot migration in `bin/install.sh` from `~/.claude/manager/`), launchd label `com.dispatch.daemon`, Xcode project `Dispatch.xcodeproj`, bundle id `com.dispatch.app`, app file `/Applications/Dispatch.app`, custom logo shipped. Swift module name is `DispatchApp` (not `Dispatch`) to avoid colliding with system libdispatch.
 
 **v1.4 Symphony orchestration shipped (substeps 0–4):** orchestrator state machine + retry/reconciliation, workspace manager + hooks, Claude Code agent runner (option A — spawn per turn), `WORKFLOW.md` loader + Linear adapter + dynamic reload, approval-required intervention kind + `/workstreams/:id/interventions/:intId/decide` endpoint + macOS Approve/Deny strip in `AgentDetailView`. Observation mode unchanged when no `--workflow` is passed. See `TODO.md` for deferred items (workstream_links SQLite join, gc CLI, MCP tool that emits approval requests).
 
 **v1.4.5 UX wave shipped:** Settings → **Providers** tab (`GET/PATCH /settings`, `~/.claude/dispatch/settings.json`, redacted API key on the wire) so local-model setup no longer needs env vars; Sleeping Robot mascot — daemon emits `live_session` per workstream (latest `session_start` newer than `session_end`), `RobotMascot` dims + closes eyes + floats `Zzz` when the underlying `claude` session ends; first-launch demo-data race fix in `DaemonResolver`; `WelcomeView` rewrite (3 numbered steps + copy-able `claude` snippet + Tutorial/Providers/Architecture links); `AgentDetailView` HSplitView reflows below 820 width; `DigestRailView` chips horizontal-scroll; tooltips across HomeView/WelcomeView/PreferencesView; bundled `TUTORIAL.md` + `LOCAL_MODELS.md` refreshed for v1.4 + Settings → Providers.
 
-Kanban + Linear-link UI (the v1.2 deliverables) and MLX-backed local LLM (v1.3) are not yet shipped — but the v1.4 Linear adapter implements the same GraphQL surface, so the v1.2 link UI is now mostly a presentation-layer task.
+**v1.3 shipped:** local-LLM transport now speaks OpenAI-compatible `/v1/chat/completions` keyed on `DISPATCH_LLM_BASE_URL` (default `http://localhost:8080/v1` for `mlx_lm.server`; bare `localhost:11434` and any URL without `/v1` get auto-promoted so existing Ollama setups upgrade transparently). `dispatch://workstream/<slug>` URL scheme registered in macOS `CFBundleURLTypes` + `commands/dispatcher.md` slash command for jumping from `claude` into the matching Radar card. `MANAGER_*` env-var fallback retired across daemon, hooks, macOS resolver.
+
+Kanban + Linear-link UI (the v1.2 deliverables) are not yet shipped — but the v1.4 Linear adapter implements the same GraphQL surface, so the v1.2 link UI is now mostly a presentation-layer task.
 
 ## Locked architectural decisions
 
@@ -47,5 +49,5 @@ These are decided. Do not relitigate without a reason; do propose changes if you
 - Local state at runtime lives at `~/.claude/dispatch/` (events, memory, db, handbook, scheduler). Do not commit — `.gitignore` excludes it.
 - When making non-trivial decisions about the build, update `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` rather than letting decisions drift.
 - **When writing user-facing copy** (UI strings, README sections, error messages surfaced to the human) prefer the Dispatch lexicon — Radar / Trace / Intercept / Protocol / Dossier. Internal identifiers (event types `decision`, `intervention_delivered`, `skill_proposed`; MCP tool names; SQLite columns) stay as the technical contract — do not rename them on the brand pass.
-- **Backwards-compat env vars** — `MANAGER_*` env vars are honored for one release with a deprecation breadcrumb. The fallback removes in v1.3. Don't add new sites that read the legacy form; new code reads `DISPATCH_*` only.
+- **Backwards-compat env vars** — `MANAGER_*` removed in v1.3. `DISPATCH_*` only. Filesystem-state migration `~/.claude/manager → ~/.claude/dispatch` still runs in `bin/install.sh` (not an env-var fallback).
 - **Swift module is `DispatchApp`, not `Dispatch`** — required because `Dispatch` is a system framework (libdispatch / GCD). Bundle id, target name, and `.app` filename are all `Dispatch`; only the Swift module identifier is suffixed. Test imports therefore use `@testable import DispatchApp`.

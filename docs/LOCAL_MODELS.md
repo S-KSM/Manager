@@ -1,69 +1,84 @@
-# Local models for Updates
+# Local models for Updates and the in-app summaries
 
-Dispatch's **Updates** feature (LLM-generated weekly / monthly summaries) runs against either the Anthropic API or a local model served by [Ollama](https://ollama.com). The daemon ships with both providers built in — you just pick one in the Generate Update sheet (or in the scheduler).
+Dispatch's **Updates** feature (LLM-generated weekly / monthly summaries) and the in-app summary tickers (Headliner + SubgoalSynthesizer) run against either the Anthropic API or any OpenAI-compatible local LLM server. The daemon ships with both wired in — you just pick one in the Generate Update sheet, in **Settings → Providers**, or via env vars.
 
 This doc covers wiring up a local model end to end. If you'd rather use the hosted Claude API, jump to [Alternative: Anthropic API](#alternative-anthropic-api).
 
-## TL;DR
+## TL;DR — mlx_lm.server (recommended on Apple Silicon)
+
+[`mlx_lm.server`](https://github.com/ml-explore/mlx-examples/tree/main/llms/mlx_lm) is Apple's MLX-backed inference server. On M-series silicon it's faster and lighter than the llama.cpp engine Ollama wraps; it speaks the OpenAI-compatible chat-completions API that Dispatch talks to as of v1.3.
 
 ```sh
-# 1. Install + start Ollama (one time)
+# 1. Install + start the server (one time)
+pip install mlx-lm
+
+# 2. Run with a 4-bit Qwen2.5 3B (small, fast — good first try)
+mlx_lm.server --port 8080 --model mlx-community/Qwen2.5-3B-Instruct-4bit
+
+# 3. Open the Dispatch app → Settings → Providers
+#    Provider:       Ollama (the family name for any OpenAI-compatible server)
+#    Local LLM URL:  http://localhost:8080/v1  (the default)
+#    Model:          mlx-community/Qwen2.5-3B-Instruct-4bit
+```
+
+That's it. Headliner and SubgoalSynthesizer pick the new settings up on their next ~30s tick; the Generate Update sheet picks them up on the next click.
+
+> The provider name stays `ollama` for historical reasons — it's the family name for "any OpenAI-compatible local server" (mlx_lm.server, Ollama, llama.cpp). Internal contract; renaming it would churn the wire schema.
+
+## Alternative: Ollama (still fully supported)
+
+```sh
+# 1. Install + start Ollama
 brew install ollama
 ollama serve            # leave running, or `brew services start ollama`
 
-# 2. Pull a model (one time, ~5 GB for qwen3:8b)
+# 2. Pull a model
 ollama pull qwen3:8b
 
-# 3. Generate an Update from the Dispatch app:
-#    File menu → New Update (or the + button on the Updates pane)
-#    → Provider: "Local (Ollama)"
-#    → Model:    qwen3:8b   (or leave blank — qwen3:8b is the default)
-#    → Generate
+# 3. Settings → Providers
+#    Local LLM URL:  http://localhost:11434          (auto-promoted to /v1)
+#    Model:          qwen3:8b
 ```
 
-No daemon restart, no env var, no config file. The daemon talks to Ollama on demand at `http://localhost:11434`.
+Dispatch v1.3 talks to Ollama on its OpenAI-compat surface (`/v1/chat/completions`), not the legacy `/api/chat`. A bare `http://localhost:11434` (or any URL whose path doesn't include `/v1`) is auto-normalized to `http://localhost:11434/v1` so existing v1.2 setups upgrade transparently.
 
-> You can also set the default provider/model app-wide in **Settings → Providers** (gear icon → Providers tab). New Updates inherit it; per-Update overrides still work in the Generate Update sheet. Headless setups that never open the macOS app should use the env-var route in [Pointing the daemon at a non-default Ollama URL](#pointing-the-daemon-at-a-non-default-ollama-url) and [Alternative: Anthropic API](#alternative-anthropic-api) below.
+## Pointing the daemon at a non-default URL
 
-**Supported providers today:** `claude` (Anthropic API) and `ollama` (any model Ollama can serve). MLX-backed local inference is on the roadmap (v1.3, deferred) — track it in [`ROADMAP.md`](ROADMAP.md).
+Two ways:
 
-## Recommended models
-
-The daemon defaults to `qwen3:8b` because it's the best quality-per-byte we've measured on Updates-style summarization. Anything Ollama can serve will work; some other reasonable picks:
-
-| Model                  | Size  | Notes                                                       |
-|------------------------|-------|-------------------------------------------------------------|
-| `qwen3:8b`             | 5.2 GB| Default. Strong reasoning, good at structured prose.        |
-| `qwen3:14b`            | 9 GB  | Better quality if you have the RAM (16 GB+ recommended).    |
-| `llama3.1:8b`          | 4.9 GB| Faster on Apple Silicon, slightly weaker reasoning.         |
-| `mistral-nemo:12b`     | 7 GB  | Good multilingual fallback.                                 |
-
-Pull whichever you want, then type the model tag (e.g. `llama3.1:8b`) into the Model field of the Generate Update sheet.
-
-## Pointing the daemon at a non-default Ollama URL
-
-Only needed if you're running Ollama on a different host or port (e.g. on a beefier machine on your LAN, or behind a reverse proxy).
+1. **Settings → Providers** in the app — preferred for desktop installs.
+2. **Env var** — for headless setups (CI, the daemon running on a beefier LAN host, etc.).
 
 ```sh
-# Add to ~/.zshrc or ~/.bashrc, then re-launch the Dispatch daemon
-export OLLAMA_URL=http://192.168.1.20:11434
+# In ~/.zshrc / ~/.bashrc, then re-launch the Dispatch daemon
+export DISPATCH_LLM_BASE_URL=http://192.168.1.20:8080/v1
 ```
 
-Then bounce the daemon so it picks up the new env:
+`DISPATCH_LLM_BASE_URL` wins over the settings file. The legacy `OLLAMA_URL` env var is still honored as a fallback so existing v1.2 configurations keep working.
+
+Bounce the daemon to pick up env changes:
 
 ```sh
 launchctl unload ~/Library/LaunchAgents/com.dispatch.daemon.plist
 launchctl load   ~/Library/LaunchAgents/com.dispatch.daemon.plist
 ```
 
-That's the only Ollama-related env var the daemon reads. Model selection happens per-request from the app, not at daemon startup, so you can switch between `qwen3:8b` and `llama3.1:8b` without any restart.
+## Recommended models
 
-## Verify the next Update used Ollama
+| Model                                          | Size  | Notes                                                       |
+|------------------------------------------------|-------|-------------------------------------------------------------|
+| `mlx-community/Qwen2.5-3B-Instruct-4bit`       | ~2 GB | Default mlx_lm.server pick. Strong reasoning for size.      |
+| `mlx-community/Qwen2.5-7B-Instruct-4bit`       | ~4 GB | Better quality if you have the RAM. Apple Silicon optimized.|
+| `qwen3:8b` (Ollama)                            | 5.2 GB| Default for Ollama users. Strong on structured prose.       |
+| `qwen3:14b` (Ollama)                           | 9 GB  | Better quality, needs 16 GB+ RAM.                           |
+| `llama3.1:8b` (Ollama)                         | 4.9 GB| Faster, slightly weaker reasoning.                          |
+
+## Verify the next Update used your local model
 
 After generating an Update, the report header in the Updates pane shows the provider it ran against. You can also check the daemon log:
 
 ```sh
-tail -n 50 ~/Library/Logs/dispatch.daemon.out.log | grep -i ollama
+tail -n 50 ~/Library/Logs/dispatch.daemon.out.log | grep -i 'local\|llm'
 ```
 
 Or hit the daemon directly:
@@ -77,38 +92,44 @@ You should see something like:
 ```json
 {
   "provider": "ollama",
-  "model": "qwen3:8b",
-  "generated_at": "2026-05-03T18:42:01.103Z"
+  "model": "mlx-community/Qwen2.5-3B-Instruct-4bit",
+  "generated_at": "2026-05-07T18:42:01.103Z"
 }
 ```
 
 ## Troubleshooting
 
-**"Ollama not reachable at http://localhost:11434"** — Ollama isn't running. Open a terminal and `ollama serve`, or `brew services start ollama` to keep it running across reboots. The daemon raises this error verbatim with an install hint when the connection is refused — see `daemon/src/llm/ollama.ts`.
+**"Local LLM not reachable at http://localhost:8080/v1"** — `mlx_lm.server` (or Ollama) isn't running. Start it; the daemon raises this error verbatim with an install hint when the connection is refused — see `daemon/src/llm/ollama.ts`.
 
-**"Ollama HTTP 404: model not found"** — you typed a model tag the local Ollama doesn't have. `ollama list` shows what's pulled; `ollama pull <tag>` to fetch a missing one.
+**"Local LLM HTTP 404: model not found"** — you typed a model id the local server doesn't have. For mlx_lm.server, the model loads on first request — the first generation may take a minute to download. For Ollama, `ollama list` shows what's pulled; `ollama pull <tag>` to fetch one.
 
-**Generation hangs / takes 2+ minutes** — first run after `ollama serve` loads the model into RAM (slow). Subsequent runs are fast. If you're on a small machine, drop to a smaller model like `llama3.1:8b` or `qwen3:4b`.
+**Generation hangs / takes 2+ minutes** — first run after the server starts loads the model into RAM (slow). Subsequent runs are fast. If you're on a small machine, drop to a smaller 4-bit MLX model.
 
-**Output looks low-quality** — local 8B models lose some nuance vs. Claude. If the Update reads as generic, switch back to `claude` in the Generate Update sheet for that one report — Dispatch lets you mix providers per report.
+**Output looks low-quality** — local 3B–8B models lose some nuance vs. Claude. If the Update reads as generic, switch back to `claude` in the Generate Update sheet for that one report — Dispatch lets you mix providers per report.
 
 ## Alternative: Anthropic API
 
 If you'd rather use the hosted Claude API (better quality, costs ~$0.05–0.20 per Update):
 
+1. Open the Dispatch app → **Settings → Providers** → paste your `sk-ant-...` key into the Anthropic API key field → Save. The key is stored in `~/.claude/dispatch/settings.json` with mode `0600` and never returned by the daemon once saved.
+
+Or, headless / via env var:
+
 ```sh
-# Add to ~/.zshrc / ~/.bashrc, then re-launch the daemon
 export ANTHROPIC_API_KEY=sk-ant-...
+launchctl unload ~/Library/LaunchAgents/com.dispatch.daemon.plist
+launchctl load   ~/Library/LaunchAgents/com.dispatch.daemon.plist
 ```
 
-Bounce the daemon (same `launchctl` dance as above) and select `Provider: Claude` in the Generate Update sheet. Default model is `claude-sonnet-4-7`; override per request if you want a different snapshot. The key is read lazily — if it isn't set when you click Generate, the daemon returns a clear error and Dispatch surfaces "set ANTHROPIC_API_KEY" inline. Source: `daemon/src/llm/claude.ts`.
+Then select `Provider: Claude` in the Generate Update sheet. Default model is `claude-sonnet-4-7`; override per request if you want a different snapshot. Source: `daemon/src/llm/claude.ts`.
 
 You can keep both configured and pick provider per Update. Nothing prevents mixing.
 
 ## What's wired where (for the curious)
 
-- Provider factory: `daemon/src/llm/index.ts` (`getProvider('claude' | 'ollama')`)
-- Ollama client: `daemon/src/llm/ollama.ts` — reads `OLLAMA_URL`, defaults to `http://localhost:11434`, default model `qwen3:8b`
-- Claude client: `daemon/src/llm/claude.ts` — reads `ANTHROPIC_API_KEY`, default model `claude-sonnet-4-7`
+- Provider factory: `daemon/src/llm/index.ts` (`getProvider('claude' | 'ollama', overrides?)`)
+- Local LLM client: `daemon/src/llm/ollama.ts` — OpenAI-compat `/v1/chat/completions`, base URL precedence `DISPATCH_LLM_BASE_URL` > settings > `OLLAMA_URL` > `http://localhost:8080/v1`, default model `qwen3:8b`
+- Claude client: `daemon/src/llm/claude.ts` — reads `ANTHROPIC_API_KEY` (or settings → Providers), default model `claude-sonnet-4-7`
 - HTTP entry point: `POST /reports/generate` in `daemon/src/http-server.ts` — accepts `provider` and optional `model` per request
 - Scheduler: `daemon/src/scheduler.ts` — picks provider/model from per-job config persisted in `~/.claude/dispatch/scheduler.json`
+- In-app summary tickers: `daemon/src/headliner.ts`, `daemon/src/subgoal-synthesizer.ts`
