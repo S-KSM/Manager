@@ -20,6 +20,12 @@ import type { LLMProviderName } from './llm/index.js';
 export interface PersistedSettings {
   headlineProvider?: LLMProviderName;
   headlineModel?: string;
+  /**
+   * Base URL of the OpenAI-compatible local LLM server (mlx_lm.server,
+   * Ollama, llama.cpp). Field name is `ollamaUrl` for legacy reasons (the
+   * macOS Settings tab predates MLX support); the actual transport speaks
+   * `/v1/chat/completions` regardless.
+   */
   ollamaUrl?: string;
   /**
    * The Anthropic API key. Stored verbatim in `settings.json`. Never returned
@@ -49,7 +55,7 @@ export interface SettingsWire {
   linearApiKeyConfigured: boolean;
 }
 
-const DEFAULT_OLLAMA_URL = 'http://localhost:11434';
+const DEFAULT_LOCAL_LLM_URL = 'http://localhost:8080/v1';
 const DEFAULT_OLLAMA_MODEL = 'qwen3:4b';
 const DEFAULT_CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -93,14 +99,22 @@ export class SettingsStore {
     return effectiveProvider === 'claude' ? DEFAULT_CLAUDE_MODEL : DEFAULT_OLLAMA_MODEL;
   }
 
-  /** Ollama base URL: settings file > `OLLAMA_URL` env > default localhost. */
+  /**
+   * Local-LLM base URL. Resolution order:
+   *   1. `DISPATCH_LLM_BASE_URL` env (v1.3+),
+   *   2. settings.json `ollamaUrl`,
+   *   3. `OLLAMA_URL` env (legacy alias, still honored),
+   *   4. `http://localhost:8080/v1` (mlx_lm.server default).
+   */
   getResolvedOllamaUrl(): string {
+    const dispatchEnv = process.env['DISPATCH_LLM_BASE_URL'];
+    if (dispatchEnv && dispatchEnv.length > 0) return dispatchEnv;
     if (this.current.ollamaUrl && this.current.ollamaUrl.length > 0) {
       return this.current.ollamaUrl;
     }
-    const env = process.env['OLLAMA_URL'];
-    if (env && env.length > 0) return env;
-    return DEFAULT_OLLAMA_URL;
+    const ollamaEnv = process.env['OLLAMA_URL'];
+    if (ollamaEnv && ollamaEnv.length > 0) return ollamaEnv;
+    return DEFAULT_LOCAL_LLM_URL;
   }
 
   /**
