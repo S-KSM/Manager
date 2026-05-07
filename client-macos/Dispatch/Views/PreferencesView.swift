@@ -89,7 +89,7 @@ private struct ProvidersSettings: View {
 
     @State private var provider: ProviderSettings.Provider = .ollama
     @State private var model: String = ""
-    @State private var ollamaURL: String = "http://localhost:11434"
+    @State private var ollamaURL: String = "http://localhost:8080/v1"
     @State private var anthropicAPIKey: String = ""
     @State private var anthropicConfigured = false
     @State private var linearAPIKey: String = ""
@@ -118,10 +118,10 @@ private struct ProvidersSettings: View {
                     .help("The model id sent to the provider. Leave blank to use the daemon's default for this provider.")
 
                 if provider == .ollama {
-                    TextField("Ollama URL", text: $ollamaURL,
-                              prompt: Text("http://localhost:11434"))
+                    TextField("Local LLM URL", text: $ollamaURL,
+                              prompt: Text("http://localhost:8080/v1"))
                         .textFieldStyle(.roundedBorder)
-                        .help("Base URL for your local Ollama server. Default works for `ollama serve` on this machine.")
+                        .help("Base URL for your OpenAI-compatible local LLM server. Defaults to mlx_lm.server (port 8080); for Ollama, use http://localhost:11434.")
                 }
             }
 
@@ -154,7 +154,7 @@ private struct ProvidersSettings: View {
                     statusBadge(reachable: daemonReachable, probing: probing,
                                 okText: "Connected", failText: "Unreachable")
                 }
-                LabeledContent(provider == .claude ? "Anthropic" : "Ollama") {
+                LabeledContent(provider == .claude ? "Anthropic" : "Local LLM") {
                     statusBadge(reachable: providerReachable, probing: probing,
                                 okText: "Reachable",
                                 failText: provider == .ollama ? "Not reachable" : "Key missing")
@@ -267,17 +267,44 @@ private struct ProvidersSettings: View {
         }
     }
 
+    /// Cheap reachability probe for any OpenAI-compatible local LLM server
+    /// (mlx_lm.server / Ollama / llama.cpp). Hits `GET <baseUrl>/models`,
+    /// the OpenAI-compat list endpoint. A 404 means we got a TCP response
+    /// from *something* but it doesn't speak the API — treat as reachable
+    /// so the user can still see "the box is up" and fix the URL. Network
+    /// errors / refusal → not reachable.
     private func probeOllama(url: String) async -> Bool {
         guard let base = URL(string: url) else { return false }
-        var req = URLRequest(url: base.appendingPathComponent("api/tags"))
+        let modelsURL = base.appendingPathComponent("models")
+        var req = URLRequest(url: modelsURL)
         req.timeoutInterval = 1.5
         do {
             let (_, response) = try await URLSession.shared.data(for: req)
             if let http = response as? HTTPURLResponse {
-                return (200..<500).contains(http.statusCode)
+                if (200..<500).contains(http.statusCode) {
+                    return true
+                }
+                return false
             }
             return false
         } catch {
+            // 404 fallback: try a bare TCP-ish check on the host:port via a
+            // root GET. If the host answers anything, the server is up.
+            if let host = base.host {
+                var components = URLComponents()
+                components.scheme = base.scheme
+                components.host = host
+                if let port = base.port { components.port = port }
+                components.path = "/"
+                if let rootURL = components.url {
+                    var rootReq = URLRequest(url: rootURL)
+                    rootReq.timeoutInterval = 1.5
+                    if let (_, rootResp) = try? await URLSession.shared.data(for: rootReq),
+                       rootResp is HTTPURLResponse {
+                        return true
+                    }
+                }
+            }
             return false
         }
     }
