@@ -13,6 +13,7 @@ import { ReportStore } from '../src/report-store.js';
 import { Scheduler } from '../src/scheduler.js';
 import { SettingsStore } from '../src/settings-store.js';
 import { SkillProposalsStore } from '../src/skill-proposals.js';
+import { WorkstreamLinksStore } from '../src/workstream-links-store.js';
 import { WorkstreamRegistry } from '../src/workstream.js';
 
 describe('HTTP server', () => {
@@ -25,6 +26,7 @@ describe('HTTP server', () => {
   let reportStore: ReportStore;
   let scheduler: Scheduler;
   let settings: SettingsStore;
+  let workstreamLinks: WorkstreamLinksStore;
   let handle: HttpServerHandle;
   let providerCalls: { name: LLMProviderName; system: string; user: string }[];
 
@@ -51,6 +53,7 @@ describe('HTTP server', () => {
       },
     });
     settings = new SettingsStore(join(dir, 'settings.json'));
+    workstreamLinks = new WorkstreamLinksStore(join(dir, 'db.sqlite'));
     handle = buildHttpServer({
       eventStore,
       memoryStore,
@@ -61,6 +64,18 @@ describe('HTTP server', () => {
       reportStore,
       scheduler,
       settings,
+      workstreamLinks,
+      linearTrackerFactory: () => ({
+        fetchIssueByIdentifier: async (identifier: string) => {
+          if (identifier === 'ENG-404') return null;
+          return {
+            id: `lin_${identifier}`,
+            identifier,
+            url: `https://linear.app/x/issue/${identifier}`,
+            state: 'In Progress',
+          };
+        },
+      }),
       getProvider: fakeProvider,
     });
   });
@@ -71,6 +86,7 @@ describe('HTTP server', () => {
     interventionQueue.close();
     skillProposalsStore.close();
     reportStore.close();
+    workstreamLinks.close();
     registry.close();
     rmSync(dir, { recursive: true, force: true });
   });
@@ -886,6 +902,90 @@ describe('HTTP server', () => {
       .send({ headlineProvider: 'gpt-99' });
     expect(r.status).toBe(400);
     expect(r.body.error).toMatch(/headlineProvider/);
+  });
+
+  // ---- Tracker links (v1.2) -----------------------------------------------
+
+  it('GET /workstreams/:id/link returns null when no link exists', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'wl1', title: 'WL1' });
+    const r = await request(handle.app).get('/workstreams/wl1/link');
+    expect(r.status).toBe(200);
+    expect(r.body).toBeNull();
+  });
+
+  it('PUT /workstreams/:id/link without a Linear key → 503', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'wl2', title: 'WL2' });
+    const prior = process.env['DISPATCH_LINEAR_API_KEY'];
+    delete process.env['DISPATCH_LINEAR_API_KEY'];
+    try {
+      const r = await request(handle.app)
+        .put('/workstreams/wl2/link')
+        .send({ tracker_kind: 'linear', issue_identifier: 'ENG-1' });
+      expect(r.status).toBe(503);
+      expect(r.body.code).toBe('linear_api_key_missing');
+    } finally {
+      if (prior !== undefined) process.env['DISPATCH_LINEAR_API_KEY'] = prior;
+    }
+  });
+
+  it('PUT /workstreams/:id/link persists, GET returns it, GET /links lists it', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'wl3', title: 'WL3' });
+    await request(handle.app).patch('/settings').send({ linearApiKey: 'lin_test' });
+
+    const put = await request(handle.app)
+      .put('/workstreams/wl3/link')
+      .send({ tracker_kind: 'linear', issue_identifier: 'ENG-7' });
+    expect(put.status).toBe(200);
+    expect(put.body.workstream_id).toBe('wl3');
+    expect(put.body.issue_identifier).toBe('ENG-7');
+    expect(put.body.issue_id).toBe('lin_ENG-7');
+    expect(put.body.last_seen_state).toBe('In Progress');
+
+    const got = await request(handle.app).get('/workstreams/wl3/link');
+    expect(got.status).toBe(200);
+    expect(got.body.issue_identifier).toBe('ENG-7');
+
+    const list = await request(handle.app).get('/links');
+    expect(list.status).toBe(200);
+    expect(Array.isArray(list.body)).toBe(true);
+    expect(
+      (list.body as Array<{ workstream_id: string }>).find((l) => l.workstream_id === 'wl3'),
+    ).toBeTruthy();
+  });
+
+  it('PUT /workstreams/:id/link with unknown identifier → 400', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'wl4', title: 'WL4' });
+    await request(handle.app).patch('/settings').send({ linearApiKey: 'lin_test' });
+    const r = await request(handle.app)
+      .put('/workstreams/wl4/link')
+      .send({ tracker_kind: 'linear', issue_identifier: 'ENG-404' });
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBe('linear_unknown_identifier');
+  });
+
+  it('DELETE /workstreams/:id/link is idempotent (200 even with no prior link)', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'wl5', title: 'WL5' });
+    const r1 = await request(handle.app).delete('/workstreams/wl5/link');
+    expect(r1.status).toBe(200);
+    // Link, then delete, then delete again — all 200.
+    await request(handle.app).patch('/settings').send({ linearApiKey: 'lin_test' });
+    await request(handle.app)
+      .put('/workstreams/wl5/link')
+      .send({ tracker_kind: 'linear', issue_identifier: 'ENG-7' });
+    const r2 = await request(handle.app).delete('/workstreams/wl5/link');
+    expect(r2.status).toBe(200);
+    const r3 = await request(handle.app).delete('/workstreams/wl5/link');
+    expect(r3.status).toBe(200);
+
+    const got = await request(handle.app).get('/workstreams/wl5/link');
+    expect(got.body).toBeNull();
+  });
+
+  it('PUT /workstreams/:id/link on unknown workstream → 404', async () => {
+    const r = await request(handle.app)
+      .put('/workstreams/no-such/link')
+      .send({ tracker_kind: 'linear', issue_identifier: 'ENG-1' });
+    expect(r.status).toBe(404);
   });
 
   it('PATCH /settings with empty anthropicApiKey clears the stored value', async () => {

@@ -36,6 +36,9 @@ import type {
   WorkstreamStatus,
   WorkstreamWithSessions,
 } from './workstream.js';
+import type { WorkstreamLinksStore } from './workstream-links-store.js';
+import { LinearTracker } from './trackers/linear.js';
+import { TrackerError } from './trackers/index.js';
 
 interface BuildOptions {
   eventStore: EventStore;
@@ -59,6 +62,21 @@ interface BuildOptions {
   settings?: SettingsStore;
   /** Override the LLM provider factory; used by tests to inject mocks. */
   getProvider?: (name: LLMProviderName, overrides?: ProviderOverrides) => LLMProvider;
+  /**
+   * v1.2 tracker-link store. When present, `/workstreams/:id/link` and
+   * `/links` are served and the optional Linear sync ticker can find rows.
+   * When absent the link endpoints 404 with `{error: "links not enabled"}`.
+   */
+  workstreamLinks?: WorkstreamLinksStore;
+  /**
+   * Test-only override for the LinearTracker constructor — lets us inject a
+   * mock fetch without standing up a real Linear endpoint. When absent,
+   * production wiring uses `new LinearTracker({apiKey, projectSlug})`.
+   */
+  linearTrackerFactory?: (apiKey: string) => {
+    fetchIssueByIdentifier: (identifier: string) =>
+      Promise<{ id: string; identifier: string; url: string | null; state: string } | null>;
+  };
 }
 
 const VALID_REPORT_STATUSES: ReadonlySet<ReportStatus> = new Set(['draft', 'saved', 'archived']);
@@ -123,8 +141,13 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     headlineStore,
     orchestrator,
     settings,
+    workstreamLinks,
   } = opts;
   const getProvider = opts.getProvider ?? defaultGetProvider;
+  const linearTrackerFactory =
+    opts.linearTrackerFactory ??
+    ((apiKey: string) =>
+      new LinearTracker({ apiKey, projectSlug: 'unused-for-link-flow' }));
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
@@ -404,6 +427,120 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
       return;
     }
     res.json(match);
+  });
+
+  // ---- Tracker links (v1.2) ------------------------------------------------
+
+  /**
+   * Either returns 200 + WorkstreamLink, or — when the workstream exists but
+   * has no link — 200 + null body. Distinguishes "no link yet" (a normal,
+   * not-an-error state for the macOS chip) from "workstream not found"
+   * (404).
+   */
+  app.get('/workstreams/:id/link', (req: Request, res: Response) => {
+    if (!workstreamLinks) {
+      res.status(404).json({ error: 'links not enabled' });
+      return;
+    }
+    const id = String(req.params['id']);
+    if (!registry.get(id)) {
+      res.status(404).json({ error: 'workstream not found' });
+      return;
+    }
+    const link = workstreamLinks.get(id);
+    res.json(link);
+  });
+
+  /**
+   * Body `{tracker_kind: 'linear', issue_identifier: 'ENG-123'}`. Resolves
+   * via `LinearTracker.fetchIssueByIdentifier`, persists. 503 when no Linear
+   * key is configured (settings file or env), 400 when Linear can't find
+   * the identifier, 404 when the workstream doesn't exist.
+   */
+  app.put('/workstreams/:id/link', async (req: Request, res: Response) => {
+    if (!workstreamLinks) {
+      res.status(404).json({ error: 'links not enabled' });
+      return;
+    }
+    const id = String(req.params['id']);
+    if (!registry.get(id)) {
+      res.status(404).json({ error: 'workstream not found' });
+      return;
+    }
+    const body = (req.body ?? {}) as {
+      tracker_kind?: unknown;
+      issue_identifier?: unknown;
+    };
+    if (body.tracker_kind !== 'linear') {
+      res.status(400).json({ error: "tracker_kind must be 'linear'" });
+      return;
+    }
+    if (typeof body.issue_identifier !== 'string' || body.issue_identifier.length === 0) {
+      res.status(400).json({ error: 'issue_identifier required' });
+      return;
+    }
+    const apiKey = settings?.getResolvedLinearApiKey();
+    if (!apiKey) {
+      res
+        .status(503)
+        .json({ error: 'Linear API key not configured', code: 'linear_api_key_missing' });
+      return;
+    }
+    let tracker: ReturnType<typeof linearTrackerFactory>;
+    try {
+      tracker = linearTrackerFactory(apiKey);
+    } catch (err) {
+      const code = err instanceof TrackerError ? err.code : 'tracker_init_failed';
+      res.status(500).json({ error: (err as Error).message, code });
+      return;
+    }
+    let issue: { id: string; identifier: string; url: string | null; state: string } | null;
+    try {
+      issue = await tracker.fetchIssueByIdentifier(body.issue_identifier);
+    } catch (err) {
+      const code = err instanceof TrackerError ? err.code : 'linear_api_request';
+      res.status(502).json({ error: (err as Error).message, code });
+      return;
+    }
+    if (!issue) {
+      res.status(400).json({
+        error: `Linear issue ${body.issue_identifier} not found`,
+        code: 'linear_unknown_identifier',
+      });
+      return;
+    }
+    const persisted = workstreamLinks.link({
+      workstreamId: id,
+      trackerKind: 'linear',
+      issueId: issue.id,
+      issueIdentifier: issue.identifier,
+      issueUrl: issue.url,
+      lastSeenState: issue.state,
+    });
+    res.json(persisted);
+  });
+
+  /** Idempotent — deleting a non-existent link is still a 200. */
+  app.delete('/workstreams/:id/link', (req: Request, res: Response) => {
+    if (!workstreamLinks) {
+      res.status(404).json({ error: 'links not enabled' });
+      return;
+    }
+    const id = String(req.params['id']);
+    if (!registry.get(id)) {
+      res.status(404).json({ error: 'workstream not found' });
+      return;
+    }
+    workstreamLinks.unlink(id);
+    res.json({ ok: true });
+  });
+
+  app.get('/links', (_req: Request, res: Response) => {
+    if (!workstreamLinks) {
+      res.status(404).json({ error: 'links not enabled' });
+      return;
+    }
+    res.json(workstreamLinks.list());
   });
 
   // ---- Hooks ---------------------------------------------------------------
