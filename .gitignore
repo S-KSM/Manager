@@ -5,6 +5,7 @@
 
 # Xcode / SwiftUI client
 client-macos/build/
+client-macos/build-debug/
 client-macos/build-release/
 client-macos/DerivedData/
 client-macos/*.xcuserstate
