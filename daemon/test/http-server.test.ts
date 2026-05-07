@@ -1004,5 +1004,225 @@ describe('HTTP server', () => {
   });
 });
 
+describe('HTTP server admin endpoints (v1.4.6 Diagnostics)', () => {
+  let dir: string;
+  let registry: WorkstreamRegistry;
+  let interventionQueue: InterventionQueue;
+  let eventStore: EventStore;
+  let memoryStore: MemoryStore;
+  let handbookStore: HandbookStore;
+  let skillProposalsStore: SkillProposalsStore;
+  let reportStore: ReportStore;
+  let scheduler: Scheduler;
+  let settings: SettingsStore;
+  let workstreamLinks: WorkstreamLinksStore;
+  let handle: HttpServerHandle;
+  let pidLookups: number[];
+  let killCalls: number[];
+  let spawnCalls: string[];
+  let pidsToReturn: number[];
+  let escalateNext: boolean;
+  let spawnNext: { ok: boolean; pid?: number; error?: string };
+  let restartCalls: number;
+  let restartedNames: string[];
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'manager-admin-'));
+    registry = new WorkstreamRegistry(join(dir, 'db.sqlite'));
+    interventionQueue = new InterventionQueue(join(dir, 'db.sqlite'));
+    eventStore = new EventStore(join(dir, 'events'));
+    memoryStore = new MemoryStore(join(dir, 'memory'));
+    handbookStore = new HandbookStore(join(dir, 'handbook.md'));
+    skillProposalsStore = new SkillProposalsStore(join(dir, 'db.sqlite'));
+    reportStore = new ReportStore(join(dir, 'db.sqlite'));
+    scheduler = new Scheduler(
+      { registry, eventStore, memoryStore, reportStore },
+      join(dir, 'scheduler.json'),
+    );
+    await scheduler.start();
+    settings = new SettingsStore(join(dir, 'settings.json'));
+    workstreamLinks = new WorkstreamLinksStore(join(dir, 'db.sqlite'));
+
+    pidLookups = [];
+    killCalls = [];
+    spawnCalls = [];
+    pidsToReturn = [];
+    escalateNext = false;
+    spawnNext = { ok: true, pid: 99999 };
+    restartCalls = 0;
+    restartedNames = ['headliner', 'subgoal_synth', 'linear_sync'];
+
+    handle = buildHttpServer({
+      eventStore,
+      memoryStore,
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      adminImpls: {
+        findPidOnPort: async (port) => {
+          pidLookups.push(port);
+          return [...pidsToReturn];
+        },
+        killWithEscalation: async (pid) => {
+          killCalls.push(pid);
+          return { escalated: escalateNext, dead: true };
+        },
+        spawnDetached: async (cmd) => {
+          spawnCalls.push(cmd);
+          return spawnNext;
+        },
+      },
+      tickerRestarter: () => {
+        restartCalls += 1;
+        return restartedNames;
+      },
+    });
+  });
+
+  afterEach(async () => {
+    scheduler.stop();
+    await handle.close();
+    interventionQueue.close();
+    skillProposalsStore.close();
+    reportStore.close();
+    workstreamLinks.close();
+    registry.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('POST /admin/llm/kill returns null when nothing is listening', async () => {
+    pidsToReturn = [];
+    const r = await request(handle.app).post('/admin/llm/kill');
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ killed: null, escalated: false });
+    // The configured base URL is the SettingsStore default = port 8080.
+    expect(pidLookups).toEqual([8080]);
+    expect(killCalls).toEqual([]);
+  });
+
+  it('POST /admin/llm/kill kills the listener PID and surfaces escalation flag', async () => {
+    pidsToReturn = [4242];
+    escalateNext = true;
+    const r = await request(handle.app).post('/admin/llm/kill');
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ killed: 4242, escalated: true });
+    expect(killCalls).toEqual([4242]);
+  });
+
+  it('POST /admin/llm/kill resolves a custom URL from settings', async () => {
+    await request(handle.app)
+      .patch('/settings')
+      .send({ ollamaUrl: 'http://localhost:11434/v1' });
+    pidsToReturn = [];
+    await request(handle.app).post('/admin/llm/kill');
+    expect(pidLookups).toEqual([11434]);
+  });
+
+  it('POST /admin/llm/restart 400s with no_start_command when unset', async () => {
+    const r = await request(handle.app).post('/admin/llm/restart');
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBe('no_start_command');
+    expect(spawnCalls).toEqual([]);
+  });
+
+  it('POST /admin/llm/restart kills + spawns when configured', async () => {
+    await request(handle.app)
+      .patch('/settings')
+      .send({ localLLMStartCommand: 'mlx_lm.server --port 8080' });
+    pidsToReturn = [4242];
+
+    const r = await request(handle.app).post('/admin/llm/restart');
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ killed_pid: 4242, started: true });
+    expect(killCalls).toEqual([4242]);
+    expect(spawnCalls).toEqual(['mlx_lm.server --port 8080']);
+  });
+
+  it('POST /admin/llm/restart returns killed_pid:null when nothing was running', async () => {
+    await request(handle.app)
+      .patch('/settings')
+      .send({ localLLMStartCommand: 'mlx_lm.server --port 8080' });
+    pidsToReturn = [];
+
+    const r = await request(handle.app).post('/admin/llm/restart');
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ killed_pid: null, started: true });
+    expect(killCalls).toEqual([]);
+    expect(spawnCalls).toEqual(['mlx_lm.server --port 8080']);
+  });
+
+  it('POST /admin/llm/restart 500s when spawn fails', async () => {
+    await request(handle.app)
+      .patch('/settings')
+      .send({ localLLMStartCommand: 'bogus-bin' });
+    spawnNext = { ok: false, error: 'ENOENT' };
+
+    const r = await request(handle.app).post('/admin/llm/restart');
+    expect(r.status).toBe(500);
+    expect(r.body.started).toBe(false);
+    expect(r.body.error).toContain('ENOENT');
+  });
+
+  it('POST /admin/restart invokes the restarter and returns the list', async () => {
+    const r = await request(handle.app).post('/admin/restart');
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ restarted: ['headliner', 'subgoal_synth', 'linear_sync'] });
+    expect(restartCalls).toBe(1);
+  });
+
+  it('POST /admin/restart 500s when the restarter throws', async () => {
+    await handle.close();
+    handle = buildHttpServer({
+      eventStore,
+      memoryStore,
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      tickerRestarter: () => {
+        throw new Error('boom');
+      },
+    });
+    const r = await request(handle.app).post('/admin/restart');
+    expect(r.status).toBe(500);
+    expect(r.body.error).toBe('boom');
+  });
+
+  it('POST /admin/restart 404s when no tickerRestarter is wired', async () => {
+    await handle.close();
+    handle = buildHttpServer({
+      eventStore,
+      memoryStore,
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+    });
+    const r = await request(handle.app).post('/admin/restart');
+    expect(r.status).toBe(404);
+  });
+
+  it('GET /settings exposes localLLMStartCommand', async () => {
+    await request(handle.app)
+      .patch('/settings')
+      .send({ localLLMStartCommand: 'mlx_lm.server --port 8080' });
+    const r = await request(handle.app).get('/settings');
+    expect(r.body.localLLMStartCommand).toBe('mlx_lm.server --port 8080');
+  });
+});
+
 // Suppress unused var warning when vi isn't otherwise used.
 void vi;

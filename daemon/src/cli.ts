@@ -203,8 +203,57 @@ async function runStart(opts: {
   const scheduler = new Scheduler({ registry, eventStore, memoryStore, reportStore });
   const headlineStore = new HeadlineStore();
   const settings = new SettingsStore(cfg.settingsPath);
-  const headliner = new Headliner({ registry, eventStore, store: headlineStore, settings });
+  let headliner = new Headliner({ registry, eventStore, store: headlineStore, settings });
   const workstreamLinks = new WorkstreamLinksStore(cfg.dbPath);
+
+  // v1.4.6 — TickerSupervisor: keeps mutable references to every running
+  // ticker so the `POST /admin/restart` endpoint can cancel + re-instantiate
+  // them in place (re-reading settings.json) without exiting the daemon.
+  let subgoalSynth: SubgoalSynthesizer | null = null;
+  let linearSyncerRef: LinearCommentSyncer | null = null;
+  const restartTickers = (): string[] => {
+    const restarted: string[] = [];
+    if (process.env['DISPATCH_HEADLINE_ENABLED'] !== '0') {
+      headliner.stop();
+      headliner = new Headliner({ registry, eventStore, store: headlineStore, settings });
+      headliner.start();
+      restarted.push('headliner');
+    }
+    if (subgoalSynth) {
+      subgoalSynth.stop();
+      subgoalSynth = new SubgoalSynthesizer({ registry, eventStore, settings });
+      subgoalSynth.start();
+      restarted.push('subgoal_synth');
+    }
+    if (linearSyncerRef) {
+      linearSyncerRef.stop();
+      linearSyncerRef = new LinearCommentSyncer({
+        registry,
+        eventStore,
+        store: workstreamLinks,
+        settings,
+        trackerFactory: (apiKey: string) =>
+          new LinearTracker({ apiKey, projectSlug: 'unused-for-link-flow' }),
+      });
+      linearSyncerRef.onWorkstreamUpdated = (e) => {
+        const event = {
+          ts: new Date().toISOString(),
+          workstream_id: e.workstreamId,
+          type: 'workstream_updated' as const,
+          id: `wsu_${randomUUID().slice(0, 8)}`,
+          payload: {
+            changes: { status: e.nextStatus },
+            prev: { status: e.prevStatus },
+            source: 'linear_sync',
+          },
+        };
+        void eventStore.appendEvent(e.workstreamId, event);
+      };
+      linearSyncerRef.start();
+      restarted.push('linear_sync');
+    }
+    return restarted;
+  };
   // Orchestrator is built below if --mock-tracker was passed; we late-bind it
   // into the HTTP server via a closure-captured holder so the route can find it.
   const orchestratorHolder: { current: Orchestrator | null } = { current: null };
@@ -220,6 +269,7 @@ async function runStart(opts: {
     headlineStore,
     settings,
     workstreamLinks,
+    tickerRestarter: restartTickers,
     get orchestrator() {
       return orchestratorHolder.current ?? undefined;
     },
@@ -235,8 +285,8 @@ async function runStart(opts: {
     process.stderr.write('[dispatch] headliner started\n');
   }
   if (process.env['DISPATCH_SUBGOAL_SYNTH_ENABLED'] !== '0') {
-    const synth = new SubgoalSynthesizer({ registry, eventStore, settings });
-    synth.start();
+    subgoalSynth = new SubgoalSynthesizer({ registry, eventStore, settings });
+    subgoalSynth.start();
     process.stderr.write('[dispatch] subgoal synthesizer started\n');
   }
 
@@ -250,6 +300,7 @@ async function runStart(opts: {
       trackerFactory: (apiKey: string) =>
         new LinearTracker({ apiKey, projectSlug: 'unused-for-link-flow' }),
     });
+    linearSyncerRef = linearSyncer;
     linearSyncer.onWorkstreamUpdated = (e) => {
       const event = {
         ts: new Date().toISOString(),
@@ -409,7 +460,10 @@ async function runStart(opts: {
     try {
       workflowWatcher?.close();
       orchestrator?.stop();
-      linearSyncer?.stop();
+      // Read through the supervisor refs so we stop the latest restart
+      // generation, not whatever was constructed at boot.
+      linearSyncerRef?.stop();
+      subgoalSynth?.stop();
       headliner.stop();
       scheduler.stop();
       await http.close();
