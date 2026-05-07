@@ -836,7 +836,7 @@ describe('HTTP server', () => {
       expect(r.status).toBe(200);
       expect(r.body).toMatchObject({
         headlineProvider: 'ollama',
-        ollamaUrl: 'http://localhost:11434',
+        ollamaUrl: 'http://localhost:8080/v1',
         anthropicApiKeyConfigured: false,
         linearApiKeyConfigured: false,
       });

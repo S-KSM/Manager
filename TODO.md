@@ -15,12 +15,11 @@ Conventions: `[x]` shipped, `[~]` in progress, `[ ]` pending, `[-]` deferred. Ea
 
 ---
 
-## v1.3 — MLX local LLM + `/dispatcher` slash command + tooltip & UX polish
+## v1.3 — MLX local LLM + `/dispatcher` slash command + MANAGER_* removal ✅
 
-- [ ] **MLX-backed local LLM** — replace Ollama-only path with generic OpenAI-compatible provider (`DISPATCH_LLM_BASE_URL`). Default recommended local: `mlx_lm.server`. Ollama keeps working (same surface).
-  - Stretch: pure-Swift MLX inside the macOS app via `mlx-swift-examples`.
-- [ ] **`/dispatcher <ws>` slash command + URL scheme** — register `dispatch://workstream/<id>` in macOS Info.plist + URL handler. Ship `~/.claude/commands/dispatcher.md`.
-- [ ] **Remove `MANAGER_*` env-var fallbacks** introduced in v1.2 (deprecation breadcrumb has fired for one release).
+- [x] **MLX-backed local LLM** — replaced Ollama-only `/api/chat` path with generic OpenAI-compatible `/v1/chat/completions` keyed on `DISPATCH_LLM_BASE_URL`. Default `http://localhost:8080/v1` (mlx_lm.server). `OLLAMA_URL` honored as legacy alias; bare `http://localhost:11434` auto-promoted to `/v1`. Pure-Swift MLX inside the macOS app remains a stretch goal.
+- [x] **`/dispatcher` slash command + URL scheme** — `dispatch://workstream/<slug>` registered in `Info.plist` `CFBundleURLTypes`. `commands/dispatcher.md` derives the slug from the current git root and runs `open dispatch://workstream/<slug>`. `bin/install.sh` copies it to `~/.claude/commands/` and runs `lsregister -f` after the `.app` lands. Parser ships in both `daemon/src/url-scheme.ts` (canonical) and `client-macos/Dispatch/Daemon/DispatchURLParser.swift` (Swift port).
+- [x] **Remove `MANAGER_*` env-var fallbacks** — `readEnvWithLegacy` helper deleted, six daemon read sites + the POSIX-shell `dispatch__legacy_env` helper + the macOS `MANAGER_DAEMON` lookup all removed. Filesystem state migration `~/.claude/manager → ~/.claude/dispatch` in `bin/install.sh` is preserved.
 - [x] **Tooltips + UX polish** — shipped in v1.4.5 (see below).
 - [x] **Activity headline (rolling LLM summary)** — shipped ahead of v1.3. Daemon's `Headliner` ticker generates one-sentence "Currently:" line per workstream every ~30s. Falls back gracefully to deterministic `latest_activity` when no LLM provider is configured. macOS app `Workstream.activityHeadline` field; HomeView card + AgentDetailView header prefer headline over `latestActivity`.
 - [x] **Story-level subgoal synthesis** — shipped ahead of v1.3. Daemon's `SubgoalSynthesizer` ticker watches each workstream for runs of ≥8 consecutive `post-tool-use` events with no agent narration; calls `qwen3:4b` (default, via Ollama) for a one-line story arc and writes it as a `subgoal_push` event with `payload.source: "synthesized"` + `payload.synth_anchor: "<firstId>..<lastId>"`. Anchor is read back from the log on each tick so synthesis is idempotent across daemon restarts (same window never summarized twice). Disable via `DISPATCH_SUBGOAL_SYNTH_ENABLED=0`. 9 unit tests cover detection, idempotency, multi-run splitting, and LLM-unreachable fallback.

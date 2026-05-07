@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var resolver: DaemonResolver
+    @EnvironmentObject private var router: URLRouter
     @State private var workstreams: [Workstream] = []
     @State private var selection: SidebarSelection? = nil
     @State private var loading: Bool = true
@@ -10,6 +11,9 @@ struct ContentView: View {
     @State private var editingTitleFor: Workstream? = nil
     @State private var editTitleDraft: String = ""
     @State private var lifecycleError: String? = nil
+    /// Set when a `dispatch://workstream/<id>` URL referenced an id we don't
+    /// know about. Cleared on the next selection change or successful match.
+    @State private var unknownWorkstreamFromURL: String? = nil
 
     /// What the sidebar can have selected. Workstream id, the team handbook,
     /// the Updates surface, the explicit Home entry, or nothing (which also
@@ -26,10 +30,31 @@ struct ContentView: View {
             sidebar
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
         } detail: {
-            detail
+            VStack(spacing: 0) {
+                if let missing = unknownWorkstreamFromURL {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text("workstream `\(missing)` not found — open `claude` here to register")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Dismiss") { unknownWorkstreamFromURL = nil }
+                            .buttonStyle(.borderless)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.orange.opacity(0.12))
+                }
+                detail
+            }
         }
         .task(id: resolver.modeToken) {
             await reload()
+        }
+        .onChange(of: router.pendingAction) { _, newValue in
+            guard let action = newValue else { return }
+            Task { await handleRouterAction(action) }
         }
         // Auto-refresh the workstream list when events arrive on any
         // stream. The home-view cards expose daemon-side projections
@@ -197,6 +222,32 @@ struct ContentView: View {
                 Task { await applyLifecycleAction(ws, action) }
             }
         )
+    }
+
+    // MARK: - URL routing
+
+    /// Apply a parsed `dispatch://` URL: select the matching workstream if
+    /// present, else reload once and re-check, else surface the missing-id
+    /// banner. Always clears `router.pendingAction` so a subsequent open
+    /// triggers `.onChange` again.
+    private func handleRouterAction(_ action: DispatchAction) async {
+        switch action {
+        case .openWorkstream(let id):
+            if workstreams.contains(where: { $0.id == id }) {
+                selection = .workstream(id)
+                unknownWorkstreamFromURL = nil
+            } else {
+                await reload()
+                if workstreams.contains(where: { $0.id == id }) {
+                    selection = .workstream(id)
+                    unknownWorkstreamFromURL = nil
+                } else {
+                    selection = .home
+                    unknownWorkstreamFromURL = id
+                }
+            }
+        }
+        router.pendingAction = nil
     }
 
     // MARK: - Lifecycle
@@ -375,7 +426,9 @@ private struct ModeBadge: View {
 
 #Preview("ContentView (mock)") {
     let resolver = DaemonResolver(forcedMode: .mock)
+    let router = URLRouter()
     return ContentView()
         .environmentObject(resolver)
+        .environmentObject(router)
         .frame(width: 1200, height: 760)
 }

@@ -4,6 +4,7 @@ import AppKit
 @main
 struct DispatchApp: App {
     @StateObject private var resolver = DaemonResolver()
+    @StateObject private var router = URLRouter()
 
     init() {
         // Before the first window appears: if we're running from a DMG,
@@ -19,6 +20,7 @@ struct DispatchApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(resolver)
+                .environmentObject(router)
                 .frame(minWidth: 820, idealWidth: 1280, minHeight: 560, idealHeight: 800)
                 .task {
                     // Self-install the bundled daemon's launchd agent before
@@ -26,6 +28,9 @@ struct DispatchApp: App {
                     // live on first launch instead of falling back to mock.
                     await LaunchdInstaller.ensureInstalled()
                     await resolver.resolve()
+                }
+                .onOpenURL { url in
+                    router.handle(url)
                 }
         }
         .windowStyle(.titleBar)

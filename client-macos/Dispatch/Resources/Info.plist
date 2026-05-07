@@ -16,6 +16,17 @@
     <string>Dispatch</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.dispatch.app.workstream</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>dispatch</string>
+            </array>
+        </dict>
+    </array>
     <key>CFBundleShortVersionString</key>
     <string>1.4.5</string>
     <key>CFBundleVersion</key>

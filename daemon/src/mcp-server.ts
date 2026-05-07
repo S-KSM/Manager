@@ -6,7 +6,6 @@ import {
   ListToolsRequestSchema,
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
-import { readEnvWithLegacy } from './config.js';
 import type { EventStore, ManagerEvent, ManagerEventType } from './event-store.js';
 import type { MemoryStore } from './memory-store.js';
 import type { SkillProposalsStore } from './skill-proposals.js';
@@ -14,16 +13,15 @@ import type { WorkstreamRegistry } from './workstream.js';
 
 /**
  * Reads the workstream id this MCP session is bound to. v0 supports a single
- * workstream per Claude Code session via the `DISPATCH_WORKSTREAM` env var
- * (legacy `MANAGER_WORKSTREAM` honored for one release); v1 will switch to
- * multiplexed sessions.
+ * workstream per Claude Code session via the `DISPATCH_WORKSTREAM` env var;
+ * v1 will switch to multiplexed sessions.
  */
 function resolveWorkstreamId(): string {
-  return readEnvWithLegacy('DISPATCH_WORKSTREAM', 'MANAGER_WORKSTREAM') ?? 'default';
+  return process.env['DISPATCH_WORKSTREAM'] ?? 'default';
 }
 
 function resolveSessionId(): string | undefined {
-  return readEnvWithLegacy('DISPATCH_SESSION_ID', 'MANAGER_SESSION_ID');
+  return process.env['DISPATCH_SESSION_ID'];
 }
 
 interface BuildOptions {

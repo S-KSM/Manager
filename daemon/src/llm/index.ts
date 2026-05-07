@@ -65,7 +65,12 @@ export class LLMRequestError extends Error {
 export interface ProviderOverrides {
   /** Anthropic API key. Wins over `ANTHROPIC_API_KEY`. */
   anthropicApiKey?: string;
-  /** Ollama base URL. Wins over `OLLAMA_URL`. */
+  /**
+   * Base URL for the OpenAI-compatible local LLM server (mlx_lm.server,
+   * Ollama, llama.cpp). Wins over `DISPATCH_LLM_BASE_URL` / `OLLAMA_URL`
+   * env vars. Settings store still uses the `ollamaUrl` field name as the
+   * historical key.
+   */
   ollamaUrl?: string;
 }
 

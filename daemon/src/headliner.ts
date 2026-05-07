@@ -9,7 +9,6 @@ import {
   getProvider as defaultGetProvider,
 } from './llm/index.js';
 import { HeadlineStore } from './headline-store.js';
-import { readEnvWithLegacy } from './config.js';
 import type { SettingsStore } from './settings-store.js';
 import type { WorkstreamRegistry } from './workstream.js';
 
@@ -190,13 +189,13 @@ export class Headliner {
  *     silently if not).
  */
 function resolveDefaultProvider(): LLMProviderName {
-  const env = readEnvWithLegacy('DISPATCH_HEADLINE_PROVIDER', 'MANAGER_HEADLINE_PROVIDER');
+  const env = process.env['DISPATCH_HEADLINE_PROVIDER'];
   if (env === 'claude' || env === 'ollama') return env;
   return 'ollama';
 }
 
 function resolveDefaultModel(provider: LLMProviderName): string {
-  const env = readEnvWithLegacy('DISPATCH_HEADLINE_MODEL', 'MANAGER_HEADLINE_MODEL');
+  const env = process.env['DISPATCH_HEADLINE_MODEL'];
   if (env && env.length > 0) return env;
   return provider === 'claude' ? DEFAULT_CLAUDE_MODEL : DEFAULT_OLLAMA_MODEL;
 }

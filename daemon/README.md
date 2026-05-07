@@ -2,7 +2,7 @@
 
 Local long-running process: hosts the MCP server agents call into and the HTTP/WebSocket API clients (the macOS app today, mobile/web later) read from. All persistent state — events, Dossier (workstream memory), Intercept queue, Protocol handbook, reports — lives here.
 
-> v1.2 rename note: the binary is `dispatch`; canonical env vars are `DISPATCH_*`; canonical state dir is `~/.claude/dispatch/`. Legacy `manager` / `MANAGER_*` / `~/.claude/manager` are still honored for one release as a backwards-compat fallback (with a stderr deprecation breadcrumb) and removed in v1.3 — see [`../docs/ROADMAP.md`](../docs/ROADMAP.md). The HTTP/WebSocket/MCP wire contracts are stable and unaffected by the rebrand.
+> Rename history: the binary is `dispatch`; canonical env vars are `DISPATCH_*`; canonical state dir is `~/.claude/dispatch/`. The legacy `MANAGER_*` env-var fallback was removed in v1.3 — set `DISPATCH_*` only. `bin/install.sh` still migrates `~/.claude/manager → ~/.claude/dispatch` on first run. The HTTP/WebSocket/MCP wire contracts are stable and unaffected by the rebrand.
 
 See [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) for the full data model and event schema.
 
@@ -60,8 +60,9 @@ State is written to `~/.claude/dispatch/` by default:
 | `DISPATCH_WORKSTREAM` | `default` | Workstream a Claude Code session belongs to. Hooks and the MCP server read this. |
 | `DISPATCH_SESSION_ID` | _(unset)_ | Override the session id; otherwise hooks supply one. |
 | `DISPATCH_DEBUG` | _(unset)_ | Set to `1` for extra hook stderr breadcrumbs. |
-
-The legacy `MANAGER_*` names are still read as a backwards-compat fallback for one release; setting only the legacy name produces a stderr deprecation breadcrumb. Migrate before v1.3.
+| `DISPATCH_LLM_BASE_URL` | `http://localhost:8080/v1` | Base URL of the OpenAI-compatible local LLM server (mlx_lm.server, Ollama, llama.cpp). Wins over `OLLAMA_URL`. |
+| `DISPATCH_HEADLINE_PROVIDER` | `ollama` | Provider for the headliner / sub-goal synthesizer (`claude` or `ollama`). |
+| `DISPATCH_HEADLINE_MODEL` | per provider | Model id sent to the headliner / sub-goal synthesizer. |
 
 ## CLI
 

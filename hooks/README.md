@@ -4,8 +4,6 @@ POSIX shell hooks that Claude Code runs at session lifecycle events. Each one PO
 
 See [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) for the event contract.
 
-> v1.2 rename note: env vars moved from `MANAGER_*` to `DISPATCH_*` and the daemon URL/log breadcrumbs now say `dispatch`. The hooks still read the legacy `MANAGER_*` names as a fallback for one release (v1.3 removes the fallback). When only the legacy var is set you'll get a one-time deprecation breadcrumb on stderr.
-
 ## What each hook captures
 
 | Script | Claude Code event | Daemon event type | What lands in the store |
@@ -42,8 +40,6 @@ The hooks read these env vars at runtime — set them in your shell **before** l
 | `DISPATCH_PORT` | `9876` | Daemon HTTP port. |
 | `DISPATCH_HOST` | `127.0.0.1` | Daemon HTTP host. Useful only if you bind to a non-localhost interface (v1.5). |
 
-Backwards-compat (v1.2 only): if `DISPATCH_X` isn't set the hooks fall back to `MANAGER_X` and emit a one-time deprecation breadcrumb on stderr. Plan to migrate before v1.3.
-
 ### Pointing at a non-default port
 
 ```sh
@@ -55,7 +51,7 @@ The hooks pick these up on every invocation. No reinstall needed.
 
 ## Auto-workstream from cwd (v1.1.1)
 
-When `DISPATCH_WORKSTREAM` (or legacy `MANAGER_WORKSTREAM`) isn't set in the environment, `_common.sh` derives a workstream id from the current directory:
+When `DISPATCH_WORKSTREAM` isn't set in the environment, `_common.sh` derives a workstream id from the current directory:
 
 1. `git rev-parse --show-toplevel` → basename of the git repo root.
 2. Otherwise, basename of `$PWD`.
@@ -74,7 +70,7 @@ Override at any time: `DISPATCH_WORKSTREAM=explicit-name claude` (or `export` it
 2. v0.5.2 — emits Claude Code's `hookSpecificOutput.additionalContext` JSON on stdout. The first part of the additionalContext advertises the dispatch MCP tools (`emit_decision`, `emit_subgoal`, `emit_confidence`, `flag_blocked`, `update_memory`, `read_memory`, `propose_skill`) and when to use them — turns the MCP wiring from "available" into "actually used".
 3. v1 — also fetches the team handbook (`GET /handbook`) and inlines it as a second section of the additionalContext, so promoted skills propagate to every agent on its next session_start. The handbook body is capped at **8 KB**; longer handbooks are truncated with a footer pointing the agent at `read_memory` / `GET /handbook` for the full text.
 
-**When it fires:** every SessionStart that has `DISPATCH_WORKSTREAM` (or legacy `MANAGER_WORKSTREAM`) set in the environment AND `jq` available. Without either, the hook silently degrades to v0 behavior (notify-only). The handbook section is omitted automatically if the daemon is unreachable or the handbook is empty. Always exits 0.
+**When it fires:** every SessionStart that has `DISPATCH_WORKSTREAM` set in the environment AND `jq` available. Without either, the hook silently degrades to v0 behavior (notify-only). The handbook section is omitted automatically if the daemon is unreachable or the handbook is empty. Always exits 0.
 
 **Output shape on success** (canonical Claude Code 4.x form):
 
@@ -182,7 +178,7 @@ Nudge and redirect frames are unchanged in v0.5.1.
 
 **`jq` dependency.** The drain feature shells out to `jq` for safe JSON parsing and emission. Without `jq` the hook logs a warning to stderr and degrades to v0 behavior (notify only). `install.sh` already requires `jq`, so a normally-installed setup has it.
 
-**Debug knob.** Set `DISPATCH_TEST_PENDING_JSON='[{"id":"int_1","kind":"nudge","payload":{"message":"hi"}}]'` to bypass the GET and feed canned data — handy for verifying formatting offline. (Legacy `MANAGER_TEST_PENDING_JSON` still honored for one release.)
+**Debug knob.** Set `DISPATCH_TEST_PENDING_JSON='[{"id":"int_1","kind":"nudge","payload":{"message":"hi"}}]'` to bypass the GET and feed canned data — handy for verifying formatting offline.
 
 ## Manual smoke test
 

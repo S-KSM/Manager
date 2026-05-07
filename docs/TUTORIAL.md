@@ -89,6 +89,8 @@ Try a different prompt in the second terminal so the two Traces look different:
 
 > Use the dispatch MCP tools to log your decisions while you sketch out a test plan for the auth flow in this repo.
 
+**Tip:** while inside `claude`, type `/dispatcher` to jump straight to this workstream's card in the Dispatch app — the slash command runs `open dispatch://workstream/<slug>` using a slug derived from your git root (or `$PWD`).
+
 ## 5. Watch the Trace
 
 Click into either workstream's card. The right pane shows **The Trace** — a vertical timeline of decision events. Each row is one `emit_decision` call. The timeline is the answer to "what was the agent thinking and why?" — it's not a chat log, it's the methodology behind the chat log.

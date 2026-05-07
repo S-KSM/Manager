@@ -31,13 +31,12 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
-workstream=$(dispatch__legacy_env DISPATCH_WORKSTREAM MANAGER_WORKSTREAM)
-workstream="${workstream:-default}"
+workstream="${DISPATCH_WORKSTREAM:-default}"
 
 # Optional debug knob: feed a canned pending-array via env var instead of
 # hitting the daemon. Useful for unit-style smoke tests when Track A's
 # endpoints aren't wired up yet.
-test_pending=$(dispatch__legacy_env DISPATCH_TEST_PENDING_JSON MANAGER_TEST_PENDING_JSON)
+test_pending="${DISPATCH_TEST_PENDING_JSON:-}"
 if [ -n "$test_pending" ]; then
   pending="$test_pending"
 else
