@@ -4,6 +4,14 @@ Versions are anchored on the macOS app's `CFBundleShortVersionString` (the Info.
 
 ---
 
+## v1.4.8 — 2026-05-07 — fix: sidebar selection unresponsive
+
+Tag [`v1.4.8`](https://github.com/S-KSM/Manager/releases/tag/v1.4.8). DMG + zip attached.
+
+Patch release. Sidebar rows (Home, workstreams, Team handbook, Updates) refused to register clicks or arrow-key selection — only buttons and disclosure groups inside the List worked. Cause was `List(selection: Binding<SidebarSelection?>)` paired with `.tag(Optional(SidebarSelection.x))` wrappers; SwiftUI on the current macOS SDK silently failed to match the wrapped-Optional tags against the optional binding, so selection writes never reached `@State`. Fix is to make the selection non-optional (`@State selection: SidebarSelection = .home`) and drop the `Optional(...)` wrapper on every tag — six call sites, one detail-pane switch simplified to plain enum cases. No daemon, hooks, or schema change.
+
+---
+
 ## v1.4.7 — 2026-05-07 — ask_user MCP + Updates UX rework + CHECK-constraint migration
 
 Tag [`v1.4.7`](https://github.com/S-KSM/Manager/releases/tag/v1.4.7). DMG + zip attached.
