@@ -88,9 +88,9 @@ Detailed design in [`/Users/shobeir/.claude/plans/read-specs-md-and-try-refactor
 
 ---
 
-## v1.4.5 — UX feedback wave (Feedback.md)
+## v1.4.5 — UX feedback wave (Feedback.md) ✅ shipped 2026-05-06
 
-Driven entirely by `Feedback.md`. No architectural changes — additive fields only, all backwards compatible. Full notes in [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
+Driven entirely by `Feedback.md`. No architectural changes — additive fields only, all backwards compatible. Full notes in [`RELEASE_NOTES.md`](RELEASE_NOTES.md). Tag [`v1.4.5`](https://github.com/S-KSM/Manager/releases/tag/v1.4.5).
 
 - [x] **Settings → Providers tab** — new `GET/PATCH /settings` endpoint backed by `~/.claude/dispatch/settings.json` (key redacted on the wire); `PreferencesView` Providers tab with provider/model/Ollama-URL/key fields + reachability probe. Env vars remain a fallback.
 - [x] **Sleeping Robot mascot** — daemon emits `live_session: bool` per workstream (latest `session_start` newer than `session_end`); `digest.live_sessions[]` for the rollup. `RobotMascot` gains `Asleep` state (dim + desaturate + closed-eye sleep arc + floating `Zzz`). Wired in HomeView card + AgentDetailView header.
@@ -120,6 +120,7 @@ Driven entirely by `Feedback.md`. No architectural changes — additive fields o
 - [ ] Codex runtime adapter (alongside ADK 2.0; pairs naturally with Symphony's original target).
 - [ ] Cursor adapter.
 - [ ] Claude-Code-as-app-server bridge (replaces v1.4.2 option A with the cleaner JSON-RPC stdio shim).
+- [ ] **Mouse-pointer context Q&A** (Feedback.md round 1, long-term) — cursor's hover target becomes context; user can ask questions about whatever the pointer is on. Likely needs accessibility-API hover capture + a chat affordance pinned to the pointer + LLM round-trip with the captured element as context. Defer until the runtime-expansion shim exists, since the chat surface should reuse the same emit path.
 
 ---
 
