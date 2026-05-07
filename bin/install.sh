@@ -288,6 +288,16 @@ else
         # Try cp first; if it fails on /Applications surface a clear error.
         if rm -rf "$APP_DEST" 2>/dev/null && cp -R "$APP_SRC" "$APP_DEST" 2>/dev/null; then
           ok "installed app to $APP_DEST"
+          # Re-register with LaunchServices so the dispatch:// URL scheme
+          # binds to the freshly-installed app immediately (no logout / Dock
+          # restart needed). Best-effort: a missing lsregister doesn't fail
+          # the install.
+          LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+          if [ -x "$LSREGISTER" ]; then
+            "$LSREGISTER" -f "$APP_DEST" >/dev/null 2>&1 \
+              && ok "registered $APP_DEST with LaunchServices (dispatch:// URL scheme live)" \
+              || warn "lsregister failed; dispatch:// may need a logout to bind"
+          fi
         else
           warn "could not write to $APP_DEST (permission denied)."
           warn "manually copy with: sudo cp -R '$APP_SRC' '$APP_DEST'"
@@ -297,6 +307,23 @@ else
       warn "skipped macOS app build"
     fi
   fi
+fi
+
+# ---------------- 2.5 install /dispatcher slash command --------------------
+
+step "Install /dispatcher slash command"
+COMMANDS_SRC="$REPO/commands/dispatcher.md"
+COMMANDS_DEST_DIR="$HOME_DIR/.claude/commands"
+COMMANDS_DEST="$COMMANDS_DEST_DIR/dispatcher.md"
+if [ -f "$COMMANDS_SRC" ]; then
+  mkdir -p "$COMMANDS_DEST_DIR"
+  if cp "$COMMANDS_SRC" "$COMMANDS_DEST"; then
+    ok "wrote $COMMANDS_DEST"
+  else
+    warn "could not copy /dispatcher slash command to $COMMANDS_DEST"
+  fi
+else
+  warn "$COMMANDS_SRC missing — /dispatcher slash command not installed"
 fi
 
 # ---------------- 3. install hooks ------------------------------------------
