@@ -759,6 +759,13 @@ struct TeamFloorView: View {
     @ViewBuilder
     private func cardMenu(for ws: Workstream) -> some View {
         switch ws.status {
+        case .backlog:
+            Button {
+                onLifecycleAction(ws, .resume)
+            } label: {
+                Label("Move to Active", systemImage: "play.circle")
+            }
+            .help("Promote this workstream out of the backlog into the active column")
         case .active:
             Button {
                 onLifecycleAction(ws, .pause)

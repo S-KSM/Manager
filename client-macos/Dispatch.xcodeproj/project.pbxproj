@@ -42,6 +42,7 @@
 		A100000000000000000005A2 /* PreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005B2 /* PreferencesView.swift */; };
 		A100000000000000000005A3 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005B3 /* WelcomeView.swift */; };
 		A100000000000000000005A4 /* AppRelocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005B4 /* AppRelocator.swift */; };
+		A100000000000000000006A1 /* WorkstreamCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006B1 /* WorkstreamCodableTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -90,6 +91,7 @@
 		A100000000000000000005B2 /* PreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesView.swift; sourceTree = "<group>"; };
 		A100000000000000000005B3 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		A100000000000000000005B4 /* AppRelocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRelocator.swift; sourceTree = "<group>"; };
+		A100000000000000000006B1 /* WorkstreamCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkstreamCodableTests.swift; sourceTree = "<group>"; };
 		A100000000000000000000C0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A100000000000000000000C1 /* Dispatch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Dispatch.entitlements; sourceTree = "<group>"; };
 		A100000000000000000000C2 /* Dispatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dispatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -147,6 +149,7 @@
 				A100000000000000000002B5 /* SkillCodableTests.swift */,
 				A100000000000000000002B6 /* DigestCodableTests.swift */,
 				A100000000000000000003B6 /* ReportCodableTests.swift */,
+				A100000000000000000006B1 /* WorkstreamCodableTests.swift */,
 			);
 			path = DispatchTests;
 			sourceTree = "<group>";
@@ -406,6 +409,7 @@
 				A100000000000000000002A5 /* SkillCodableTests.swift in Sources */,
 				A100000000000000000002A6 /* DigestCodableTests.swift in Sources */,
 				A100000000000000000003A6 /* ReportCodableTests.swift in Sources */,
+				A100000000000000000006A1 /* WorkstreamCodableTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
