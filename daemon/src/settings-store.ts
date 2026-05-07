@@ -1,6 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { readEnvWithLegacy } from './config.js';
 import type { LLMProviderName } from './llm/index.js';
 
 /**
@@ -79,7 +78,7 @@ export class SettingsStore {
    */
   getResolvedProvider(): LLMProviderName {
     if (this.current.headlineProvider) return this.current.headlineProvider;
-    const env = readEnvWithLegacy('DISPATCH_HEADLINE_PROVIDER', 'MANAGER_HEADLINE_PROVIDER');
+    const env = process.env['DISPATCH_HEADLINE_PROVIDER'];
     if (env === 'claude' || env === 'ollama') return env;
     return 'ollama';
   }
@@ -94,7 +93,7 @@ export class SettingsStore {
     if (this.current.headlineModel && this.current.headlineModel.length > 0) {
       return this.current.headlineModel;
     }
-    const env = readEnvWithLegacy('DISPATCH_HEADLINE_MODEL', 'MANAGER_HEADLINE_MODEL');
+    const env = process.env['DISPATCH_HEADLINE_MODEL'];
     if (env && env.length > 0) return env;
     return effectiveProvider === 'claude' ? DEFAULT_CLAUDE_MODEL : DEFAULT_OLLAMA_MODEL;
   }
