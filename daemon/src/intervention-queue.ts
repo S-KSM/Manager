@@ -119,6 +119,36 @@ export class InterventionQueue {
       CREATE INDEX IF NOT EXISTS idx_interventions_pending
         ON interventions(workstream_id, delivered_at);
     `);
+    // v1.4.7 — older daemons (< v1.4.4) emitted a `CHECK(kind IN
+    // ('nudge','redirect','rollback'))` clause inline with the column. v1.4.4
+    // dropped it from the source but `CREATE TABLE IF NOT EXISTS` won't
+    // overwrite an existing table, so any DB that survived from before the
+    // approval-bridge release still has the CHECK constraint and refuses
+    // `approval_required` and `question_required` rows. Rebuild the table
+    // when we detect the legacy constraint.
+    const row = this.db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'interventions'")
+      .get() as { sql: string } | undefined;
+    if (row && /CHECK\s*\(/i.test(row.sql)) {
+      this.db.exec(`
+        BEGIN;
+        CREATE TABLE interventions_new (
+          id            TEXT PRIMARY KEY,
+          workstream_id TEXT NOT NULL,
+          kind          TEXT NOT NULL,
+          payload_json  TEXT NOT NULL,
+          created_at    TEXT NOT NULL,
+          delivered_at  TEXT
+        );
+        INSERT INTO interventions_new (id, workstream_id, kind, payload_json, created_at, delivered_at)
+          SELECT id, workstream_id, kind, payload_json, created_at, delivered_at FROM interventions;
+        DROP TABLE interventions;
+        ALTER TABLE interventions_new RENAME TO interventions;
+        CREATE INDEX IF NOT EXISTS idx_interventions_pending
+          ON interventions(workstream_id, delivered_at);
+        COMMIT;
+      `);
+    }
   }
 
   close(): void {

@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { InterventionQueue } from '../src/intervention-queue.js';
 
@@ -135,5 +136,48 @@ describe('InterventionQueue', () => {
     const fetched = queue.get(intv.id);
     expect(fetched?.id).toBe(intv.id);
     expect(queue.get('int_missing')).toBeNull();
+  });
+
+  it('migrates legacy DBs that still carry the v1.4.0 CHECK(kind IN …) constraint', () => {
+    // Hand-built DB shaped like the pre-v1.4.4 schema. Survives across daemon
+    // upgrades on real machines, so the migration must rebuild the table.
+    const legacyDir = mkdtempSync(join(tmpdir(), 'manager-iq-legacy-'));
+    const legacyPath = join(legacyDir, 'db.sqlite');
+    const raw = new Database(legacyPath);
+    raw.exec(`
+      CREATE TABLE interventions (
+        id            TEXT PRIMARY KEY,
+        workstream_id TEXT NOT NULL,
+        kind          TEXT NOT NULL CHECK(kind IN ('nudge','redirect','rollback')),
+        payload_json  TEXT NOT NULL,
+        created_at    TEXT NOT NULL,
+        delivered_at  TEXT
+      );
+    `);
+    raw.prepare(
+      "INSERT INTO interventions VALUES ('int_legacy','ws','nudge','{\"message\":\"hi\"}','2026-05-07T00:00:00Z',NULL)",
+    ).run();
+    raw.close();
+
+    const upgraded = new InterventionQueue(legacyPath);
+    try {
+      // The legacy row survives the rebuild.
+      const all = upgraded.all('ws');
+      expect(all).toHaveLength(1);
+      expect(all[0]!.id).toBe('int_legacy');
+      // And the CHECK is gone — `approval_required` and `question_required`
+      // both insert successfully now.
+      expect(() =>
+        upgraded.enqueue('ws', 'approval_required', { approval_request: { summary: 's' } }),
+      ).not.toThrow();
+      expect(() =>
+        upgraded.enqueue('ws', 'question_required', {
+          question_request: { question: 'q', allow_freetext: true },
+        }),
+      ).not.toThrow();
+    } finally {
+      upgraded.close();
+      rmSync(legacyDir, { recursive: true, force: true });
+    }
   });
 });
