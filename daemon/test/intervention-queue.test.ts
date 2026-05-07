@@ -100,4 +100,40 @@ describe('InterventionQueue', () => {
     expect(pendingA).toHaveLength(1);
     expect(pendingA[0]!.payload.message).toBe('for a');
   });
+
+  it('answerQuestion records answer + marks delivered (question_required only)', () => {
+    const intv = queue.enqueue('demo', 'question_required', {
+      question_request: {
+        question: 'Use cache?',
+        options: ['yes', 'no'],
+      },
+    });
+    const updated = queue.answerQuestion(intv.id, { choice: 'yes' });
+    expect(updated).not.toBeNull();
+    expect(updated!.delivered_at).not.toBeNull();
+    expect(updated!.payload.question_answer?.choice).toBe('yes');
+    // Original request preserved.
+    expect(updated!.payload.question_request?.question).toBe('Use cache?');
+    // Idempotency — second call returns null.
+    expect(queue.answerQuestion(intv.id, { choice: 'no' })).toBeNull();
+    // Wrong kind returns null.
+    const nudge = queue.enqueue('demo', 'nudge', { message: 'hi' });
+    expect(queue.answerQuestion(nudge.id, { choice: 'x' })).toBeNull();
+  });
+
+  it('answerQuestion accepts freetext-only answers', () => {
+    const intv = queue.enqueue('demo', 'question_required', {
+      question_request: { question: 'Why?', allow_freetext: true },
+    });
+    const updated = queue.answerQuestion(intv.id, { freetext: 'because' });
+    expect(updated!.payload.question_answer?.freetext).toBe('because');
+    expect(updated!.payload.question_answer?.choice).toBeUndefined();
+  });
+
+  it('get returns one row by id, null when missing', () => {
+    const intv = queue.enqueue('demo', 'nudge', { message: 'one' });
+    const fetched = queue.get(intv.id);
+    expect(fetched?.id).toBe(intv.id);
+    expect(queue.get('int_missing')).toBeNull();
+  });
 });

@@ -4,7 +4,12 @@ import { dirname } from 'node:path';
 import Database, { type Database as DatabaseType } from 'better-sqlite3';
 import { getConfig } from './config.js';
 
-export type InterventionKind = 'nudge' | 'redirect' | 'rollback' | 'approval_required';
+export type InterventionKind =
+  | 'nudge'
+  | 'redirect'
+  | 'rollback'
+  | 'approval_required'
+  | 'question_required';
 
 /**
  * Wire-format Intervention as documented in docs/ARCHITECTURE.md
@@ -40,6 +45,31 @@ export interface InterventionPayload {
    * acks with the decision attached.
    */
   approval_decision?: { approved: boolean };
+  /**
+   * v1.4.7 (`question_required` only) — agent asks the manager a question and
+   * blocks on `mcp__dispatch__ask_user` until the manager picks an option (or
+   * supplies free text) in the Dispatch app. The MCP tool enqueues with
+   * `question_request` and the manager answers via
+   * `POST /workstreams/:id/interventions/:intId/answer`.
+   */
+  question_request?: {
+    question: string;
+    options?: string[];
+    allow_freetext?: boolean;
+    /** Optional context line shown above the question — e.g. tool name. */
+    context?: string;
+  };
+  /**
+   * v1.4.7 (`question_required` only) — set by the manager via `/answer`.
+   * `choice` matches one of `question_request.options` when the manager
+   * picked one; `freetext` is set when the manager typed a custom answer
+   * (allowed only if `allow_freetext === true`). At least one of the two is
+   * always present on a delivered question.
+   */
+  question_answer?: {
+    choice?: string;
+    freetext?: string;
+  };
 }
 
 interface InterventionRow {
@@ -175,6 +205,57 @@ export class InterventionQueue {
     if (row.kind !== 'approval_required') return null;
     const payload = this.parsePayload(row.payload_json);
     payload.approval_decision = { approved };
+    const nowTs = new Date().toISOString();
+    this.db
+      .prepare(
+        'UPDATE interventions SET payload_json = ?, delivered_at = ? WHERE id = ? AND delivered_at IS NULL',
+      )
+      .run(JSON.stringify(payload), nowTs, id);
+    const updated = selectStmt.get(id) as InterventionRow;
+    return this.rowToWire(updated);
+  }
+
+  /**
+   * v1.4.7 — fetch one intervention by id (any state), or `null` if missing.
+   * Used by the MCP `ask_user` polling loop so the agent can wait for the
+   * manager's `/answer` round-trip without hammering listPending.
+   */
+  get(id: string): Intervention | null {
+    const row = this.db
+      .prepare(
+        'SELECT id, workstream_id, kind, payload_json, created_at, delivered_at FROM interventions WHERE id = ?',
+      )
+      .get(id) as InterventionRow | undefined;
+    return row ? this.rowToWire(row) : null;
+  }
+
+  /**
+   * v1.4.7 — record a question answer and mark the intervention delivered in
+   * one shot. Mirrors `decideApproval`. Returns null if the intervention id
+   * is unknown, already delivered, or not a `question_required`. The caller
+   * is responsible for validating that `answer.choice` matches a known option
+   * (or that `allow_freetext` was set when only freetext is supplied).
+   */
+  answerQuestion(
+    id: string,
+    answer: { choice?: string; freetext?: string },
+  ): Intervention | null {
+    const selectStmt = this.db.prepare(
+      'SELECT id, workstream_id, kind, payload_json, created_at, delivered_at FROM interventions WHERE id = ?',
+    );
+    const row = selectStmt.get(id) as InterventionRow | undefined;
+    if (!row) return null;
+    if (row.delivered_at !== null) return null;
+    if (row.kind !== 'question_required') return null;
+    const payload = this.parsePayload(row.payload_json);
+    const cleaned: { choice?: string; freetext?: string } = {};
+    if (typeof answer.choice === 'string' && answer.choice.length > 0) {
+      cleaned.choice = answer.choice;
+    }
+    if (typeof answer.freetext === 'string' && answer.freetext.length > 0) {
+      cleaned.freetext = answer.freetext;
+    }
+    payload.question_answer = cleaned;
     const nowTs = new Date().toISOString();
     this.db
       .prepare(

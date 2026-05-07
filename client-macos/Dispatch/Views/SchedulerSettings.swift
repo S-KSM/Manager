@@ -28,9 +28,10 @@ struct SchedulerSettings: View {
                         .controlSize(.small)
                         .help("Close the scheduler settings")
                 }
-                Text("The daemon generates a draft on each fire and drops it into the Drafts inbox for you to review. Both jobs are off by default.")
+                Text("Each fire generates a draft and drops it into the Drafts inbox for review. Both jobs are off by default — flip the switch to start. You can still hit “New update” at any time to generate one on demand.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 if loading && jobs.isEmpty {
                     HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }
                         .padding(.vertical, 12)
@@ -174,7 +175,21 @@ private struct JobRow: View {
 
     private var detail: String {
         let audience = job.audiencePreset?.replacingOccurrences(of: "_", with: " ").capitalized ?? "—"
-        return "cron `\(job.cron)` · \(audience) · \(job.provider.capitalized)"
+        return "\(humanCadence(job.cron)) · \(audience) · \(job.provider.capitalized)"
+    }
+
+    /// Translate the canonical preset cron strings to plain English so the
+    /// row is legible without parsing `0 8 * * 1` mentally. Falls back to
+    /// the raw cron expression for anything custom.
+    private func humanCadence(_ cron: String) -> String {
+        switch cron.trimmingCharacters(in: .whitespaces) {
+        case "0 8 * * 1":
+            return "Every Monday, 8:00 AM"
+        case "0 8 1 * *":
+            return "1st of each month, 8:00 AM"
+        default:
+            return "cron `\(cron)`"
+        }
     }
 }
 

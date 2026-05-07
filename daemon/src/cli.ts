@@ -449,7 +449,7 @@ async function runStart(opts: {
 
   let mcpRunning = false;
   if (opts.mcpStdio) {
-    const mcp = buildMcpServer({ eventStore, memoryStore, registry, skillProposalsStore });
+    const mcp = buildMcpServer({ eventStore, memoryStore, registry, skillProposalsStore, interventionQueue });
     await startMcpStdio(mcp);
     mcpRunning = true;
     process.stderr.write('[dispatch] MCP server bound to stdio\n');
@@ -505,7 +505,7 @@ async function runMcp(): Promise<void> {
   const memoryStore = new MemoryStore(cfg.memoryDir);
   const interventionQueue = new InterventionQueue(cfg.dbPath);
   const skillProposalsStore = new SkillProposalsStore(cfg.dbPath);
-  const mcp = buildMcpServer({ eventStore, memoryStore, registry, skillProposalsStore });
+  const mcp = buildMcpServer({ eventStore, memoryStore, registry, skillProposalsStore, interventionQueue });
   await startMcpStdio(mcp);
   process.stderr.write(`[dispatch] MCP stdio bound; state at ${cfg.home}\n`);
 

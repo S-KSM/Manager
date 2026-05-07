@@ -14,6 +14,9 @@ enum InterventionKind: String, Codable, CaseIterable, Sendable {
     /// v1.4.4 — agent (or runtime) is asking for permission to do something.
     /// The manager must ack with `payload.approval_decision = { approved: bool }`.
     case approvalRequired = "approval_required"
+    /// v1.4.7 — agent is asking the manager a question (`mcp__dispatch__ask_user`).
+    /// The manager answers via `POST /workstreams/:id/interventions/:intId/answer`.
+    case questionRequired = "question_required"
 }
 
 struct Intervention: Codable, Identifiable, Sendable, Hashable {
@@ -57,17 +60,25 @@ struct InterventionPayload: Codable, Sendable, Hashable {
     let approvalRequest: ApprovalRequest?
     /// v1.4.4 (`approval_required` only) — manager's decision attached on ack.
     let approvalDecision: ApprovalDecision?
+    /// v1.4.7 (`question_required` only) — agent's question + options.
+    let questionRequest: QuestionRequest?
+    /// v1.4.7 (`question_required` only) — manager's chosen option / freetext.
+    let questionAnswer: QuestionAnswer?
 
     init(
         message: String? = nil,
         rollbackToDecisionID: String? = nil,
         approvalRequest: ApprovalRequest? = nil,
-        approvalDecision: ApprovalDecision? = nil
+        approvalDecision: ApprovalDecision? = nil,
+        questionRequest: QuestionRequest? = nil,
+        questionAnswer: QuestionAnswer? = nil
     ) {
         self.message = message
         self.rollbackToDecisionID = rollbackToDecisionID
         self.approvalRequest = approvalRequest
         self.approvalDecision = approvalDecision
+        self.questionRequest = questionRequest
+        self.questionAnswer = questionAnswer
     }
 
     enum CodingKeys: String, CodingKey {
@@ -75,6 +86,8 @@ struct InterventionPayload: Codable, Sendable, Hashable {
         case rollbackToDecisionID = "rollback_to_decision_id"
         case approvalRequest      = "approval_request"
         case approvalDecision     = "approval_decision"
+        case questionRequest      = "question_request"
+        case questionAnswer       = "question_answer"
     }
 }
 
@@ -86,4 +99,25 @@ struct ApprovalRequest: Codable, Sendable, Hashable {
 
 struct ApprovalDecision: Codable, Sendable, Hashable {
     let approved: Bool
+}
+
+/// v1.4.7 — wire shape of the agent's `ask_user` payload.
+struct QuestionRequest: Codable, Sendable, Hashable {
+    let question: String
+    let options: [String]?
+    let allowFreetext: Bool?
+    let context: String?
+
+    enum CodingKeys: String, CodingKey {
+        case question
+        case options
+        case allowFreetext = "allow_freetext"
+        case context
+    }
+}
+
+/// v1.4.7 — manager's reply attached to a delivered `question_required`.
+struct QuestionAnswer: Codable, Sendable, Hashable {
+    let choice: String?
+    let freetext: String?
 }

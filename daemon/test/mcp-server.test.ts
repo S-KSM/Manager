@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { EventStore } from '../src/event-store.js';
+import { InterventionQueue } from '../src/intervention-queue.js';
 import { buildMcpServer } from '../src/mcp-server.js';
 import { MemoryStore } from '../src/memory-store.js';
 import { SkillProposalsStore } from '../src/skill-proposals.js';
@@ -16,6 +17,7 @@ describe('MCP server propose_skill tool', () => {
   let eventStore: EventStore;
   let memoryStore: MemoryStore;
   let skillProposalsStore: SkillProposalsStore;
+  let interventionQueue: InterventionQueue;
   let client: Client;
   let prevEnvWorkstream: string | undefined;
 
@@ -25,10 +27,17 @@ describe('MCP server propose_skill tool', () => {
     eventStore = new EventStore(join(dir, 'events'));
     memoryStore = new MemoryStore(join(dir, 'memory'));
     skillProposalsStore = new SkillProposalsStore(join(dir, 'db.sqlite'));
+    interventionQueue = new InterventionQueue(join(dir, 'db.sqlite'));
     prevEnvWorkstream = process.env['DISPATCH_WORKSTREAM'];
     process.env['DISPATCH_WORKSTREAM'] = 'sk_ws';
 
-    const server = buildMcpServer({ eventStore, memoryStore, registry, skillProposalsStore });
+    const server = buildMcpServer({
+      eventStore,
+      memoryStore,
+      registry,
+      skillProposalsStore,
+      interventionQueue,
+    });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     client = new Client({ name: 'test-client', version: '0.0.1' }, { capabilities: {} });
     await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
@@ -37,6 +46,7 @@ describe('MCP server propose_skill tool', () => {
   afterEach(async () => {
     await client.close();
     skillProposalsStore.close();
+    interventionQueue.close();
     registry.close();
     if (prevEnvWorkstream === undefined) {
       delete process.env['DISPATCH_WORKSTREAM'];
@@ -81,6 +91,110 @@ describe('MCP server propose_skill tool', () => {
     const result = await client.callTool({
       name: 'propose_skill',
       arguments: { title: '', body: 'something' },
+    });
+    expect(result.isError).toBe(true);
+  });
+});
+
+describe('MCP server ask_user tool', () => {
+  let dir: string;
+  let registry: WorkstreamRegistry;
+  let eventStore: EventStore;
+  let memoryStore: MemoryStore;
+  let skillProposalsStore: SkillProposalsStore;
+  let interventionQueue: InterventionQueue;
+  let client: Client;
+  let prevEnvWorkstream: string | undefined;
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'manager-ask-'));
+    registry = new WorkstreamRegistry(join(dir, 'db.sqlite'));
+    eventStore = new EventStore(join(dir, 'events'));
+    memoryStore = new MemoryStore(join(dir, 'memory'));
+    skillProposalsStore = new SkillProposalsStore(join(dir, 'db.sqlite'));
+    interventionQueue = new InterventionQueue(join(dir, 'db.sqlite'));
+    prevEnvWorkstream = process.env['DISPATCH_WORKSTREAM'];
+    process.env['DISPATCH_WORKSTREAM'] = 'ask_ws';
+
+    const server = buildMcpServer({
+      eventStore,
+      memoryStore,
+      registry,
+      skillProposalsStore,
+      interventionQueue,
+      // Tight poll/timeout knobs so the test runs fast.
+      askUserPollMs: 25,
+      askUserDefaultTimeoutSec: 1,
+      askUserMaxTimeoutSec: 5,
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    client = new Client({ name: 'test-client', version: '0.0.1' }, { capabilities: {} });
+    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+  });
+
+  afterEach(async () => {
+    await client.close();
+    skillProposalsStore.close();
+    interventionQueue.close();
+    registry.close();
+    if (prevEnvWorkstream === undefined) {
+      delete process.env['DISPATCH_WORKSTREAM'];
+    } else {
+      process.env['DISPATCH_WORKSTREAM'] = prevEnvWorkstream;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('lists ask_user in tools/list', async () => {
+    const result = await client.listTools();
+    expect(result.tools.map((t) => t.name)).toContain('ask_user');
+  });
+
+  it('returns the manager answer when answerQuestion lands during the poll', async () => {
+    // Race the tool call against an out-of-band answer. The MCP server polls
+    // SQLite at askUserPollMs cadence; once the manager answers via the
+    // queue, the next poll returns the choice to the agent.
+    const callPromise = client.callTool({
+      name: 'ask_user',
+      arguments: {
+        question: 'Pick one',
+        options: ['a', 'b'],
+        timeout_seconds: 2,
+      },
+    });
+    // Wait long enough for the enqueue to happen before answering.
+    await new Promise((r) => setTimeout(r, 100));
+    const pending = interventionQueue.listPending('ask_ws');
+    expect(pending).toHaveLength(1);
+    interventionQueue.answerQuestion(pending[0]!.id, { choice: 'b' });
+    const result = await callPromise;
+    expect(result.isError).not.toBe(true);
+    const text = (result.content as { type: string; text: string }[])[0]!.text;
+    const parsed = JSON.parse(text);
+    expect(parsed.answered).toBe(true);
+    expect(parsed.choice).toBe('b');
+  });
+
+  it('returns answered:false on timeout', async () => {
+    const result = await client.callTool({
+      name: 'ask_user',
+      arguments: {
+        question: 'No one will answer',
+        options: ['x'],
+        timeout_seconds: 1,
+      },
+    });
+    expect(result.isError).not.toBe(true);
+    const text = (result.content as { type: string; text: string }[])[0]!.text;
+    const parsed = JSON.parse(text);
+    expect(parsed.answered).toBe(false);
+    expect(parsed.reason).toBe('timeout');
+  });
+
+  it('errors when neither options nor allow_freetext are supplied', async () => {
+    const result = await client.callTool({
+      name: 'ask_user',
+      arguments: { question: 'lonely', timeout_seconds: 1 },
     });
     expect(result.isError).toBe(true);
   });

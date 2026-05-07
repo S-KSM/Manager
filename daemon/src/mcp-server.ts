@@ -7,6 +7,7 @@ import {
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import type { EventStore, ManagerEvent, ManagerEventType } from './event-store.js';
+import type { InterventionQueue } from './intervention-queue.js';
 import type { MemoryStore } from './memory-store.js';
 import type { SkillProposalsStore } from './skill-proposals.js';
 import type { WorkstreamRegistry } from './workstream.js';
@@ -29,6 +30,21 @@ interface BuildOptions {
   memoryStore: MemoryStore;
   registry: WorkstreamRegistry;
   skillProposalsStore: SkillProposalsStore;
+  /**
+   * v1.4.7 — required for the `ask_user` tool, which enqueues a
+   * `question_required` intervention and polls the queue for the manager's
+   * answer. Older callers (`runMcp` MCP-only mode) must pass this too;
+   * SQLite WAL keeps it concurrent-safe across processes.
+   */
+  interventionQueue: InterventionQueue;
+  /**
+   * Test seam: lets the unit suite swap in a manual clock + a shorter poll
+   * interval so `ask_user` can be exercised without real timers. Production
+   * leaves these undefined (defaults: real timers, 1 s poll, 300 s timeout).
+   */
+  askUserPollMs?: number;
+  askUserDefaultTimeoutSec?: number;
+  askUserMaxTimeoutSec?: number;
 }
 
 /**
@@ -123,6 +139,44 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: 'ask_user',
+    description:
+      "Ask the human supervisor a question via the Dispatch app and block until they answer. The question and options surface as a `question_required` intervention strip in the workstream's detail view; the user picks an option (or types free text when allowed) and the answer comes back here. Use this instead of guessing when a decision genuinely needs the human in the loop.",
+    inputSchema: {
+      type: 'object',
+      required: ['question'],
+      properties: {
+        question: {
+          type: 'string',
+          description: 'The question to surface to the manager.',
+        },
+        options: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Multiple-choice options. Render as buttons in Dispatch. Up to 8 strings. May be empty if `allow_freetext` is true.',
+        },
+        allow_freetext: {
+          type: 'boolean',
+          description:
+            'When true, the manager may type a free-form answer in addition to / instead of picking an option. Defaults to false.',
+        },
+        context: {
+          type: 'string',
+          description:
+            'Optional one-line context shown above the question (e.g. the tool the agent is about to call, the file under discussion).',
+        },
+        timeout_seconds: {
+          type: 'number',
+          minimum: 5,
+          maximum: 3600,
+          description:
+            'How long to wait for an answer before returning `{answered:false, reason:"timeout"}`. Default 300 s. Capped at 1 h.',
+        },
+      },
+    },
+  },
+  {
     name: 'propose_skill',
     description:
       'Propose a skill/pattern that should be promoted to the team handbook for all agents to read.',
@@ -139,7 +193,16 @@ const TOOLS: Tool[] = [
 ];
 
 export function buildMcpServer(opts: BuildOptions): Server {
-  const { eventStore, memoryStore, registry, skillProposalsStore } = opts;
+  const {
+    eventStore,
+    memoryStore,
+    registry,
+    skillProposalsStore,
+    interventionQueue,
+  } = opts;
+  const askUserPollMs = opts.askUserPollMs ?? 1000;
+  const askUserDefaultTimeoutSec = opts.askUserDefaultTimeoutSec ?? 300;
+  const askUserMaxTimeoutSec = opts.askUserMaxTimeoutSec ?? 3600;
   const server = new Server(
     {
       name: 'dispatch-daemon',
@@ -224,6 +287,83 @@ export function buildMcpServer(opts: BuildOptions): Server {
         }
         const md = await memoryStore.read(workstreamId);
         return textResult(md);
+      }
+      case 'ask_user': {
+        const question = String(args['question'] ?? '').trim();
+        if (!question) return errorResult('question is required');
+        const optionsRaw = args['options'];
+        const options: string[] = Array.isArray(optionsRaw)
+          ? optionsRaw
+              .filter((x): x is string => typeof x === 'string' && x.length > 0)
+              .slice(0, 8)
+          : [];
+        const allowFreetext = args['allow_freetext'] === true;
+        if (options.length === 0 && !allowFreetext) {
+          return errorResult(
+            'either provide at least one option or set allow_freetext=true so the manager has a way to answer',
+          );
+        }
+        const context =
+          typeof args['context'] === 'string' && args['context'].length > 0
+            ? (args['context'] as string)
+            : undefined;
+        const requestedTimeout =
+          typeof args['timeout_seconds'] === 'number' && Number.isFinite(args['timeout_seconds'])
+            ? Math.max(5, Math.min(askUserMaxTimeoutSec, Math.floor(args['timeout_seconds'] as number)))
+            : askUserDefaultTimeoutSec;
+
+        const intervention = interventionQueue.enqueue(workstreamId, 'question_required', {
+          question_request: {
+            question,
+            ...(options.length > 0 ? { options } : {}),
+            ...(allowFreetext ? { allow_freetext: true } : {}),
+            ...(context ? { context } : {}),
+          },
+        });
+        // Mirror to the event log so per-workstream WS streams (and the
+        // macOS QuestionStrip) see it without a separate poll path.
+        await append('intervention_enqueued', {
+          intervention_id: intervention.id,
+          kind: intervention.kind,
+        });
+
+        const deadline = Date.now() + requestedTimeout * 1000;
+        // Polling cadence is intentionally simple — the queue is a SQLite
+        // table with WAL, and `get(id)` is one prepared statement. A 1 s
+        // tick keeps the agent's reply latency under ~1 s after the manager
+        // clicks an option without burning CPU.
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const current = interventionQueue.get(intervention.id);
+          if (current && current.delivered_at && current.payload.question_answer) {
+            const ans = current.payload.question_answer;
+            await append('intervention_delivered', {
+              intervention_id: intervention.id,
+              kind: intervention.kind,
+              ...(ans.choice !== undefined ? { choice: ans.choice } : {}),
+              ...(ans.freetext !== undefined ? { freetext: ans.freetext } : {}),
+            });
+            return textResult(
+              JSON.stringify({
+                answered: true,
+                intervention_id: intervention.id,
+                ...(ans.choice !== undefined ? { choice: ans.choice } : {}),
+                ...(ans.freetext !== undefined ? { freetext: ans.freetext } : {}),
+              }),
+            );
+          }
+          if (Date.now() >= deadline) {
+            return textResult(
+              JSON.stringify({
+                answered: false,
+                reason: 'timeout',
+                intervention_id: intervention.id,
+                timeout_seconds: requestedTimeout,
+              }),
+            );
+          }
+          await new Promise((resolve) => setTimeout(resolve, askUserPollMs));
+        }
       }
       case 'propose_skill': {
         const title = String(args['title'] ?? '');
