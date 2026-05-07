@@ -405,10 +405,30 @@ describe('HTTP server', () => {
     expect(payload.prev?.['title']).toBe('LC2');
   });
 
-  it('PATCH /workstreams/:id with invalid status → 400', async () => {
+  it('PATCH /workstreams/:id with invalid status → 400 mentioning backlog', async () => {
     await request(handle.app).post('/workstreams').send({ id: 'lc3', title: 'LC3' });
     const r = await request(handle.app).patch('/workstreams/lc3').send({ status: 'bogus' });
     expect(r.status).toBe(400);
+    expect(typeof r.body.error).toBe('string');
+    expect(r.body.error).toContain('backlog');
+  });
+
+  it('PATCH /workstreams/:id sets status to backlog and emits workstream_updated', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'lcb', title: 'LCB' });
+    const r = await request(handle.app).patch('/workstreams/lcb').send({ status: 'backlog' });
+    expect(r.status).toBe(200);
+    expect(r.body.status).toBe('backlog');
+    const events = await request(handle.app).get('/workstreams/lcb/events');
+    const updates = (
+      events.body as Array<{ type: string; payload?: Record<string, unknown> }>
+    ).filter((e) => e.type === 'workstream_updated');
+    expect(updates).toHaveLength(1);
+    const payload = updates[0]!.payload as {
+      changes?: Record<string, unknown>;
+      prev?: Record<string, unknown>;
+    };
+    expect(payload.changes?.['status']).toBe('backlog');
+    expect(payload.prev?.['status']).toBe('active');
   });
 
   it('PATCH /workstreams/:id on unknown id → 404', async () => {

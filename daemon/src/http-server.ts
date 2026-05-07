@@ -65,7 +65,12 @@ const VALID_REPORT_STATUSES: ReadonlySet<ReportStatus> = new Set(['draft', 'save
 const VALID_PROVIDERS: ReadonlySet<LLMProviderName> = new Set(['claude', 'ollama']);
 const REPORT_DEFAULT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-const WORKSTREAM_STATUSES: ReadonlySet<WorkstreamStatus> = new Set(['active', 'paused', 'retired']);
+const WORKSTREAM_STATUSES: ReadonlySet<WorkstreamStatus> = new Set([
+  'backlog',
+  'active',
+  'paused',
+  'retired',
+]);
 
 const DIGEST_DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -282,7 +287,9 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
         typeof body.status !== 'string' ||
         !WORKSTREAM_STATUSES.has(body.status as WorkstreamStatus)
       ) {
-        res.status(400).json({ error: 'status must be one of active, paused, retired' });
+        res
+          .status(400)
+          .json({ error: 'status must be one of backlog, active, paused, retired' });
         return;
       }
       const nextStatus = body.status as WorkstreamStatus;
