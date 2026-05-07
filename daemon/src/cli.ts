@@ -7,6 +7,7 @@ import { EventStore } from './event-store.js';
 import { HandbookStore } from './handbook-store.js';
 import { HeadlineStore } from './headline-store.js';
 import { Headliner } from './headliner.js';
+import { LinearCommentSyncer } from './linear-comment-syncer.js';
 import { SubgoalSynthesizer } from './subgoal-synthesizer.js';
 import { buildHttpServer } from './http-server.js';
 import { Orchestrator, type DispatchOutcome } from './orchestrator.js';
@@ -23,7 +24,9 @@ import { ReportStore } from './report-store.js';
 import { Scheduler } from './scheduler.js';
 import { SettingsStore } from './settings-store.js';
 import { SkillProposalsStore } from './skill-proposals.js';
+import { WorkstreamLinksStore } from './workstream-links-store.js';
 import { WorkstreamRegistry } from './workstream.js';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Whether to launch an MCP stdio server in `dispatch start`.
@@ -201,6 +204,7 @@ async function runStart(opts: {
   const headlineStore = new HeadlineStore();
   const settings = new SettingsStore(cfg.settingsPath);
   const headliner = new Headliner({ registry, eventStore, store: headlineStore, settings });
+  const workstreamLinks = new WorkstreamLinksStore(cfg.dbPath);
   // Orchestrator is built below if --mock-tracker was passed; we late-bind it
   // into the HTTP server via a closure-captured holder so the route can find it.
   const orchestratorHolder: { current: Orchestrator | null } = { current: null };
@@ -215,6 +219,7 @@ async function runStart(opts: {
     scheduler,
     headlineStore,
     settings,
+    workstreamLinks,
     get orchestrator() {
       return orchestratorHolder.current ?? undefined;
     },
@@ -233,6 +238,34 @@ async function runStart(opts: {
     const synth = new SubgoalSynthesizer({ registry, eventStore, settings });
     synth.start();
     process.stderr.write('[dispatch] subgoal synthesizer started\n');
+  }
+
+  let linearSyncer: LinearCommentSyncer | null = null;
+  if (process.env['DISPATCH_LINEAR_SYNC_ENABLED'] !== '0') {
+    linearSyncer = new LinearCommentSyncer({
+      registry,
+      eventStore,
+      store: workstreamLinks,
+      settings,
+      trackerFactory: (apiKey: string) =>
+        new LinearTracker({ apiKey, projectSlug: 'unused-for-link-flow' }),
+    });
+    linearSyncer.onWorkstreamUpdated = (e) => {
+      const event = {
+        ts: new Date().toISOString(),
+        workstream_id: e.workstreamId,
+        type: 'workstream_updated' as const,
+        id: `wsu_${randomUUID().slice(0, 8)}`,
+        payload: {
+          changes: { status: e.nextStatus },
+          prev: { status: e.prevStatus },
+          source: 'linear_sync',
+        },
+      };
+      void eventStore.appendEvent(e.workstreamId, event);
+    };
+    linearSyncer.start();
+    process.stderr.write('[dispatch] linear comment syncer started\n');
   }
 
   // v1.4.x: optional orchestrator. Built from either --workflow (full path) or
@@ -376,6 +409,7 @@ async function runStart(opts: {
     try {
       workflowWatcher?.close();
       orchestrator?.stop();
+      linearSyncer?.stop();
       headliner.stop();
       scheduler.stop();
       await http.close();
@@ -383,6 +417,7 @@ async function runStart(opts: {
       interventionQueue.close();
       skillProposalsStore.close();
       reportStore.close();
+      workstreamLinks.close();
     } catch (e) {
       process.stderr.write(`[dispatch] shutdown error: ${(e as Error).message}\n`);
     }
