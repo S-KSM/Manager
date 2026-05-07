@@ -807,12 +807,14 @@ describe('HTTP server', () => {
 
   // ---- Settings ------------------------------------------------------------
 
-  it('GET /settings returns defaults with anthropicApiKeyConfigured=false', async () => {
+  it('GET /settings returns defaults with anthropic + linear keys redacted', async () => {
     // Tests run in a tmp DISPATCH_HOME so the env-var fallback is the only
     // possible source of an API key. Save+restore the key to keep the test
     // hermetic.
-    const prior = process.env['ANTHROPIC_API_KEY'];
+    const priorA = process.env['ANTHROPIC_API_KEY'];
+    const priorL = process.env['DISPATCH_LINEAR_API_KEY'];
     delete process.env['ANTHROPIC_API_KEY'];
+    delete process.env['DISPATCH_LINEAR_API_KEY'];
     try {
       const r = await request(handle.app).get('/settings');
       expect(r.status).toBe(200);
@@ -820,11 +822,35 @@ describe('HTTP server', () => {
         headlineProvider: 'ollama',
         ollamaUrl: 'http://localhost:11434',
         anthropicApiKeyConfigured: false,
+        linearApiKeyConfigured: false,
       });
       expect(typeof r.body.headlineModel).toBe('string');
       expect(r.body.anthropicApiKey).toBeUndefined();
+      expect(r.body.linearApiKey).toBeUndefined();
     } finally {
-      if (prior !== undefined) process.env['ANTHROPIC_API_KEY'] = prior;
+      if (priorA !== undefined) process.env['ANTHROPIC_API_KEY'] = priorA;
+      if (priorL !== undefined) process.env['DISPATCH_LINEAR_API_KEY'] = priorL;
+    }
+  });
+
+  it('PATCH /settings persists linearApiKey and redacts on read', async () => {
+    const priorL = process.env['DISPATCH_LINEAR_API_KEY'];
+    delete process.env['DISPATCH_LINEAR_API_KEY'];
+    try {
+      const r = await request(handle.app)
+        .patch('/settings')
+        .send({ linearApiKey: 'lin_api_xxx' });
+      expect(r.status).toBe(200);
+      expect(r.body.linearApiKeyConfigured).toBe(true);
+      expect(r.body.linearApiKey).toBeUndefined();
+      expect(settings.getResolvedLinearApiKey()).toBe('lin_api_xxx');
+
+      const cleared = await request(handle.app).patch('/settings').send({ linearApiKey: '' });
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.linearApiKeyConfigured).toBe(false);
+      expect(settings.getResolvedLinearApiKey()).toBeUndefined();
+    } finally {
+      if (priorL !== undefined) process.env['DISPATCH_LINEAR_API_KEY'] = priorL;
     }
   });
 
