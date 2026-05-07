@@ -92,6 +92,8 @@ private struct ProvidersSettings: View {
     @State private var ollamaURL: String = "http://localhost:11434"
     @State private var anthropicAPIKey: String = ""
     @State private var anthropicConfigured = false
+    @State private var linearAPIKey: String = ""
+    @State private var linearConfigured = false
 
     @State private var saving = false
     @State private var saveError: String?
@@ -129,6 +131,18 @@ private struct ProvidersSettings: View {
                     .textFieldStyle(.roundedBorder)
                     .help("Required only when Provider = Claude. Stored in ~/.claude/dispatch/settings.json with 0600 permissions; never returned by the daemon once saved.")
                 if anthropicConfigured && anthropicAPIKey.isEmpty {
+                    Text("A key is on file. Type a new one to replace it; clear and save to remove it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Linear API key") {
+                SecureField(linearConfigured ? "•••• configured" : "lin_api_…",
+                            text: $linearAPIKey)
+                    .textFieldStyle(.roundedBorder)
+                    .help("Required for the Link-to-Linear chip in the agent detail view, plus the bidirectional Linear sync. Same redaction + storage as the Anthropic key.")
+                if linearConfigured && linearAPIKey.isEmpty {
                     Text("A key is on file. Type a new one to replace it; clear and save to remove it.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -186,7 +200,9 @@ private struct ProvidersSettings: View {
             model = s.headlineModel
             ollamaURL = s.ollamaURL
             anthropicConfigured = s.anthropicAPIKeyConfigured
+            linearConfigured = s.linearAPIKeyConfigured
             anthropicAPIKey = ""
+            linearAPIKey = ""
             loaded = true
             loadingError = nil
         } catch {
@@ -209,13 +225,18 @@ private struct ProvidersSettings: View {
         if !anthropicAPIKey.isEmpty {
             patch.anthropicAPIKey = anthropicAPIKey
         }
+        if !linearAPIKey.isEmpty {
+            patch.linearAPIKey = linearAPIKey
+        }
         do {
             let s = try await client.patchSettings(patch)
             provider = s.headlineProvider
             model = s.headlineModel
             ollamaURL = s.ollamaURL
             anthropicConfigured = s.anthropicAPIKeyConfigured
+            linearConfigured = s.linearAPIKeyConfigured
             anthropicAPIKey = ""
+            linearAPIKey = ""
             saveError = nil
             savedAt = Date()
             // Probe again now that settings have changed (URL / provider may
