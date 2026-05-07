@@ -176,6 +176,7 @@ Two channels feed the daemon:
 | `update_memory(section, content)` | write into the workstream memory MD |
 | `read_memory(section?)` | read it back |
 | `propose_skill(title, body, source_decision_id?)` | propose a pattern for promotion to the team handbook (manager reviews and promotes via the macOS app) |
+| `ask_user(question, options?, allow_freetext?, context?, timeout_seconds?)` | v1.4.7 — block on a human answer surfaced as a `question_required` intervention strip in the workstream detail view; returns `{answered, choice?, freetext?}` or `{answered:false, reason:"timeout"}` |
 
 Agent prompt (system message added at workstream start) instructs the agent to call `emit_decision` at each non-trivial fork and `update_memory` whenever it learns something a future session of this workstream should know.
 
@@ -210,6 +211,8 @@ Five components, all in `daemon/src/`:
 **Telemetry equivalence.** The orchestrator does not emit any new event types. A spawned `claude` session writes the same `session_start` / `tool_use` / `decision` / `subgoal_push` / etc. that a human-launched session writes — because it *is* the same `claude`, with the same hooks installed and the same MCP server attached. The only orchestration-specific surface is `GET /orchestrator/state` (Symphony §13.7.2 snapshot) for the macOS client to render an "autonomous" badge on cards spawned by the orchestrator.
 
 **Approval bridge (v1.4.4).** When an autonomous agent needs human authorization for a destructive or out-of-scope action it enqueues an `approval_required` intervention. The macOS `AgentDetailView` renders an `ApprovalStrip` between the header and the timeline; tapping Approve / Deny calls `POST /workstreams/:id/interventions/:intId/decide`, which atomically merges the decision into the queue and emits `intervention_delivered` with `approved: bool`. The agent-side trigger (an MCP tool that enqueues approval requests) is deferred to v1.4.5; until then the queue + API + UI infra ships ahead of any source that fills it.
+
+**Question bridge (v1.4.7).** Same shape as the approval bridge, one intervention kind down: `ask_user` MCP tool → `question_required` intervention → `QuestionStrip` between the header and the timeline → `POST /workstreams/:id/interventions/:intId/answer` with `{choice?, freetext?}`. The MCP handler blocks the agent's tool call (polling SQLite once per second, capped at the agent-supplied `timeout_seconds`, default 300) and returns the manager's pick to the agent. Lets the agent route a question to Dispatch instead of blocking the terminal session — the user picks an option in the app and the agent unblocks.
 
 **WORKFLOW.md schema (minimum viable):**
 

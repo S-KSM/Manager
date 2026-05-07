@@ -270,6 +270,80 @@ describe('HTTP server', () => {
     expect(r.status).toBe(400);
   });
 
+  it('POST /workstreams/:id/interventions/:intId/answer records choice + emits intervention_delivered', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'q', title: 'Q' });
+    const enq = await request(handle.app).post('/interventions').send({
+      workstream_id: 'q',
+      kind: 'question_required',
+      payload: {
+        question_request: { question: 'Use cache?', options: ['yes', 'no'] },
+      },
+    });
+    expect(enq.status).toBe(201);
+    const intId = enq.body.id as string;
+
+    const ans = await request(handle.app)
+      .post(`/workstreams/q/interventions/${intId}/answer`)
+      .send({ choice: 'yes' });
+    expect(ans.status).toBe(200);
+    expect(ans.body.delivered_at).not.toBeNull();
+    expect(ans.body.payload.question_answer.choice).toBe('yes');
+
+    // Replay rejected — already answered.
+    const replay = await request(handle.app)
+      .post(`/workstreams/q/interventions/${intId}/answer`)
+      .send({ choice: 'no' });
+    expect(replay.status).toBe(409);
+
+    const events = await request(handle.app).get('/workstreams/q/events');
+    const delivered = (
+      events.body as Array<{ type: string; payload?: Record<string, unknown> }>
+    ).filter((e) => e.type === 'intervention_delivered');
+    expect(delivered.at(-1)!.payload?.choice).toBe('yes');
+  });
+
+  it('POST .../answer rejects choice that does not match options', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'q2', title: 'Q2' });
+    const enq = await request(handle.app).post('/interventions').send({
+      workstream_id: 'q2',
+      kind: 'question_required',
+      payload: { question_request: { question: 'Pick', options: ['a', 'b'] } },
+    });
+    const r = await request(handle.app)
+      .post(`/workstreams/q2/interventions/${enq.body.id}/answer`)
+      .send({ choice: 'c' });
+    expect(r.status).toBe(400);
+  });
+
+  it('POST .../answer rejects freetext when allow_freetext is unset', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'q3', title: 'Q3' });
+    const enq = await request(handle.app).post('/interventions').send({
+      workstream_id: 'q3',
+      kind: 'question_required',
+      payload: { question_request: { question: 'Pick', options: ['a'] } },
+    });
+    const r = await request(handle.app)
+      .post(`/workstreams/q3/interventions/${enq.body.id}/answer`)
+      .send({ freetext: 'something else' });
+    expect(r.status).toBe(400);
+  });
+
+  it('POST .../answer accepts freetext when allow_freetext was set', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'q4', title: 'Q4' });
+    const enq = await request(handle.app).post('/interventions').send({
+      workstream_id: 'q4',
+      kind: 'question_required',
+      payload: {
+        question_request: { question: 'Why?', allow_freetext: true },
+      },
+    });
+    const r = await request(handle.app)
+      .post(`/workstreams/q4/interventions/${enq.body.id}/answer`)
+      .send({ freetext: 'because' });
+    expect(r.status).toBe(200);
+    expect(r.body.payload.question_answer.freetext).toBe('because');
+  });
+
   it('POST ack is idempotent — re-acking the same id is a 200 with empty array', async () => {
     await request(handle.app).post('/workstreams').send({ id: 'g', title: 'G' });
     const enq = await request(handle.app)

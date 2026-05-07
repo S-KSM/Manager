@@ -24,6 +24,9 @@ struct AgentDetailView: View {
     /// v1.4.4 — pending approval-required interventions polled from the daemon.
     /// Drives the Approve/Deny strip below the header.
     @State private var pendingApprovals: [Intervention] = []
+    /// v1.4.7 — pending question-required interventions (`mcp__dispatch__ask_user`).
+    /// Drives the QuestionStrip below the header.
+    @State private var pendingQuestions: [Intervention] = []
 
     /// v1.2 — current Linear-link state. nil = not linked. Refreshed on
     /// every workstream change + after Link/Unlink operations.
@@ -61,6 +64,15 @@ struct AgentDetailView: View {
                         pending: pendingApprovals,
                         onDecide: { intv, approved in
                             Task { await decide(intv: intv, approved: approved) }
+                        }
+                    )
+                }
+                if !pendingQuestions.isEmpty {
+                    Divider()
+                    QuestionStrip(
+                        pending: pendingQuestions,
+                        onAnswer: { intv, choice, freetext in
+                            Task { await answer(intv: intv, choice: choice, freetext: freetext) }
                         }
                     )
                 }
@@ -309,6 +321,7 @@ struct AgentDetailView: View {
     private func refreshPendingApprovals() async {
         let all = (try? await client.listPendingInterventions(workstreamID: workstream.id)) ?? []
         pendingApprovals = all.filter { $0.kind == .approvalRequired }
+        pendingQuestions = all.filter { $0.kind == .questionRequired }
     }
 
     private func decide(intv: Intervention, approved: Bool) async {
@@ -316,6 +329,16 @@ struct AgentDetailView: View {
             workstreamID: workstream.id,
             interventionID: intv.id,
             approved: approved
+        )
+        await refreshPendingApprovals()
+    }
+
+    private func answer(intv: Intervention, choice: String?, freetext: String?) async {
+        _ = try? await client.answerQuestion(
+            workstreamID: workstream.id,
+            interventionID: intv.id,
+            choice: choice,
+            freetext: freetext
         )
         await refreshPendingApprovals()
     }
@@ -426,6 +449,110 @@ struct ApprovalStrip: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Color.orange.opacity(0.08))
+    }
+}
+
+// MARK: - v1.4.7 Question strip
+
+/// Banner rendered between the AgentDetail header and the methodology
+/// timeline whenever the workstream has one or more pending
+/// `question_required` interventions (the agent called `ask_user`). Each
+/// row carries its own option buttons + optional freetext field so the
+/// manager can answer right here without switching back to the terminal.
+struct QuestionStrip: View {
+    let pending: [Intervention]
+    /// `(intervention, choice?, freetext?)` — exactly one of `choice` /
+    /// `freetext` is set per click; the parent forwards both to the daemon.
+    var onAnswer: (Intervention, String?, String?) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(pending) { intv in
+                QuestionRow(intv: intv, onAnswer: onAnswer)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.blue.opacity(0.08))
+    }
+}
+
+private struct QuestionRow: View {
+    let intv: Intervention
+    var onAnswer: (Intervention, String?, String?) -> Void
+
+    @State private var freetextDraft: String = ""
+    @FocusState private var freetextFocused: Bool
+
+    private var question: String {
+        intv.payload.questionRequest?.question ?? "Agent has a question"
+    }
+    private var options: [String] {
+        intv.payload.questionRequest?.options ?? []
+    }
+    private var allowFreetext: Bool {
+        intv.payload.questionRequest?.allowFreetext ?? false
+    }
+    private var contextLine: String? {
+        intv.payload.questionRequest?.context
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: "questionmark.bubble.fill")
+                    .foregroundStyle(.blue)
+                VStack(alignment: .leading, spacing: 2) {
+                    if let contextLine, !contextLine.isEmpty {
+                        Text(contextLine)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Text(question)
+                        .font(.body.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            if !options.isEmpty {
+                FlowLayout(spacing: 6) {
+                    ForEach(options, id: \.self) { opt in
+                        Button {
+                            onAnswer(intv, opt, nil)
+                        } label: {
+                            Text(opt)
+                                .font(.caption)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .help("Answer “\(opt)”")
+                    }
+                }
+            }
+            if allowFreetext {
+                HStack(spacing: 6) {
+                    TextField("Custom answer…", text: $freetextDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($freetextFocused)
+                        .onSubmit { submitFreetext() }
+                    Button("Send") { submitFreetext() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(freetextDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .help("Send a free-form answer to the agent")
+                }
+            }
+        }
+    }
+
+    private func submitFreetext() {
+        let trimmed = freetextDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        onAnswer(intv, nil, trimmed)
+        freetextDraft = ""
+        freetextFocused = false
     }
 }
 

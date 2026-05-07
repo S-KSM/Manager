@@ -36,6 +36,8 @@ struct UpdatesView: View {
                         Spacer()
                     }
                     .padding(.vertical, 24)
+                } else if drafts.isEmpty && saved.isEmpty {
+                    emptyStateCTA
                 } else {
                     section(
                         title: "Drafts",
@@ -101,33 +103,102 @@ struct UpdatesView: View {
 
     @ViewBuilder
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Updates")
-                    .font(.title2.weight(.semibold))
-                Text("Generate, save, and schedule team summaries.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        // ViewThatFits collapses the action buttons under the title when the
+        // detail pane is narrower than ~520pt — otherwise the "+ New report"
+        // button gets clipped, which made the surface look broken on first
+        // open.
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline) {
+                titleBlock
+                Spacer()
+                actionButtons
             }
-            Spacer()
+            VStack(alignment: .leading, spacing: 10) {
+                titleBlock
+                actionButtons
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Updates")
+                .font(.title2.weight(.semibold))
+            Text("Generate, save, and schedule team summaries.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
+        HStack(spacing: 8) {
             Button {
                 showSchedulerSheet = true
             } label: {
-                Label("Scheduler…", systemImage: "gearshape")
+                Label("Auto-draft schedule…", systemImage: "calendar.badge.clock")
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .help("Configure weekly + monthly draft generation.")
+            .help("Configure recurring weekly / monthly draft generation.")
 
             Button {
                 showGenerateSheet = true
             } label: {
-                Label("New report", systemImage: "plus")
+                Label("New update", systemImage: "plus")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
+            .keyboardShortcut("n", modifiers: [.command])
             .help("Generate a fresh update across the workstreams you pick")
         }
+    }
+
+    @ViewBuilder
+    private var emptyStateCTA: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: "doc.text.image")
+                    .font(.title2)
+                    .foregroundStyle(.blue)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("No updates yet")
+                        .font(.headline)
+                    Text("Generate an LLM-rendered summary across the workstreams you pick. Choose a time window — last 24h, this week, or pick exact dates.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            HStack(spacing: 10) {
+                Button {
+                    showGenerateSheet = true
+                } label: {
+                    Label("Generate your first update", systemImage: "sparkles")
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                Button {
+                    showSchedulerSheet = true
+                } label: {
+                    Label("Or set up auto-drafts…", systemImage: "calendar.badge.clock")
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.blue.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.blue.opacity(0.25), lineWidth: 1)
+        )
     }
 
     @ViewBuilder

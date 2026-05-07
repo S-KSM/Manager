@@ -127,6 +127,7 @@ const INTERVENTION_KINDS: ReadonlySet<InterventionKind> = new Set([
   'redirect',
   'rollback',
   'approval_required',
+  'question_required',
 ]);
 
 /**
@@ -756,7 +757,8 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     }
     if (!INTERVENTION_KINDS.has(kind as InterventionKind)) {
       res.status(400).json({
-        error: 'kind must be one of nudge, redirect, rollback, approval_required',
+        error:
+          'kind must be one of nudge, redirect, rollback, approval_required, question_required',
       });
       return;
     }
@@ -834,6 +836,83 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
           intervention_id: updated.id,
           kind: updated.kind,
           approved: body.approved,
+        },
+      };
+      await eventStore.appendEvent(updated.workstream_id, event);
+      res.json(updated);
+    },
+  );
+
+  /**
+   * v1.4.7 — record manager's answer to a `question_required` intervention.
+   * Body: `{ choice?: string, freetext?: string }`. At least one must be a
+   * non-empty string. When the original `question_request.options` is set,
+   * `choice` (if supplied) must match one of those options exactly. When
+   * `allow_freetext` was not set, `freetext` is rejected. Returns the
+   * updated wire row; marks delivered atomically and emits an
+   * `intervention_delivered` event with the answer attached so WS streams
+   * notify the macOS UI.
+   */
+  app.post(
+    '/workstreams/:id/interventions/:intId/answer',
+    async (req: Request, res: Response) => {
+      const id = String(req.params['id']);
+      const intId = String(req.params['intId']);
+      if (!registry.get(id)) {
+        res.status(404).json({ error: 'workstream not found' });
+        return;
+      }
+      const body = (req.body ?? {}) as { choice?: unknown; freetext?: unknown };
+      const choice =
+        typeof body.choice === 'string' && body.choice.length > 0 ? body.choice : undefined;
+      const freetext =
+        typeof body.freetext === 'string' && body.freetext.length > 0 ? body.freetext : undefined;
+      if (!choice && !freetext) {
+        res.status(400).json({ error: 'choice or freetext required' });
+        return;
+      }
+      const existing = interventionQueue.get(intId);
+      if (!existing || existing.workstream_id !== id) {
+        res.status(404).json({ error: 'intervention not found' });
+        return;
+      }
+      if (existing.kind !== 'question_required') {
+        res.status(400).json({ error: 'intervention is not a question_required' });
+        return;
+      }
+      if (existing.delivered_at !== null) {
+        res.status(409).json({ error: 'intervention already answered' });
+        return;
+      }
+      const request = existing.payload.question_request;
+      if (choice && Array.isArray(request?.options) && request.options.length > 0) {
+        if (!request.options.includes(choice)) {
+          res.status(400).json({ error: 'choice does not match a known option' });
+          return;
+        }
+      }
+      if (freetext && request?.allow_freetext !== true) {
+        res.status(400).json({ error: 'freetext not allowed for this question' });
+        return;
+      }
+      const updated = interventionQueue.answerQuestion(intId, {
+        ...(choice ? { choice } : {}),
+        ...(freetext ? { freetext } : {}),
+      });
+      if (!updated) {
+        res.status(404).json({ error: 'intervention not found or already answered' });
+        return;
+      }
+      const event: ManagerEvent = {
+        ts: updated.delivered_at ?? new Date().toISOString(),
+        workstream_id: updated.workstream_id,
+        type: 'intervention_delivered',
+        id: `intd_${randomUUID().slice(0, 8)}`,
+        payload: {
+          intervention_id: updated.id,
+          kind: updated.kind,
+          ...(choice ? { choice } : {}),
+          ...(freetext ? { freetext } : {}),
         },
       };
       await eventStore.appendEvent(updated.workstream_id, event);

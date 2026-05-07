@@ -45,6 +45,9 @@ struct GenerateReportSheet: View {
     @State private var saveTask: Task<Void, Never>?
 
     enum Period: String, CaseIterable, Identifiable {
+        case last24h = "Last 24h"
+        case today = "Today"
+        case yesterday = "Yesterday"
         case thisWeek = "This week"
         case lastWeek = "Last week"
         case thisMonth = "This month"
@@ -157,13 +160,27 @@ struct GenerateReportSheet: View {
     @ViewBuilder
     private var periodSection: some View {
         sectionLabel("Period")
-        Picker("Period", selection: $period) {
+        // Chip strip — wraps at narrow widths so adding `Last 24h` / `Today`
+        // / `Yesterday` doesn't blow up the segmented picker.
+        FlowLayout(spacing: 6) {
             ForEach(Period.allCases) { p in
-                Text(p.rawValue).tag(p)
+                let active = period == p
+                Button {
+                    period = p
+                } label: {
+                    Text(p.rawValue)
+                        .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule().fill((active ? Color.accentColor : Color.gray).opacity(0.15))
+                        )
+                        .foregroundStyle(active ? Color.accentColor : Color.primary)
+                }
+                .buttonStyle(.plain)
+                .help("Set the report window to \(p.rawValue.lowercased())")
             }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
 
         if period == .custom {
             HStack(spacing: 12) {
@@ -471,6 +488,16 @@ struct GenerateReportSheet: View {
         let cal = Calendar.current
         let now = Date()
         switch period {
+        case .last24h:
+            let since = cal.date(byAdding: .hour, value: -24, to: now)
+            return (since, now)
+        case .today:
+            let since = cal.startOfDay(for: now)
+            return (since, now)
+        case .yesterday:
+            let startOfToday = cal.startOfDay(for: now)
+            let startOfYesterday = cal.date(byAdding: .day, value: -1, to: startOfToday)
+            return (startOfYesterday, startOfToday)
         case .thisWeek:
             let since = cal.date(byAdding: .day, value: -7, to: now)
             return (since, now)

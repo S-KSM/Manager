@@ -31,6 +31,14 @@ protocol DaemonClientProtocol: Sendable {
     func decideApproval(workstreamID: String,
                         interventionID: String,
                         approved: Bool) async throws -> Intervention
+    /// v1.4.7 — answer a `question_required` intervention. Pass either a
+    /// `choice` matching one of the question's options or a `freetext`
+    /// reply (only valid when the agent set `allow_freetext`). Server
+    /// merges `payload.question_answer` and marks delivered atomically.
+    func answerQuestion(workstreamID: String,
+                        interventionID: String,
+                        choice: String?,
+                        freetext: String?) async throws -> Intervention
 
     // MARK: - v1: workstream lifecycle
 
@@ -431,6 +439,22 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         struct Body: Encodable { let approved: Bool }
         let path = "workstreams/\(workstreamID)/interventions/\(interventionID)/decide"
         return try await sendJSON(method: "POST", path: path, body: Body(approved: approved))
+    }
+
+    func answerQuestion(workstreamID: String,
+                        interventionID: String,
+                        choice: String?,
+                        freetext: String?) async throws -> Intervention {
+        struct Body: Encodable {
+            let choice: String?
+            let freetext: String?
+        }
+        let path = "workstreams/\(workstreamID)/interventions/\(interventionID)/answer"
+        return try await sendJSON(
+            method: "POST",
+            path: path,
+            body: Body(choice: choice, freetext: freetext)
+        )
     }
 
     // MARK: - v1: lifecycle
