@@ -4,6 +4,41 @@ Versions are anchored on the macOS app's `CFBundleShortVersionString` (the Info.
 
 ---
 
+## v1.4.7 — 2026-05-07 — ask_user MCP + Updates UX rework + CHECK-constraint migration
+
+Tag [`v1.4.7`](https://github.com/S-KSM/Manager/releases/tag/v1.4.7). DMG + zip attached.
+
+Two product threads bundled with one urgent migration. The product threads fix the same complaint surfaced in dogfood — the human couldn't get an agent's question without leaving the Claude Code terminal, and the Updates surface looked blank on first open so the on-demand draft flow stayed hidden. The migration unblocks any DB that survived from before v1.4.4.
+
+### `ask_user` MCP tool (`mcp__dispatch__ask_user`)
+
+- New `question_required` intervention kind + `answerQuestion()` queue helper + `get(id)` lookup; mirrors the v1.4.4 approval bridge.
+- `POST /workstreams/:id/interventions/:intId/answer` validates the choice against the original options list and rejects freetext when `allow_freetext` was off.
+- MCP tool blocks on a 1s poll loop; default 300s timeout, agent-overridable up to 1h. Emits `intervention_enqueued` + `intervention_delivered` events so the WS stream notifies the macOS QuestionStrip without a separate channel.
+- macOS `QuestionStrip` renders next to `ApprovalStrip` in `AgentDetailView`. Option buttons fire instantly; optional freetext field shows when `allow_freetext: true`.
+
+### Updates UX rework
+
+- Empty-state CTA card replaces the silent "No drafts / No saved reports" pair on first open, with a `Generate your first update` button + auto-draft link.
+- Header uses `ViewThatFits` so action buttons stack under the title at narrow widths instead of clipping. `cmd-N` shortcut on `New update`.
+- `GenerateReportSheet` adds `Last 24h` / `Today` / `Yesterday` periods and switches from segmented to a wrapping chip strip so 8 options fit.
+- `SchedulerSettings` translates the canonical preset crons to plain English ("Every Monday, 8:00 AM") and rewrites the intro to point at on-demand as the alternative to scheduling.
+
+### Legacy CHECK-constraint migration
+
+v1.4.4 dropped the `CHECK(kind IN …)` clause from the source DDL but `CREATE TABLE IF NOT EXISTS` is a no-op on existing tables — any DB that survived from before v1.4.4 still rejects `approval_required` and `question_required` rows. v1.4.7 detects the legacy constraint via `sqlite_master.sql` and rebuilds the table inside a single transaction (create new without CHECK, copy rows, drop old, rename). Caught while running the install + e2e smoke for the ask_user wire-up.
+
+### Tests
+
+- 306/306 daemon tests pass (+9 across `intervention-queue` / `http-server` / `mcp-server`).
+- macOS Debug build clean. `xcodebuild build-for-testing` succeeds; the GUI host app still can't launch under the sandboxed XCTest runner (same limitation as v1.4.6).
+
+### Migration
+
+None at the wire level — `question_required` is additive. The CHECK-constraint rebuild runs automatically at daemon start when a legacy table is detected; a fresh install hits the rebuilt DDL directly and no-ops.
+
+---
+
 ## v1.4.6 — 2026-05-07 — Diagnostics tab (kill / restart)
 
 Tag [`v1.4.6`](https://github.com/S-KSM/Manager/releases/tag/v1.4.6). DMG + zip attached.
