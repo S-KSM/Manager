@@ -120,7 +120,7 @@ Localhost-only in v0/v0.5/v1; auth + remote binding land in v1.5. Default port 9
 | `GET` | `/workstreams` | Array of Workstream wire objects. |
 | `POST` | `/workstreams` | Body `{id, title}` → 201 with the new Workstream wire object. |
 | `GET` | `/workstreams/:id` | Workstream wire object (with `sessions[]` populated). 404 if unknown. |
-| `PATCH` | `/workstreams/:id` | Body `{status?, title?}`. Validates `status` ∈ {active, paused, retired}. Updates the registry, appends a single `workstream_updated` event with `{changes, prev}`, returns the updated Workstream wire object. 404 if unknown. |
+| `PATCH` | `/workstreams/:id` | Body `{status?, title?}`. Validates `status` ∈ {backlog, active, paused, retired}. Updates the registry, appends a single `workstream_updated` event with `{changes, prev}`, returns the updated Workstream wire object. 404 if unknown. |
 | `DELETE` | `/workstreams/:id` | Soft-delete: sets status to `retired` and appends `workstream_updated`. Returns 200 + the updated Workstream wire object (not 204) so clients can refresh local state without a follow-up GET. |
 | `GET` | `/workstreams/:id/memory` | Raw Markdown body (`text/markdown`). |
 | `GET` | `/workstreams/:id/events` | Array of Event JSON objects. Optional `?since=<byteOffset>`. |
@@ -144,6 +144,10 @@ Localhost-only in v0/v0.5/v1; auth + remote binding land in v1.5. Default port 9
 | `DELETE` | `/reports/:id` | Soft-delete: sets `status='archived'` and returns 200 + the updated Report. |
 | `GET` | `/scheduler/jobs` | Naked array of `{id, enabled, cron, audience_preset, provider, model, next_fire_at}`. |
 | `PATCH` | `/scheduler/jobs/:id` | Body `{enabled?, cron?, audience_preset?, provider?, model?}`. Validates the cron expression eagerly, persists the change to `~/.claude/manager/scheduler.json`, recomputes `next_fire_at`, and returns the updated job. 404 on unknown id; 400 on invalid cron / preset / provider. |
+| `GET` | `/workstreams/:id/link` | v1.2 — `WorkstreamLink \| null`. The `null` body distinguishes "linked nothing yet" from "workstream not found" (404). |
+| `PUT` | `/workstreams/:id/link` | v1.2 — Body `{tracker_kind: 'linear', issue_identifier: string}`. Resolves via `LinearTracker.fetchIssueByIdentifier` and persists. 503 with `code: 'linear_api_key_missing'` when no key is configured; 400 with `code: 'linear_unknown_identifier'` when the tracker can't find the issue; 404 when the workstream doesn't exist. |
+| `DELETE` | `/workstreams/:id/link` | v1.2 — Idempotent unlink. Returns 200 even when no prior link existed. |
+| `GET` | `/links` | v1.2 — Naked array of every persisted `WorkstreamLink`. |
 
 ### Agent-side instrumentation (Claude Code, v0)
 
@@ -240,6 +244,41 @@ Both tickers degrade silently when the LLM endpoint is unreachable; the determin
 
 The macOS timeline renders synthesized sub-goals with a 🤖 prefix and collapses runs of raw `tool_use` rows into an "N actions ▸" pill so the human sees story + sub-story rather than a list of bash calls — see `client-macos/Dispatch/Views/AgentDetailView.swift`.
 
+### Tracker links (v1.2)
+
+The link table is the manual analogue of the orchestrator's auto-claim path: a human links a Dispatch workstream to a tracker issue once, and the daemon then ferries decisions out to the tracker as comments and tracker-state changes back into the workstream's `status` field.
+
+**SQLite schema** (`daemon/src/workstream-links-store.ts`):
+
+```sql
+CREATE TABLE workstream_links (
+  workstream_id    TEXT PRIMARY KEY,
+  tracker_kind     TEXT NOT NULL,         -- 'linear' for v1.2; future: 'github_issues', 'jira', …
+  issue_id         TEXT NOT NULL,         -- tracker-internal id (Linear node id)
+  issue_identifier TEXT NOT NULL,         -- human identifier (ENG-123)
+  issue_url        TEXT,
+  last_seen_state  TEXT,                  -- last tracker state we observed
+  last_synced_at   TEXT,                  -- ISO 8601 of last successful round-trip
+  created_at       TEXT NOT NULL,
+  FOREIGN KEY (workstream_id) REFERENCES workstreams(id)
+);
+CREATE INDEX idx_links_issue ON workstream_links(issue_id);
+CREATE TABLE linear_comments_posted (
+  decision_id   TEXT PRIMARY KEY,
+  workstream_id TEXT NOT NULL,
+  posted_at     TEXT NOT NULL
+);
+```
+
+**HTTP surface.** Four endpoints (`GET/PUT/DELETE /workstreams/:id/link`, `GET /links`) — see the table above.
+
+**`LinearCommentSyncer` ticker** (`daemon/src/linear-comment-syncer.ts`). Cadence 60 s (`tickIntervalMs`); disable with `DISPATCH_LINEAR_SYNC_ENABLED=0`.
+
+- *Forward (Dispatch → Linear):* for every linked workstream, scan the event log for `decision` events with `payload.confidence >= DISPATCH_LINEAR_COMMENT_MIN_CONFIDENCE` (default `0.8`). For each one not already in `linear_comments_posted`, render a deterministic Markdown body and call `addIssueComment`. On success, mark the decision id posted. `linear_comment_failed` errors are swallowed and retried next tick — the set is only updated on confirmed success, so retries can't double-post.
+- *Reverse (Linear → Dispatch):* `fetchIssueStatesByIds` across linked issues. When the new state differs from `last_seen_state` we apply the state map below — but **only** if the workstream's *current* Dispatch status equals what the previous Linear state mapped to, i.e. the human hasn't manually overridden. State map: `Done|Closed|Cancelled|Canceled→retired`, `In Progress→active`, `Backlog|Todo→backlog`, `On Hold|Paused→paused`, anything else → silent skip + log once. The CLI wires `onWorkstreamUpdated` so a flip appends a `workstream_updated` event with `payload.source: 'linear_sync'`.
+
+Reachability failures (`fetchIssueStatesByIds` rejects, individual `addIssueComment` fails) are logged + swallowed at tick-scope so a temporary Linear outage doesn't crash the daemon.
+
 ## Data model
 
 ### Workstream
@@ -250,7 +289,7 @@ Wire format served by `GET /workstreams` and `GET /workstreams/:id` (snake_case 
 workstream_id      : string (slug, e.g. "frontend-refactor")
 title              : string
 created_at         : ISO 8601 timestamp
-status             : active | paused | retired
+status             : backlog | active | paused | retired
 memory_path        : absolute path to ~/.claude/manager/memory/<workstream_id>.md
 sessions           : [session_id, ...]   # all Claude Code sessions that ran under this workstream
 current_subgoal    : string | null       # head of the goal stack, or null if none

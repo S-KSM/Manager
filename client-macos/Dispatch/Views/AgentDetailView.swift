@@ -25,6 +25,11 @@ struct AgentDetailView: View {
     /// Drives the Approve/Deny strip below the header.
     @State private var pendingApprovals: [Intervention] = []
 
+    /// v1.2 — current Linear-link state. nil = not linked. Refreshed on
+    /// every workstream change + after Link/Unlink operations.
+    @State private var linearLink: WorkstreamLink? = nil
+    @State private var showLinkSheet = false
+
     /// Live copy of the workstream record. Seeded from the parent's snapshot
     /// at view-task time; refreshed on every WS event arrival so daemon-side
     /// projections (todos, latest_activity) flow into the Plan section
@@ -106,6 +111,7 @@ struct AgentDetailView: View {
             liveWorkstream = workstream
             await reload()
             await refreshPendingApprovals()
+            await refreshLinearLink()
             // Then live-subscribe to new events for this workstream until
             // `.task(id:)` cancels us (workstream change or view disappear).
             // Cancellation propagates into the AsyncStream, which calls
@@ -123,6 +129,10 @@ struct AgentDetailView: View {
                 // Cheap to re-poll on every event; queue is single-digit
                 // rows and the request is local-loopback.
                 await refreshPendingApprovals()
+                // The Linear sync ticker mutates link rows server-side; pick
+                // up state changes (last_seen_state, last_synced_at) on the
+                // same WS-event cadence as the rest of the header.
+                await refreshLinearLink()
             }
             // If we get here, the stream ended (transport failure or
             // cancellation). Reconnect is a v1 deliverable.
@@ -146,6 +156,26 @@ struct AgentDetailView: View {
                 onDismiss: { promoteTarget = nil }
             )
         }
+        .sheet(isPresented: $showLinkSheet) {
+            LinkLinearSheet(
+                workstream: workstream,
+                client: client,
+                onLinked: { link in
+                    linearLink = link
+                    showLinkSheet = false
+                },
+                onCancel: { showLinkSheet = false }
+            )
+        }
+    }
+
+    private func refreshLinearLink() async {
+        linearLink = (try? await client.getWorkstreamLink(workstreamID: workstream.id)) ?? nil
+    }
+
+    private func unlink() async {
+        try? await client.unlinkWorkstream(workstreamID: workstream.id)
+        linearLink = nil
     }
 
     private var header: some View {
@@ -203,6 +233,12 @@ struct AgentDetailView: View {
                     .lineLimit(1)
                     .fixedSize()
             }
+            LinearChip(
+                link: linearLink,
+                onLink: { showLinkSheet = true },
+                onUnlink: { Task { await unlink() } }
+            )
+            .layoutPriority(0)
             Button {
                 showInterventionPanel = true
             } label: {
@@ -282,6 +318,67 @@ struct AgentDetailView: View {
             approved: approved
         )
         await refreshPendingApprovals()
+    }
+}
+
+// MARK: - v1.2 Linear chip
+
+/// Tracker-link chip rendered in the AgentDetail header. Two states:
+///
+/// - **Linked**: link icon + identifier + a Menu offering "Open in Linear"
+///   and "Unlink" actions. Truncates the identifier so a long custom prefix
+///   doesn't push the rest of the header off-screen.
+/// - **Unlinked**: a small "Link…" button that opens `LinkLinearSheet`.
+struct LinearChip: View {
+    let link: WorkstreamLink?
+    let onLink: () -> Void
+    let onUnlink: () -> Void
+
+    var body: some View {
+        if let link {
+            Menu {
+                if let urlString = link.issueURL,
+                   let url = URL(string: urlString) {
+                    Link(destination: url) {
+                        Label("Open in Linear", systemImage: "arrow.up.right.square")
+                    }
+                }
+                Divider()
+                Button(role: .destructive, action: onUnlink) {
+                    Label("Unlink", systemImage: "link.badge.plus")
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "link")
+                        .imageScale(.small)
+                    Text(link.issueIdentifier)
+                        .font(.caption.weight(.medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule().fill(Color.purple.opacity(0.15))
+                )
+                .overlay(
+                    Capsule().stroke(Color.purple.opacity(0.45), lineWidth: 1)
+                )
+                .foregroundStyle(.purple)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Linked to Linear issue \(link.issueIdentifier)")
+        } else {
+            Button(action: onLink) {
+                Label("Link…", systemImage: "link")
+                    .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Link this workstream to a Linear issue")
+        }
     }
 }
 

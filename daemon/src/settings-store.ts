@@ -26,6 +26,13 @@ export interface PersistedSettings {
    * from `GET /settings` — `serializeForWire()` redacts it to a boolean.
    */
   anthropicApiKey?: string;
+  /**
+   * Linear API key. Same redaction pattern as `anthropicApiKey` —
+   * write-only on the wire, in-process readable via
+   * `getResolvedLinearApiKey()` so the LinearTracker + LinkLinearSheet can
+   * authenticate without an env var.
+   */
+  linearApiKey?: string;
 }
 
 /**
@@ -38,6 +45,8 @@ export interface SettingsWire {
   headlineModel: string;
   ollamaUrl: string;
   anthropicApiKeyConfigured: boolean;
+  /** v1.2 — Linear key redaction. Same shape as anthropicApiKeyConfigured. */
+  linearApiKeyConfigured: boolean;
 }
 
 const DEFAULT_OLLAMA_URL = 'http://localhost:11434';
@@ -107,6 +116,19 @@ export class SettingsStore {
     return process.env['ANTHROPIC_API_KEY'] ?? undefined;
   }
 
+  /**
+   * Linear API key for the LinearTracker. Settings file > `DISPATCH_LINEAR_API_KEY`
+   * env var > undefined. The link sheet + comment syncer both go through
+   * this resolver so the user never has to re-enter the key.
+   */
+  getResolvedLinearApiKey(): string | undefined {
+    if (this.current.linearApiKey && this.current.linearApiKey.length > 0) {
+      return this.current.linearApiKey;
+    }
+    const env = process.env['DISPATCH_LINEAR_API_KEY'];
+    return env && env.length > 0 ? env : undefined;
+  }
+
   /** Wire shape with the API key redacted to a boolean. */
   serializeForWire(): SettingsWire {
     const provider = this.getResolvedProvider();
@@ -115,6 +137,7 @@ export class SettingsStore {
       headlineModel: this.getResolvedModel(provider),
       ollamaUrl: this.getResolvedOllamaUrl(),
       anthropicApiKeyConfigured: this.getResolvedAnthropicApiKey() !== undefined,
+      linearApiKeyConfigured: this.getResolvedLinearApiKey() !== undefined,
     };
   }
 
@@ -166,6 +189,12 @@ export class SettingsStore {
       if (v.length === 0) delete next.anthropicApiKey;
       else next.anthropicApiKey = v;
     }
+    if (input['linearApiKey'] !== undefined) {
+      const v = input['linearApiKey'];
+      if (typeof v !== 'string') throw new Error('linearApiKey must be a string');
+      if (v.length === 0) delete next.linearApiKey;
+      else next.linearApiKey = v;
+    }
 
     this.current = next;
     writeToDisk(this.path, next);
@@ -194,6 +223,12 @@ function readFromDisk(path: string): PersistedSettings {
       (obj['anthropicApiKey'] as string).length > 0
     ) {
       out.anthropicApiKey = obj['anthropicApiKey'] as string;
+    }
+    if (
+      typeof obj['linearApiKey'] === 'string' &&
+      (obj['linearApiKey'] as string).length > 0
+    ) {
+      out.linearApiKey = obj['linearApiKey'] as string;
     }
     return out;
   } catch {

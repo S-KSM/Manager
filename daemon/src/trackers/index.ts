@@ -62,6 +62,9 @@ export type TrackerErrorCode =
   | 'linear_graphql_errors'
   | 'linear_unknown_payload'
   | 'linear_missing_end_cursor'
+  | 'linear_unknown_identifier'
+  | 'linear_state_not_found'
+  | 'linear_comment_failed'
   | 'mock_source_missing'
   | 'mock_source_invalid';
 

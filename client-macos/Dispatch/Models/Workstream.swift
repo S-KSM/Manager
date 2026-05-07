@@ -10,9 +10,18 @@ import SwiftUI
 /// them when present and degrade gracefully when not.
 struct Workstream: Identifiable, Codable, Hashable, Sendable {
     enum Status: String, Codable, Sendable, CaseIterable {
+        case backlog
         case active
         case paused
         case retired
+
+        /// Forward-compat decode: an unknown status string from a newer
+        /// daemon decodes to `.active` instead of throwing, so the client
+        /// keeps working when the wire enum grows underneath it.
+        init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Status(rawValue: raw) ?? .active
+        }
     }
 
     let id: String                // workstream_id (slug)
@@ -151,6 +160,7 @@ struct Todo: Codable, Hashable, Identifiable, Sendable {
 extension Workstream {
     var statusColor: Color {
         switch status {
+        case .backlog: return .gray.opacity(0.7)
         case .active:  return .green
         case .paused:  return .yellow
         case .retired: return .gray
@@ -159,6 +169,7 @@ extension Workstream {
 
     var statusLabel: String {
         switch status {
+        case .backlog: return "Backlog"
         case .active:  return "Active"
         case .paused:  return "Paused"
         case .retired: return "Retired"

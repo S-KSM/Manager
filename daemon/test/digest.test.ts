@@ -181,6 +181,27 @@ describe('buildDigest', () => {
     expect(digest.since).toBe('2026-05-01T00:00:00.000Z');
   });
 
+  it('backlog workstream with no events does not count toward active bucket', async () => {
+    // Create a backlog workstream and an active one. Only the active one
+    // emits an event in-window, so totals.active should be 1 (not 2). The
+    // backlog workstream has no activity yet.
+    registry.create('act', 'Active', 'active');
+    registry.create('bk', 'Backlog', 'backlog');
+    await eventStore.appendEvent(
+      'act',
+      ev('act', 'tool_use', {
+        ts: new Date(Date.now() - 1000).toISOString(),
+        session_id: 's1',
+        id: 't1',
+        payload: {},
+      }),
+    );
+    const digest = await buildDigest({ registry, eventStore }, new Date(Date.now() - 60_000));
+    expect(digest.totals.active).toBe(1);
+    expect(digest.buckets.active).toEqual(['act']);
+    expect(digest.buckets.active).not.toContain('bk');
+  });
+
   it('pending approval_required intervention counts toward needs_attention but not blocked', async () => {
     registry.create('a', 'A');
     interventionQueue.enqueue('a', 'approval_required', {

@@ -4,6 +4,34 @@ Versions are anchored on the macOS app's `CFBundleShortVersionString` (the Info.
 
 ---
 
+## v1.2 — 2026-05-07 — Kanban board + Linear-link UI
+
+(Note: v1.2 ships *after* v1.4.5 calendar-wise — the v1.2 milestone is the Kanban + Linear-link UI roadmap entry from `TODO.md`, originally deferred while v1.4 autonomous-mode work landed first. Daemon and macOS app stay on `MARKETING_VERSION = 1.4.5`; v1.2 here refers to the milestone, not the binary version.)
+
+### New features
+
+- **4-column Kanban board** — `HomeView` swaps the v1.1 `LazyVGrid` team-floor for a `KanbanBoardView` with Backlog / Active / Paused / Retired columns. Cards are `.draggable(WorkstreamDragPayload)`; columns `.dropDestination` call `PATCH /workstreams/:id` with the new status. Active column auto-folds into a "Pod-grouped" disclosure when it holds more than 12 cards (`shouldGroupPod` boundary). Digest filter dims non-matching cards in place rather than reflowing columns.
+- **Linear-link UI** — every workstream can now be linked to a Linear issue from the agent-detail header. New SQLite table `workstream_links` (FK to `workstreams(id)`) + 4 endpoints: `GET/PUT/DELETE /workstreams/:id/link` and `GET /links`. Linking resolves the identifier via `LinearTracker.fetchIssueByIdentifier`. `LinearChip` renders linked (link icon + identifier + Open-in-Linear / Unlink menu) vs unlinked (a "Link…" button opening `LinkLinearSheet`). Settings → Providers gains a `linearApiKey` SecureField with the same redaction as the Anthropic key.
+- **Bidirectional Linear sync ticker** — `LinearCommentSyncer` runs every 60s while a Linear key is configured. Forward: `decision` events with `payload.confidence ≥ DISPATCH_LINEAR_COMMENT_MIN_CONFIDENCE` (default 0.8) post a deterministic Markdown comment via `addIssueComment`, deduped via `linear_comments_posted`. Reverse: `fetchIssueStatesByIds` flips the workstream's status when Linear's state changes, *only* if the user hasn't manually overridden it (state map: `Done|Closed|Cancelled→retired`, `In Progress→active`, `Backlog|Todo→backlog`, `On Hold|Paused→paused`, anything else → silent skip + log once). Disable via `DISPATCH_LINEAR_SYNC_ENABLED=0`.
+
+### Wire schema additions (additive, backwards compatible)
+
+- `Workstream.status` enum gains `'backlog'`. macOS Codable falls back to `.active` for unknown future values.
+- `GET /settings` returns `linearApiKeyConfigured: boolean`. `PATCH /settings` accepts `linearApiKey: string` (empty string clears, omit to leave untouched).
+- `GET /workstreams/:id/link` → `WorkstreamLink | null`. `PUT /workstreams/:id/link` body `{tracker_kind: 'linear', issue_identifier: string}`. `DELETE /workstreams/:id/link` is idempotent. `GET /links` lists every persisted link.
+- New `TrackerErrorCode` values: `linear_unknown_identifier`, `linear_state_not_found`, `linear_comment_failed`.
+
+### Tests
+
+- 247/247 daemon tests pass (29 new — workstream-links-store + LinearCommentSyncer + extended LinearTracker mutations + link HTTP endpoints + backlog status digest assertion).
+- 66/66 macOS tests pass (KanbanLogicTests + WorkstreamCodableTests + WorkstreamLinkCodableTests + 4 link-flow MockDaemonClient tests + the existing 48 pre-v1.2 cases).
+
+### Migration
+
+None. New `workstream_links` + `linear_comments_posted` tables are created on first boot; existing daemons keep working with no link rows. Per-workstream status is unchanged for everything that isn't currently `'backlog'`.
+
+---
+
 ## v1.4.5 — 2026-05-06 — UX feedback wave + Provider settings + Sleeping Robot
 
 First release driven entirely by user feedback on the v1.4 build (`Feedback.md`). No architectural changes; v1.5 (auth for remote/mobile) is still next on the roadmap.

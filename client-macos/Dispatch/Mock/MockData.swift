@@ -113,6 +113,36 @@ enum MockData {
             latestActivity: nil,
             lastEventAt: daysAgo(1),
             liveSession: false
+        ),
+        // Two backlog demo workstreams so the kanban Backlog column has data
+        // out of the box (shipped in v1.2 alongside the kanban swap).
+        Workstream(
+            id: "billing-redesign",
+            title: "Billing surface redesign (Q3)",
+            createdAt: daysAgo(1),
+            status: .backlog,
+            sessions: [],
+            currentSubgoal: nil,
+            latestConfidence: nil,
+            needsAttention: false,
+            todos: nil,
+            latestActivity: nil,
+            lastEventAt: nil,
+            liveSession: false
+        ),
+        Workstream(
+            id: "docs-migrate",
+            title: "Docs site → MDX migration",
+            createdAt: hoursAgo(20),
+            status: .backlog,
+            sessions: [],
+            currentSubgoal: nil,
+            latestConfidence: nil,
+            needsAttention: false,
+            todos: nil,
+            latestActivity: nil,
+            lastEventAt: nil,
+            liveSession: false
         )
     ]
 

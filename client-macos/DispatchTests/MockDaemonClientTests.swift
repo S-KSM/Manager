@@ -112,6 +112,24 @@ final class MockDaemonClientTests: XCTestCase {
         XCTAssertEqual(renamed.status, .paused)
     }
 
+    func testUpdateWorkstreamToBacklog() async throws {
+        // Kanban drag-from-Active-into-Backlog round-trips. Mock mirrors the
+        // daemon's `PATCH /workstreams/:id` shape, so verifying the mock is
+        // good proof that the wiring works end-to-end on the client side.
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let updated = try await client.updateWorkstream(
+            id: "frontend-refactor",
+            status: .backlog,
+            title: nil
+        )
+        XCTAssertEqual(updated.status, .backlog)
+        XCTAssertEqual(updated.id, "frontend-refactor")
+
+        let list = try await client.listWorkstreams()
+        let observed = try XCTUnwrap(list.first { $0.id == "frontend-refactor" })
+        XCTAssertEqual(observed.status, .backlog)
+    }
+
     func testUpdateUnknownWorkstreamThrows() async {
         let client = MockDaemonClient(simulatedLatency: .zero)
         do {
@@ -354,6 +372,57 @@ final class MockDaemonClientTests: XCTestCase {
         XCTAssertEqual(report.audienceFreetext, "Series A investors")
         XCTAssertTrue(report.bodyMD.contains("Series A investors"),
                       "synthesizer should weave the freetext into the body")
+    }
+
+    // MARK: - v1.2: Linear-link UI
+
+    func testGetWorkstreamLinkIsNilWhenUnlinked() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let got = try await client.getWorkstreamLink(workstreamID: "frontend-refactor")
+        XCTAssertNil(got)
+    }
+
+    func testLinkWorkstreamThenGetReturnsTheLink() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let created = try await client.linkWorkstream(
+            workstreamID: "frontend-refactor",
+            trackerKind: "linear",
+            issueIdentifier: "ENG-7"
+        )
+        XCTAssertEqual(created.workstreamID, "frontend-refactor")
+        XCTAssertEqual(created.issueIdentifier, "ENG-7")
+        XCTAssertEqual(created.issueID, "lin_ENG-7")
+        XCTAssertEqual(created.lastSeenState, "In Progress")
+
+        let fetched = try await client.getWorkstreamLink(workstreamID: "frontend-refactor")
+        XCTAssertNotNil(fetched)
+        XCTAssertEqual(fetched?.issueIdentifier, "ENG-7")
+    }
+
+    func testUnlinkWorkstreamRemovesIt() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        _ = try await client.linkWorkstream(
+            workstreamID: "frontend-refactor",
+            trackerKind: "linear",
+            issueIdentifier: "ENG-7"
+        )
+        try await client.unlinkWorkstream(workstreamID: "frontend-refactor")
+        let after = try await client.getWorkstreamLink(workstreamID: "frontend-refactor")
+        XCTAssertNil(after)
+    }
+
+    func testLinkWorkstreamUnknownIdentifierThrows() async {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        do {
+            _ = try await client.linkWorkstream(
+                workstreamID: "frontend-refactor",
+                trackerKind: "linear",
+                issueIdentifier: "ENG-404"
+            )
+            XCTFail("expected throw on unknown identifier")
+        } catch {
+            // ok
+        }
     }
 
     func testPostInterventionStoresAndReturnsRecord() async throws {

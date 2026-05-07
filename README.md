@@ -95,6 +95,13 @@ Dry-run (claim/release decisions logged but no agent spawn): add `--dry-run`. Wa
 
 When an autonomous agent needs human authorization for a destructive action, an `approval_required` intervention surfaces as an Approve / Deny strip in the agent detail view. Approving emits an `intervention_delivered` event with `approved: true` so the agent's next turn knows it was cleared.
 
+## v1.2 highlights
+
+- **Kanban board.** The Radar's home view is now a 4-column kanban (Backlog / Active / Paused / Retired). Drag a card between columns to flip its status server-side. The Active column auto-folds into a "Pod-grouped" disclosure when it goes over 12 cards so the floor stays scannable.
+- **Linear-link UI.** Open any agent and use the **Link…** chip in the header to attach a Linear issue (`ENG-123`-style identifier). Once linked, high-confidence decisions auto-post as Markdown comments on the Linear issue, and Linear-side state moves (Done, In Progress, On Hold, …) flow back into the workstream's Dispatch status — provided you haven't manually overridden it. Disable the sync ticker via `DISPATCH_LINEAR_SYNC_ENABLED=0`.
+
+To set this up, open **Dispatch → Settings → Providers → Linear API key** and paste a Linear API key. The same redacted-on-the-wire pattern as the Anthropic key applies — the key is stored in `~/.claude/dispatch/settings.json` (mode `0600`) and `GET /settings` only returns `linearApiKeyConfigured: true`.
+
 ## The Dispatch lexicon
 
 | Capability | Dispatch term | What it is |

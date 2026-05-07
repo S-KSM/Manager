@@ -549,10 +549,20 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         headlineProvider: .ollama,
         headlineModel: "qwen3:4b",
         ollamaURL: "http://localhost:11434",
-        anthropicAPIKeyConfigured: false
+        anthropicAPIKeyConfigured: false,
+        linearAPIKeyConfigured: false
     )
     /// Captured cleartext key for tests; never returned via the protocol.
     private var _settingsAnthropicKey: String?
+    private var _settingsLinearKey: String?
+    /// In-memory mirror of `workstream_links`. Test-only inspection via
+    /// `linksSnapshot`.
+    private var _links: [String: WorkstreamLink] = [:]
+    var linksSnapshot: [String: WorkstreamLink] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _links
+    }
 
     var settingsSnapshot: ProviderSettings {
         lock.lock()
@@ -584,7 +594,57 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
                 _settings.anthropicAPIKeyConfigured = true
             }
         }
+        if let key = patch.linearAPIKey {
+            if key.isEmpty {
+                _settingsLinearKey = nil
+                _settings.linearAPIKeyConfigured = false
+            } else {
+                _settingsLinearKey = key
+                _settings.linearAPIKeyConfigured = true
+            }
+        }
         return _settings
+    }
+
+    // MARK: - v1.2: Linear-link UI
+
+    func getWorkstreamLink(workstreamID: String) async throws -> WorkstreamLink? {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        defer { lock.unlock() }
+        return _links[workstreamID]
+    }
+
+    func linkWorkstream(workstreamID: String,
+                        trackerKind: String,
+                        issueIdentifier: String) async throws -> WorkstreamLink {
+        try? await Task.sleep(for: simulatedLatency)
+        // Simulate the daemon's identifier-resolution failure mode so views
+        // can exercise the "not found" branch under the mock.
+        if issueIdentifier == "ENG-404" {
+            throw DaemonError.badResponse(400)
+        }
+        lock.lock()
+        defer { lock.unlock() }
+        let link = WorkstreamLink(
+            workstreamID: workstreamID,
+            trackerKind: trackerKind,
+            issueID: "lin_\(issueIdentifier)",
+            issueIdentifier: issueIdentifier,
+            issueURL: "https://linear.app/x/issue/\(issueIdentifier)",
+            lastSeenState: "In Progress",
+            lastSyncedAt: nil,
+            createdAt: Date()
+        )
+        _links[workstreamID] = link
+        return link
+    }
+
+    func unlinkWorkstream(workstreamID: String) async throws {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        defer { lock.unlock() }
+        _links.removeValue(forKey: workstreamID)
     }
 
     func listSchedulerJobs() async throws -> [SchedulerJob] {

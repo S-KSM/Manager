@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 import Database, { type Database as DatabaseType } from 'better-sqlite3';
 import { getConfig } from './config.js';
 
-export type WorkstreamStatus = 'active' | 'paused' | 'retired';
+export type WorkstreamStatus = 'backlog' | 'active' | 'paused' | 'retired';
 
 export interface Workstream {
   id: string;

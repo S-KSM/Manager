@@ -118,6 +118,24 @@ protocol DaemonClientProtocol: Sendable {
     /// (same as GET).
     func patchSettings(_ patch: ProviderSettingsPatch) async throws -> ProviderSettings
 
+    // MARK: - v1.2: Linear-link UI
+
+    /// `GET /workstreams/:id/link` — current link for the workstream, or
+    /// `nil` when no link exists. Powers the `LinearChip`'s linked vs
+    /// unlinked state.
+    func getWorkstreamLink(workstreamID: String) async throws -> WorkstreamLink?
+
+    /// `PUT /workstreams/:id/link` — resolve a tracker identifier (e.g.
+    /// `ENG-123`) to an issue and persist the link. Throws on 503 (no
+    /// Linear key), 400 (unknown identifier), 404 (unknown workstream).
+    func linkWorkstream(workstreamID: String,
+                        trackerKind: String,
+                        issueIdentifier: String) async throws -> WorkstreamLink
+
+    /// `DELETE /workstreams/:id/link` — idempotent unlink. The daemon
+    /// returns 200 even when no prior link existed.
+    func unlinkWorkstream(workstreamID: String) async throws
+
     /// Returns `false` on connection error; never throws. Used by
     /// `DaemonResolver` to choose live vs mock at startup.
     func health() async -> Bool
@@ -139,12 +157,42 @@ struct ProviderSettings: Codable, Equatable, Sendable {
     var headlineModel: String
     var ollamaURL: String
     var anthropicAPIKeyConfigured: Bool
+    /// v1.2 — true when the daemon has a Linear key on file (settings
+    /// file or DISPATCH_LINEAR_API_KEY env). Drives the Providers tab
+    /// "Linear API key" section's "configured" hint.
+    var linearAPIKeyConfigured: Bool = false
 
     enum CodingKeys: String, CodingKey {
         case headlineProvider
         case headlineModel
         case ollamaURL = "ollamaUrl"
         case anthropicAPIKeyConfigured = "anthropicApiKeyConfigured"
+        case linearAPIKeyConfigured = "linearApiKeyConfigured"
+    }
+
+    init(
+        headlineProvider: Provider,
+        headlineModel: String,
+        ollamaURL: String,
+        anthropicAPIKeyConfigured: Bool,
+        linearAPIKeyConfigured: Bool = false
+    ) {
+        self.headlineProvider = headlineProvider
+        self.headlineModel = headlineModel
+        self.ollamaURL = ollamaURL
+        self.anthropicAPIKeyConfigured = anthropicAPIKeyConfigured
+        self.linearAPIKeyConfigured = linearAPIKeyConfigured
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.headlineProvider = try c.decode(Provider.self, forKey: .headlineProvider)
+        self.headlineModel = try c.decode(String.self, forKey: .headlineModel)
+        self.ollamaURL = try c.decode(String.self, forKey: .ollamaURL)
+        self.anthropicAPIKeyConfigured = try c.decode(Bool.self, forKey: .anthropicAPIKeyConfigured)
+        // Older daemons predating the linear key field default to false.
+        self.linearAPIKeyConfigured =
+            try c.decodeIfPresent(Bool.self, forKey: .linearAPIKeyConfigured) ?? false
     }
 }
 
@@ -155,12 +203,16 @@ struct ProviderSettingsPatch: Codable, Equatable, Sendable {
     var headlineModel: String?
     var ollamaURL: String?
     var anthropicAPIKey: String?
+    /// v1.2 — same redaction pattern as `anthropicAPIKey`. Empty string
+    /// clears the stored value; `nil` leaves it untouched.
+    var linearAPIKey: String?
 
     enum CodingKeys: String, CodingKey {
         case headlineProvider
         case headlineModel
         case ollamaURL = "ollamaUrl"
         case anthropicAPIKey = "anthropicApiKey"
+        case linearAPIKey = "linearApiKey"
     }
 }
 
@@ -489,6 +541,60 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         try await sendJSON(method: "PATCH", path: "settings", body: patch)
     }
 
+    // MARK: - v1.2: Linear-link UI
+
+    func getWorkstreamLink(workstreamID: String) async throws -> WorkstreamLink? {
+        let url = baseURL.appendingPathComponent("workstreams/\(workstreamID)/link")
+        do {
+            let (data, response) = try await session.data(from: url)
+            try Self.assertOK(response)
+            // Empty body or `null` → no link.
+            if data.isEmpty {
+                return nil
+            }
+            // The daemon writes `null` as the JSON body when no link exists.
+            if let s = String(data: data, encoding: .utf8),
+               s.trimmingCharacters(in: .whitespacesAndNewlines) == "null" {
+                return nil
+            }
+            do {
+                return try decoder.decode(WorkstreamLink.self, from: data)
+            } catch {
+                throw DaemonError.decoding(error)
+            }
+        } catch let e as DaemonError {
+            throw e
+        } catch {
+            throw DaemonError.transport(error)
+        }
+    }
+
+    func linkWorkstream(workstreamID: String,
+                        trackerKind: String,
+                        issueIdentifier: String) async throws -> WorkstreamLink {
+        let body = LinkWorkstreamBody(trackerKind: trackerKind, issueIdentifier: issueIdentifier)
+        return try await sendJSON(
+            method: "PUT",
+            path: "workstreams/\(workstreamID)/link",
+            body: body
+        )
+    }
+
+    func unlinkWorkstream(workstreamID: String) async throws {
+        let url = baseURL.appendingPathComponent("workstreams/\(workstreamID)/link")
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        do {
+            let (_, response) = try await session.data(for: req)
+            try Self.assertOK(response)
+        } catch let e as DaemonError {
+            throw e
+        } catch {
+            throw DaemonError.transport(error)
+        }
+    }
+
     func streamEvents(workstreamID: String) -> AsyncStream<Event> {
         // Build a ws:// URL alongside the http base.
         var components = URLComponents(url: baseURL,
@@ -652,6 +758,17 @@ private struct AppendSkillResponse: Decodable {
 
 /// Empty JSON body (`{}`) used for promote/dismiss POSTs that take no params.
 private struct EmptyBody: Encodable {}
+
+/// Wire shape for `PUT /workstreams/:id/link`.
+private struct LinkWorkstreamBody: Encodable {
+    let trackerKind: String
+    let issueIdentifier: String
+
+    enum CodingKeys: String, CodingKey {
+        case trackerKind = "tracker_kind"
+        case issueIdentifier = "issue_identifier"
+    }
+}
 
 /// Wrapper that decodes an `Event` if possible and stores `nil` otherwise.
 /// Used when the daemon returns an array of events: a single bad row
