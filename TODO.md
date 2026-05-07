@@ -9,9 +9,9 @@ Conventions: `[x]` shipped, `[~]` in progress, `[ ]` pending, `[-]` deferred. Ea
 ## v1.2 — Code-layer Dispatch rename + Kanban + Linear
 
 - [x] Code-layer rename Manager → Dispatch (daemon binary, env vars, state dir, launchd label, Xcode project, bundle id, custom logo, Swift module name workaround for system libdispatch).
-- [ ] **Kanban board** — replace team-floor grid with 4 columns (Backlog / Active / Paused / Retired) + drag-and-drop status changes. Pod auto-grouping moves into the Active column when card count exceeds threshold.
-- [ ] **Linear.app integration** — `workstream_links` SQLite table + GraphQL client. Link a workstream to a Linear issue from the agent-detail header. Status changes flow Linear ↔ Dispatch; high-confidence decisions optionally land as comments.
-  - Note: this work folds into v1.4.3 (Linear adapter for the orchestrator). Ship the link surface first; reuse the GraphQL client for v1.4.
+- [x] **Kanban board** — 4-column `KanbanBoardView` (Backlog / Active / Paused / Retired) with `.draggable(WorkstreamDragPayload)` cards + `.dropDestination` PATCH calls. Pod auto-grouping kicks in on the Active column above 12 cards (`shouldGroupPod`). The old `LazyVGrid`-based `TeamFloorView` is removed entirely. Digest filter dims non-matching cards in place rather than reflowing columns.
+- [x] **Linear.app integration** — `workstream_links` SQLite table + 4 HTTP endpoints (GET/PUT/DELETE `/workstreams/:id/link`, GET `/links`); macOS `LinearChip` in the agent-detail header opens `LinkLinearSheet` when unlinked, surfaces Open-in-Linear / Unlink when linked. Settings → Providers gains a `linearApiKey` SecureField. Bidirectional sync ticker `LinearCommentSyncer` posts high-confidence decisions as Markdown comments (forward) and reflects Linear state transitions back into Dispatch status (reverse, with user-override respect).
+  - Fulfills the v1.4.3 deferred item *"workstream_links SQLite table — folds in when v1.2 Link UI ships"*. The orchestrator still uses sanitized identifier as workstream id directly; the link table is for the manual link UI + sync ticker.
 
 ---
 

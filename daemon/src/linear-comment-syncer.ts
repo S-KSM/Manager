@@ -121,7 +121,9 @@ export class LinearCommentSyncer {
     this.tickIntervalMs = opts.tickIntervalMs ?? DEFAULT_INTERVAL_MS;
     this.minConfidence = opts.minConfidence ?? readMinConfidence();
     this.isEnabled = opts.isEnabled ?? defaultIsEnabled;
-    this.log = opts.log ?? ((m, c) => process.stderr.write(`[dispatch] ${m}${c ? ' ' + JSON.stringify(c) : ''}\n`));
+    this.log =
+      opts.log ??
+      ((m, c) => process.stderr.write(`[dispatch] ${m}${c ? ` ${JSON.stringify(c)}` : ''}\n`));
   }
 
   start(): void {
@@ -183,8 +185,9 @@ export class LinearCommentSyncer {
     if (link.last_seen_state === newState) return;
     const prevStatus = this.registry.get(link.workstream_id)?.status;
     if (!prevStatus) return;
-    const prevMappedFromLinear =
-      link.last_seen_state ? linearStateToDispatchStatus(link.last_seen_state) : null;
+    const prevMappedFromLinear = link.last_seen_state
+      ? linearStateToDispatchStatus(link.last_seen_state)
+      : null;
     const nextMappedFromLinear = linearStateToDispatchStatus(newState);
     if (nextMappedFromLinear === null) {
       const key = `${link.workstream_id}::${newState}`;
@@ -255,21 +258,17 @@ export class LinearCommentSyncer {
 }
 
 function defaultIsEnabled(): boolean {
-  return process.env['DISPATCH_LINEAR_SYNC_ENABLED'] !== '0';
+  return process.env.DISPATCH_LINEAR_SYNC_ENABLED !== '0';
 }
 
 function readMinConfidence(): number {
-  const raw = process.env['DISPATCH_LINEAR_COMMENT_MIN_CONFIDENCE'];
+  const raw = process.env.DISPATCH_LINEAR_COMMENT_MIN_CONFIDENCE;
   if (raw === undefined || raw === '') return DEFAULT_MIN_CONFIDENCE;
   const n = Number.parseFloat(raw);
   return Number.isFinite(n) ? n : DEFAULT_MIN_CONFIDENCE;
 }
 
-function renderCommentBody(
-  ev: ManagerEvent,
-  link: WorkstreamLink,
-  confidence: number,
-): string {
+function renderCommentBody(ev: ManagerEvent, link: WorkstreamLink, confidence: number): string {
   const payload = (ev.payload ?? {}) as { choice?: unknown; rationale?: unknown };
   const choice = typeof payload.choice === 'string' ? payload.choice : '(no choice recorded)';
   const rationale = typeof payload.rationale === 'string' ? payload.rationale : '';
