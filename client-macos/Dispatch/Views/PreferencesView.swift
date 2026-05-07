@@ -1,10 +1,14 @@
 import SwiftUI
 
-/// Cmd-, Settings window. Two tabs:
+/// Cmd-, Settings window. Three tabs:
 ///   - Daemon: live/mock status + bundled daemon hint.
 ///   - Providers: pick the LLM that powers activity headlines + sub-goal
 ///     synthesis (the "summary" features), and stash an Anthropic API key /
 ///     Ollama URL without touching env vars.
+///   - Diagnostics (v1.4.6): kill / restart the local LLM and soft- /
+///     hard-restart the daemon. Lives next to the launchctl plumbing
+///     because that's the only place those buttons can survive a daemon
+///     dying mid-response.
 struct PreferencesView: View {
     let client: DaemonClientProtocol
 
@@ -14,8 +18,10 @@ struct PreferencesView: View {
                 .tabItem { Label("Daemon", systemImage: "gearshape") }
             ProvidersSettings(client: client)
                 .tabItem { Label("Providers", systemImage: "cpu") }
+            DiagnosticsSettings(client: client)
+                .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
         }
-        .frame(width: 560, height: 420)
+        .frame(width: 560, height: 460)
     }
 }
 
@@ -94,6 +100,10 @@ private struct ProvidersSettings: View {
     @State private var anthropicConfigured = false
     @State private var linearAPIKey: String = ""
     @State private var linearConfigured = false
+    /// v1.4.6 — `localLLMStartCommand` is cleartext on the wire (not a
+    /// credential). The Diagnostics tab's Restart-Model button stays
+    /// disabled when this is empty.
+    @State private var localLLMStartCommand: String = ""
 
     @State private var saving = false
     @State private var saveError: String?
@@ -122,6 +132,12 @@ private struct ProvidersSettings: View {
                               prompt: Text("http://localhost:8080/v1"))
                         .textFieldStyle(.roundedBorder)
                         .help("Base URL for your OpenAI-compatible local LLM server. Defaults to mlx_lm.server (port 8080); for Ollama, use http://localhost:11434.")
+
+                    TextField("Local LLM start command",
+                              text: $localLLMStartCommand,
+                              prompt: Text("mlx_lm.server --port 8080"))
+                        .textFieldStyle(.roundedBorder)
+                        .help("Shell command the Diagnostics tab's Restart-Model button runs after killing the existing process. Optional; leave blank to disable that button.")
                 }
             }
 
@@ -201,6 +217,7 @@ private struct ProvidersSettings: View {
             ollamaURL = s.ollamaURL
             anthropicConfigured = s.anthropicAPIKeyConfigured
             linearConfigured = s.linearAPIKeyConfigured
+            localLLMStartCommand = s.localLLMStartCommand
             anthropicAPIKey = ""
             linearAPIKey = ""
             loaded = true
@@ -228,6 +245,9 @@ private struct ProvidersSettings: View {
         if !linearAPIKey.isEmpty {
             patch.linearAPIKey = linearAPIKey
         }
+        // localLLMStartCommand is cleartext: always send the current value
+        // (including empty, which the daemon treats as "clear").
+        patch.localLLMStartCommand = localLLMStartCommand
         do {
             let s = try await client.patchSettings(patch)
             provider = s.headlineProvider
@@ -235,6 +255,7 @@ private struct ProvidersSettings: View {
             ollamaURL = s.ollamaURL
             anthropicConfigured = s.anthropicAPIKeyConfigured
             linearConfigured = s.linearAPIKeyConfigured
+            localLLMStartCommand = s.localLLMStartCommand
             anthropicAPIKey = ""
             linearAPIKey = ""
             saveError = nil
@@ -331,8 +352,183 @@ private struct ProvidersSettings: View {
     }
 }
 
+/// v1.4.6 — Diagnostics tab. Four buttons:
+///   1. Kill Local LLM        — `POST /admin/llm/kill`
+///   2. Restart Local LLM     — `POST /admin/llm/restart`
+///                              (disabled until a start command is set)
+///   3. Restart Daemon — Soft — `POST /admin/restart` (re-reads settings,
+///                              reboots tickers, no process exit)
+///   4. Restart Daemon — Hard — `launchctl kickstart -k` via
+///                              `LaunchctlController` (the daemon would
+///                              die mid-response if this were a daemon
+///                              endpoint).
+///
+/// Destructive actions (Kill, Hard Restart) confirm via
+/// `confirmationDialog`; non-destructive ones don't. Each button shows its
+/// last result inline so the user knows whether the click landed.
+private struct DiagnosticsSettings: View {
+    let client: DaemonClientProtocol
+
+    @State private var startCommand: String = ""
+    @State private var loadedStartCommand = false
+
+    @State private var killResultText: String?
+    @State private var restartLLMResultText: String?
+    @State private var restartSoftResultText: String?
+    @State private var restartHardResultText: String?
+
+    @State private var killing = false
+    @State private var restartingLLM = false
+    @State private var restartingSoft = false
+
+    @State private var confirmKill = false
+    @State private var confirmHard = false
+
+    var body: some View {
+        Form {
+            Section("Local LLM") {
+                Button("Kill Local LLM") { confirmKill = true }
+                    .disabled(killing)
+                    .help("Find the PID listening on the configured local LLM port and SIGTERM it (with a 3-second grace period before SIGKILL).")
+                if let text = killResultText {
+                    Text(text)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+
+                Button("Restart Local LLM") { Task { await restartLLM() } }
+                    .disabled(restartingLLM || startCommand.isEmpty || !loadedStartCommand)
+                    .help(
+                        startCommand.isEmpty
+                            ? "Set a start command first (Providers tab → Local LLM start command)."
+                            : "Kill the existing process, then run the start command via bash -lc detached."
+                    )
+                if let text = restartLLMResultText {
+                    Text(text)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+            }
+
+            Section("Daemon") {
+                Button("Restart Daemon — Soft") { Task { await restartSoft() } }
+                    .disabled(restartingSoft)
+                    .help("Re-read settings.json and re-instantiate the background tickers (Headliner / SubgoalSynthesizer / LinearCommentSyncer). The daemon process keeps running.")
+                if let text = restartSoftResultText {
+                    Text(text)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+
+                Button("Restart Daemon — Hard") { confirmHard = true }
+                    .help("Run launchctl kickstart -k. Daemon process exits and launchd brings it back. The Radar reconnects automatically.")
+                if let text = restartHardResultText {
+                    Text(text)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+            }
+        }
+        .padding(20)
+        .task {
+            // Pull the configured start command so we can disable the
+            // Restart-Model button without a roundtrip on every render.
+            if let s = try? await client.getSettings() {
+                startCommand = s.localLLMStartCommand
+            }
+            loadedStartCommand = true
+        }
+        .confirmationDialog(
+            "Kill the local LLM?",
+            isPresented: $confirmKill,
+            titleVisibility: .visible
+        ) {
+            Button("Kill", role: .destructive) { Task { await killLLM() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Sends SIGTERM, escalates to SIGKILL after 3s if it doesn't exit.")
+        }
+        .confirmationDialog(
+            "Hard-restart the daemon?",
+            isPresented: $confirmHard,
+            titleVisibility: .visible
+        ) {
+            Button("Restart", role: .destructive) { hardRestart() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Runs `launchctl kickstart -k`. The daemon exits and launchd respawns it. Existing connections drop.")
+        }
+    }
+
+    private func killLLM() async {
+        killing = true
+        defer { killing = false }
+        do {
+            let result = try await client.killLLM()
+            if let pid = result.killed {
+                let suffix = result.escalated ? " (SIGKILL after grace period)" : ""
+                killResultText = "Killed PID \(pid)\(suffix)."
+            } else {
+                killResultText = "Nothing was running on the configured port."
+            }
+        } catch {
+            killResultText = "Kill failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func restartLLM() async {
+        restartingLLM = true
+        defer { restartingLLM = false }
+        do {
+            let result = try await client.restartLLM()
+            let killedNote: String
+            if let pid = result.killedPID {
+                killedNote = "killed PID \(pid), "
+            } else {
+                killedNote = ""
+            }
+            restartLLMResultText = "Local LLM restarted (\(killedNote)started=\(result.started))."
+        } catch {
+            restartLLMResultText = "Restart failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func restartSoft() async {
+        restartingSoft = true
+        defer { restartingSoft = false }
+        do {
+            let result = try await client.restartDaemon()
+            if result.restarted.isEmpty {
+                restartSoftResultText = "No tickers were running to restart."
+            } else {
+                restartSoftResultText = "Restarted: \(result.restarted.joined(separator: ", "))."
+            }
+        } catch {
+            restartSoftResultText = "Soft restart failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func hardRestart() {
+        switch LaunchctlController.kickstart() {
+        case .success:
+            restartHardResultText = "Daemon restart triggered. The Radar will reconnect on the next /health probe."
+        case .failure(let error):
+            restartHardResultText = "Hard restart failed: \(error.localizedDescription)"
+        }
+    }
+}
+
 #if DEBUG
 #Preview("Providers — Ollama default") {
+    PreferencesView(client: MockDaemonClient(simulatedLatency: .zero))
+        .environmentObject(DaemonResolver())
+}
+
+#Preview("Diagnostics tab") {
     PreferencesView(client: MockDaemonClient(simulatedLatency: .zero))
         .environmentObject(DaemonResolver())
 }
