@@ -38,6 +38,16 @@ export interface PersistedSettings {
    * authenticate without an env var.
    */
   linearApiKey?: string;
+  /**
+   * v1.4.6 — shell command the Diagnostics tab's "Restart Local LLM"
+   * button runs after killing the existing process. Cleartext on the wire
+   * (the value is a user-facing command, not a credential). Empty string
+   * means "no start command configured" — the restart endpoint then 400s
+   * with `code: 'no_start_command'` so the UI can surface a helpful hint.
+   *
+   * Example: `mlx_lm.server --port 8080 --model mlx-community/Qwen3-4B-MLX`.
+   */
+  localLLMStartCommand?: string;
 }
 
 /**
@@ -52,6 +62,12 @@ export interface SettingsWire {
   anthropicApiKeyConfigured: boolean;
   /** v1.2 — Linear key redaction. Same shape as anthropicApiKeyConfigured. */
   linearApiKeyConfigured: boolean;
+  /**
+   * v1.4.6 — current localLLMStartCommand cleartext (or empty string when
+   * unset). Not redacted: the value is a shell command, not a credential.
+   * Diagnostics tab disables Restart-Model when this is empty.
+   */
+  localLLMStartCommand: string;
 }
 
 const DEFAULT_LOCAL_LLM_URL = 'http://localhost:8080/v1';
@@ -142,6 +158,15 @@ export class SettingsStore {
     return env && env.length > 0 ? env : undefined;
   }
 
+  /**
+   * v1.4.6 — local-LLM start command for the Diagnostics tab. Empty string
+   * when unset; the restart endpoint relies on `''` to mean "missing" so the
+   * UI can render "Set a start command first" tooltip.
+   */
+  getLocalLLMStartCommand(): string {
+    return this.current.localLLMStartCommand ?? '';
+  }
+
   /** Wire shape with the API key redacted to a boolean. */
   serializeForWire(): SettingsWire {
     const provider = this.getResolvedProvider();
@@ -151,6 +176,7 @@ export class SettingsStore {
       ollamaUrl: this.getResolvedOllamaUrl(),
       anthropicApiKeyConfigured: this.getResolvedAnthropicApiKey() !== undefined,
       linearApiKeyConfigured: this.getResolvedLinearApiKey() !== undefined,
+      localLLMStartCommand: this.getLocalLLMStartCommand(),
     };
   }
 
@@ -208,6 +234,15 @@ export class SettingsStore {
       if (v.length === 0) delete next.linearApiKey;
       else next.linearApiKey = v;
     }
+    if (input['localLLMStartCommand'] !== undefined) {
+      const v = input['localLLMStartCommand'];
+      if (typeof v !== 'string') {
+        throw new Error('localLLMStartCommand must be a string');
+      }
+      // Empty string clears (matches the rest of the patch surface).
+      if (v.length === 0) delete next.localLLMStartCommand;
+      else next.localLLMStartCommand = v;
+    }
 
     this.current = next;
     writeToDisk(this.path, next);
@@ -242,6 +277,12 @@ function readFromDisk(path: string): PersistedSettings {
       (obj['linearApiKey'] as string).length > 0
     ) {
       out.linearApiKey = obj['linearApiKey'] as string;
+    }
+    if (
+      typeof obj['localLLMStartCommand'] === 'string' &&
+      (obj['localLLMStartCommand'] as string).length > 0
+    ) {
+      out.localLLMStartCommand = obj['localLLMStartCommand'] as string;
     }
     return out;
   } catch {
