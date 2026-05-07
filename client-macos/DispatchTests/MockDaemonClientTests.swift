@@ -374,6 +374,57 @@ final class MockDaemonClientTests: XCTestCase {
                       "synthesizer should weave the freetext into the body")
     }
 
+    // MARK: - v1.2: Linear-link UI
+
+    func testGetWorkstreamLinkIsNilWhenUnlinked() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let got = try await client.getWorkstreamLink(workstreamID: "frontend-refactor")
+        XCTAssertNil(got)
+    }
+
+    func testLinkWorkstreamThenGetReturnsTheLink() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let created = try await client.linkWorkstream(
+            workstreamID: "frontend-refactor",
+            trackerKind: "linear",
+            issueIdentifier: "ENG-7"
+        )
+        XCTAssertEqual(created.workstreamID, "frontend-refactor")
+        XCTAssertEqual(created.issueIdentifier, "ENG-7")
+        XCTAssertEqual(created.issueID, "lin_ENG-7")
+        XCTAssertEqual(created.lastSeenState, "In Progress")
+
+        let fetched = try await client.getWorkstreamLink(workstreamID: "frontend-refactor")
+        XCTAssertNotNil(fetched)
+        XCTAssertEqual(fetched?.issueIdentifier, "ENG-7")
+    }
+
+    func testUnlinkWorkstreamRemovesIt() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        _ = try await client.linkWorkstream(
+            workstreamID: "frontend-refactor",
+            trackerKind: "linear",
+            issueIdentifier: "ENG-7"
+        )
+        try await client.unlinkWorkstream(workstreamID: "frontend-refactor")
+        let after = try await client.getWorkstreamLink(workstreamID: "frontend-refactor")
+        XCTAssertNil(after)
+    }
+
+    func testLinkWorkstreamUnknownIdentifierThrows() async {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        do {
+            _ = try await client.linkWorkstream(
+                workstreamID: "frontend-refactor",
+                trackerKind: "linear",
+                issueIdentifier: "ENG-404"
+            )
+            XCTFail("expected throw on unknown identifier")
+        } catch {
+            // ok
+        }
+    }
+
     func testPostInterventionStoresAndReturnsRecord() async throws {
         let client = MockDaemonClient(simulatedLatency: .zero)
 
