@@ -103,6 +103,17 @@ Driven entirely by `Feedback.md`. No architectural changes — additive fields o
 
 ---
 
+## v1.4.6 — Diagnostics tab (kill / restart) ✅ shipped 2026-05-07
+
+Lands on top of v1.2 (Kanban + Linear UI) and v1.3 (MLX + URL scheme + MANAGER_* removal). Wire schema additive — new field on `GET/PATCH /settings`, three new POST endpoints under `/admin/`. Full notes in [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
+
+- [x] **Settings → Diagnostics tab** — Four buttons: Kill Local LLM, Restart Local LLM, Restart Daemon — Soft, Restart Daemon — Hard. Destructive actions confirm via `confirmationDialog`; each surfaces last-result text inline.
+- [x] **Daemon admin endpoints** — `POST /admin/llm/kill` (lsof + SIGTERM with 3s grace → SIGKILL), `POST /admin/llm/restart` (kill flow + `bash -lc <localLLMStartCommand>` detached), `POST /admin/restart` (cancel + re-instantiate Headliner / SubgoalSynthesizer / LinearCommentSyncer in place). Pure helpers in `daemon/src/admin.ts` (parseHostPort / findPidOnPort / killWithEscalation / spawnDetached) take injectable side-effect mocks.
+- [x] **`localLLMStartCommand` settings field** — Cleartext on the wire (not a credential). New TextField on the Providers tab. Empty string → Restart-Model button disabled with "Set a start command first" tooltip.
+- [x] **`LaunchctlController.kickstart()`** — Hard restart shells out to `launchctl kickstart -k gui/<uid>/com.dispatch.daemon` rather than hitting a daemon endpoint (the daemon would die mid-response). `Result<Void, KickstartError>` surfaces non-zero exits with the stderr tail.
+
+---
+
 ## v1.5 — Remote / mobile
 
 - [ ] Daemon binds to non-localhost interface with token auth.

@@ -4,6 +4,39 @@ Versions are anchored on the macOS app's `CFBundleShortVersionString` (the Info.
 
 ---
 
+## v1.4.6 — 2026-05-07 — Diagnostics tab (kill / restart)
+
+Operational hygiene: the macOS Settings window grows a third tab — **Diagnostics** — with four buttons that let the user recover from the two failure modes that have shown up most often in v1.4.x dogfooding (a wedged local-LLM server, and a daemon that has read a stale settings.json). Wire schema additive; no migration required.
+
+### New buttons
+
+- **Kill Local LLM** — `POST /admin/llm/kill`. Daemon resolves the configured base URL via the existing env > settings > default chain, parses host:port out of it, runs `lsof -i tcp:<port> -sTCP:LISTEN -t` to find the listener PID, and sends SIGTERM. After a 3-second grace period it escalates to SIGKILL. Returns `{killed: pid|null, escalated: bool}`. 200 even when nothing was running.
+- **Restart Local LLM** — `POST /admin/llm/restart`. Same kill flow, then runs the user's configured `localLLMStartCommand` via `bash -lc <cmd>` detached + `unref()`. 400 with `code: 'no_start_command'` when the command is empty so the macOS UI can disable the button.
+- **Restart Daemon — Soft** — `POST /admin/restart`. Cancels + re-instantiates Headliner / SubgoalSynthesizer / LinearCommentSyncer in place so a Settings change takes effect without a process exit. Returns the list of restarted ticker names. The daemon process keeps its PID.
+- **Restart Daemon — Hard** — macOS-side only. `LaunchctlController.kickstart()` shells out to `launchctl kickstart -k gui/<uid>/com.dispatch.daemon`. Not a daemon endpoint because the daemon would die mid-response — instead the existing `DaemonResolver` `/health` poll catches the new daemon when launchd brings it back.
+
+### Wire schema additions (additive, backwards compatible)
+
+- `GET/PATCH /settings` gains `localLLMStartCommand: string`. Cleartext on the wire — it's a user-facing command, not a credential. Empty string when unset; PATCH accepts the value verbatim (no redaction). Older daemons predating v1.4.6 are forward-compatible: the macOS Codable mirror defaults the field to `""`.
+- `POST /admin/llm/kill` → `{killed, escalated, error?}`.
+- `POST /admin/llm/restart` → `{killed_pid, started, error?}` on 200; 400 + `code: 'no_start_command'` when missing.
+- `POST /admin/restart` → `{restarted: string[]}`.
+
+### Providers tab
+
+The Providers tab grows a fifth field, "Local LLM start command", under the URL field. Cleartext (no SecureField) since it's not a credential. Configure once → Restart-Model button lights up.
+
+### Tests
+
+- 305/305 daemon tests pass (19 new `admin.test.ts` cases — `parseHostPort` / `findPidOnPort` / `killWithEscalation` / `spawnDetached`; 11 new `http-server.test.ts` cases for the three admin endpoints + the `localLLMStartCommand` round-trip).
+- 7 new `MockDaemonClientTests` cases (kill/restart call counts + arg shape, error propagation, `localLLMStartCommand` patch round-trip, LaunchctlController exit-code → error mapping). Tests build clean. The XCTest runner in this build environment couldn't launch the GUI host app (same sandbox limitation as v1.2 / v1.3); `xcodebuild build-for-testing` succeeds.
+
+### Migration
+
+None. New field `localLLMStartCommand` defaults to empty in both the daemon's `settings.json` and the macOS Codable mirror. Existing settings files keep working unchanged.
+
+---
+
 ## v1.3 — 2026-05-07 — MLX local LLM + /dispatcher URL scheme + MANAGER_* removal
 
 Three deliverables. Wire schema additive; the env-var removal is a hard break for anyone still relying on `MANAGER_*` (`bin/install.sh` has been emitting a deprecation breadcrumb since v1.2).
