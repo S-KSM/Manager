@@ -4,7 +4,7 @@ struct ContentView: View {
     @EnvironmentObject private var resolver: DaemonResolver
     @EnvironmentObject private var router: URLRouter
     @State private var workstreams: [Workstream] = []
-    @State private var selection: SidebarSelection? = nil
+    @State private var selection: SidebarSelection = .home
     @State private var loading: Bool = true
 
     @State private var showNewWorkstreamSheet = false
@@ -136,7 +136,7 @@ struct ContentView: View {
             // visually distinguishes it from the workstream rows below.
             Section {
                 Label("Home", systemImage: "house.fill")
-                    .tag(Optional(SidebarSelection.home))
+                    .tag(SidebarSelection.home)
             }
             .listSectionSeparator(.visible)
 
@@ -146,7 +146,7 @@ struct ContentView: View {
                 }
                 ForEach(active) { ws in
                     WorkstreamRow(workstream: ws)
-                        .tag(Optional(SidebarSelection.workstream(ws.id)))
+                        .tag(SidebarSelection.workstream(ws.id))
                 }
             } header: {
                 HStack {
@@ -164,9 +164,9 @@ struct ContentView: View {
 
             Section("Reference") {
                 Label("Team handbook", systemImage: "book")
-                    .tag(Optional(SidebarSelection.handbook))
+                    .tag(SidebarSelection.handbook)
                 Label("Updates", systemImage: "doc.text.image")
-                    .tag(Optional(SidebarSelection.updates))
+                    .tag(SidebarSelection.updates)
             }
 
             if !retired.isEmpty {
@@ -174,7 +174,7 @@ struct ContentView: View {
                     DisclosureGroup {
                         ForEach(retired) { ws in
                             WorkstreamRow(workstream: ws)
-                                .tag(Optional(SidebarSelection.workstream(ws.id)))
+                                .tag(SidebarSelection.workstream(ws.id))
                         }
                     } label: {
                         Text("\(retired.count) retired")
@@ -192,7 +192,7 @@ struct ContentView: View {
     @ViewBuilder
     private var detail: some View {
         switch selection {
-        case .some(.workstream(let id)):
+        case .workstream(let id):
             if let ws = workstreams.first(where: { $0.id == id }) {
                 AgentDetailView(
                     workstream: ws,
@@ -203,11 +203,11 @@ struct ContentView: View {
             } else {
                 placeholderHome
             }
-        case .some(.handbook):
+        case .handbook:
             HandbookView(client: resolver.client)
-        case .some(.updates):
+        case .updates:
             UpdatesView(client: resolver.client, workstreams: workstreams)
-        case .some(.home), .none:
+        case .home:
             placeholderHome
         }
     }
