@@ -67,6 +67,36 @@ const STATES_BY_IDS_QUERY = `
   }
 `;
 
+const ISSUE_BY_IDENTIFIER_QUERY = `
+  query IssueByIdentifier($identifier: String!) {
+    issues(filter: { identifier: { eq: $identifier } }, first: 1) {
+      nodes {
+        id identifier title description priority url branchName createdAt updatedAt
+        labels { nodes { name } }
+        state { name }
+      }
+    }
+  }
+`;
+
+const SET_ISSUE_STATE_MUTATION = `
+  mutation SetIssueState($issueId: String!, $stateId: String!) {
+    issueUpdate(id: $issueId, input: { stateId: $stateId }) {
+      success
+      issue { id state { id name } }
+    }
+  }
+`;
+
+const ADD_ISSUE_COMMENT_MUTATION = `
+  mutation AddIssueComment($issueId: String!, $body: String!) {
+    commentCreate(input: { issueId: $issueId, body: $body }) {
+      success
+      comment { id }
+    }
+  }
+`;
+
 export interface LinearTrackerOptions {
   apiKey: string;
   projectSlug: string;
@@ -141,6 +171,58 @@ export class LinearTracker implements Tracker {
       if (n?.id && n.state?.name) out.set(n.id, n.state.name);
     }
     return out;
+  }
+
+  /**
+   * v1.2 — resolve a human-typed identifier (`ENG-123`) to an Issue. Returns
+   * `null` when no issue matches so the HTTP layer can hand the macOS Link
+   * sheet a clean 400 with `linear_unknown_identifier`.
+   */
+  async fetchIssueByIdentifier(identifier: string): Promise<Issue | null> {
+    const data = await this.gql<{ issues: { nodes: LinearIssueNode[] } }>(
+      ISSUE_BY_IDENTIFIER_QUERY,
+      { identifier },
+    );
+    const nodes = data.issues?.nodes ?? [];
+    if (nodes.length === 0) return null;
+    const node = nodes[0];
+    return node ? normalizeNode(node) : null;
+  }
+
+  /**
+   * v1.2 reverse-sync support. Calls Linear's `issueUpdate` mutation with a
+   * pre-resolved state id. When `success === false` we throw
+   * `linear_state_not_found` so the caller can tell the difference between
+   * "wrong state id" and a network blip.
+   */
+  async setIssueState(issueId: string, stateId: string): Promise<void> {
+    const data = await this.gql<{
+      issueUpdate: { success: boolean; issue: { id: string } | null };
+    }>(SET_ISSUE_STATE_MUTATION, { issueId, stateId });
+    if (!data.issueUpdate?.success) {
+      throw new TrackerError(
+        'linear_state_not_found',
+        `Linear issueUpdate did not succeed for issue=${issueId} state=${stateId}`,
+      );
+    }
+  }
+
+  /**
+   * v1.2 forward-sync support. Posts a Markdown comment to the linked issue.
+   * Wraps a failed `commentCreate.success` as `linear_comment_failed` so the
+   * comment syncer can swallow it and try again on the next tick.
+   */
+  async addIssueComment(issueId: string, body: string): Promise<{ id: string }> {
+    const data = await this.gql<{
+      commentCreate: { success: boolean; comment: { id: string } | null };
+    }>(ADD_ISSUE_COMMENT_MUTATION, { issueId, body });
+    if (!data.commentCreate?.success || !data.commentCreate.comment?.id) {
+      throw new TrackerError(
+        'linear_comment_failed',
+        `Linear commentCreate did not succeed for issue=${issueId}`,
+      );
+    }
+    return { id: data.commentCreate.comment.id };
   }
 
   private async gql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
