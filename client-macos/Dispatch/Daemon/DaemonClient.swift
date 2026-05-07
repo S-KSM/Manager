@@ -139,6 +139,60 @@ protocol DaemonClientProtocol: Sendable {
     /// Returns `false` on connection error; never throws. Used by
     /// `DaemonResolver` to choose live vs mock at startup.
     func health() async -> Bool
+
+    // MARK: - v1.4.6: Diagnostics tab
+
+    /// `POST /admin/llm/kill` — find the PID listening on the configured
+    /// local-LLM port and SIGTERM it (with a 3s grace period before
+    /// SIGKILL). Returns the daemon's wire shape: `killed` is the PID we
+    /// sent the signal to, or `nil` if nothing was running. `escalated`
+    /// is true when SIGTERM didn't take and we had to SIGKILL.
+    func killLLM() async throws -> KillLLMResult
+
+    /// `POST /admin/llm/restart` — kill, then run `localLLMStartCommand`
+    /// (configured in Settings → Providers) via `bash -lc` detached. Throws
+    /// when the daemon returns 400 with `code: 'no_start_command'` so the
+    /// UI can disable the button + show the configuration hint.
+    func restartLLM() async throws -> RestartLLMResult
+
+    /// `POST /admin/restart` — soft daemon restart: re-read settings.json,
+    /// cancel + re-instantiate the background tickers (Headliner /
+    /// SubgoalSynthesizer / LinearCommentSyncer). Process does NOT exit.
+    func restartDaemon() async throws -> RestartDaemonResult
+}
+
+// MARK: - v1.4.6 Diagnostics wire shapes
+
+/// Wire shape of `POST /admin/llm/kill`. Always 200; `killed == nil`
+/// means nothing was listening on the configured port.
+struct KillLLMResult: Codable, Equatable, Sendable {
+    var killed: Int?
+    var escalated: Bool
+    var error: String?
+}
+
+/// Wire shape of `POST /admin/llm/restart` 200. The daemon reports the
+/// PID it killed (or nil) and a `started` boolean. The 400 path
+/// (`code: 'no_start_command'`) surfaces as `DaemonError.badResponse(400)`
+/// from the LiveDaemonClient — the Diagnostics view inspects the original
+/// daemon response in the UI; the protocol-level type only carries 200s.
+struct RestartLLMResult: Codable, Equatable, Sendable {
+    /// Snake-case on the wire; camel-case on the Swift side.
+    var killedPID: Int?
+    var started: Bool
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case killedPID = "killed_pid"
+        case started
+        case error
+    }
+}
+
+/// Wire shape of `POST /admin/restart`. The list of ticker names that the
+/// daemon stopped + re-instantiated.
+struct RestartDaemonResult: Codable, Equatable, Sendable {
+    var restarted: [String]
 }
 
 /// Redacted wire shape of `GET /settings`. Mirrors the daemon's
@@ -161,6 +215,10 @@ struct ProviderSettings: Codable, Equatable, Sendable {
     /// file or DISPATCH_LINEAR_API_KEY env). Drives the Providers tab
     /// "Linear API key" section's "configured" hint.
     var linearAPIKeyConfigured: Bool = false
+    /// v1.4.6 — the shell command the Diagnostics tab's "Restart Local
+    /// LLM" button runs. Cleartext on the wire (it's a command, not a
+    /// credential). Empty string when unset.
+    var localLLMStartCommand: String = ""
 
     enum CodingKeys: String, CodingKey {
         case headlineProvider
@@ -168,6 +226,7 @@ struct ProviderSettings: Codable, Equatable, Sendable {
         case ollamaURL = "ollamaUrl"
         case anthropicAPIKeyConfigured = "anthropicApiKeyConfigured"
         case linearAPIKeyConfigured = "linearApiKeyConfigured"
+        case localLLMStartCommand = "localLLMStartCommand"
     }
 
     init(
@@ -175,13 +234,15 @@ struct ProviderSettings: Codable, Equatable, Sendable {
         headlineModel: String,
         ollamaURL: String,
         anthropicAPIKeyConfigured: Bool,
-        linearAPIKeyConfigured: Bool = false
+        linearAPIKeyConfigured: Bool = false,
+        localLLMStartCommand: String = ""
     ) {
         self.headlineProvider = headlineProvider
         self.headlineModel = headlineModel
         self.ollamaURL = ollamaURL
         self.anthropicAPIKeyConfigured = anthropicAPIKeyConfigured
         self.linearAPIKeyConfigured = linearAPIKeyConfigured
+        self.localLLMStartCommand = localLLMStartCommand
     }
 
     init(from decoder: Decoder) throws {
@@ -193,6 +254,10 @@ struct ProviderSettings: Codable, Equatable, Sendable {
         // Older daemons predating the linear key field default to false.
         self.linearAPIKeyConfigured =
             try c.decodeIfPresent(Bool.self, forKey: .linearAPIKeyConfigured) ?? false
+        // Older daemons predating v1.4.6 don't ship localLLMStartCommand;
+        // default to "" so the UI treats it as unconfigured.
+        self.localLLMStartCommand =
+            try c.decodeIfPresent(String.self, forKey: .localLLMStartCommand) ?? ""
     }
 }
 
@@ -206,6 +271,11 @@ struct ProviderSettingsPatch: Codable, Equatable, Sendable {
     /// v1.2 — same redaction pattern as `anthropicAPIKey`. Empty string
     /// clears the stored value; `nil` leaves it untouched.
     var linearAPIKey: String?
+    /// v1.4.6 — the local-LLM start command. Cleartext on the wire
+    /// (not a credential). Empty string clears the value; `nil` leaves
+    /// it untouched (so the existing Save button doesn't clobber the
+    /// user's stored command on every save).
+    var localLLMStartCommand: String?
 
     enum CodingKeys: String, CodingKey {
         case headlineProvider
@@ -213,6 +283,7 @@ struct ProviderSettingsPatch: Codable, Equatable, Sendable {
         case ollamaURL = "ollamaUrl"
         case anthropicAPIKey = "anthropicApiKey"
         case linearAPIKey = "linearApiKey"
+        case localLLMStartCommand = "localLLMStartCommand"
     }
 }
 
@@ -593,6 +664,20 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         } catch {
             throw DaemonError.transport(error)
         }
+    }
+
+    // MARK: - v1.4.6: Diagnostics tab
+
+    func killLLM() async throws -> KillLLMResult {
+        try await sendJSON(method: "POST", path: "admin/llm/kill", body: EmptyBody())
+    }
+
+    func restartLLM() async throws -> RestartLLMResult {
+        try await sendJSON(method: "POST", path: "admin/llm/restart", body: EmptyBody())
+    }
+
+    func restartDaemon() async throws -> RestartDaemonResult {
+        try await sendJSON(method: "POST", path: "admin/restart", body: EmptyBody())
     }
 
     func streamEvents(workstreamID: String) -> AsyncStream<Event> {

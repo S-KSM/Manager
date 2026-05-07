@@ -148,6 +148,9 @@ Localhost-only in v0/v0.5/v1; auth + remote binding land in v1.5. Default port 9
 | `PUT` | `/workstreams/:id/link` | v1.2 — Body `{tracker_kind: 'linear', issue_identifier: string}`. Resolves via `LinearTracker.fetchIssueByIdentifier` and persists. 503 with `code: 'linear_api_key_missing'` when no key is configured; 400 with `code: 'linear_unknown_identifier'` when the tracker can't find the issue; 404 when the workstream doesn't exist. |
 | `DELETE` | `/workstreams/:id/link` | v1.2 — Idempotent unlink. Returns 200 even when no prior link existed. |
 | `GET` | `/links` | v1.2 — Naked array of every persisted `WorkstreamLink`. |
+| `POST` | `/admin/llm/kill` | v1.4.6 — Resolves the configured local-LLM base URL, finds the listener PID via `lsof -i tcp:<port> -sTCP:LISTEN -t`, sends SIGTERM with a 3-second grace period before SIGKILL. Returns `{killed: pid \| null, escalated: bool, error?: string}`. 200 always (200 + `killed: null` when nothing was running). |
+| `POST` | `/admin/llm/restart` | v1.4.6 — Same kill flow, then runs `localLLMStartCommand` from settings via `bash -lc <cmd>` detached + `unref()`. Returns `{killed_pid, started, error?}`. 400 with `code: 'no_start_command'` when the command isn't configured. |
+| `POST` | `/admin/restart` | v1.4.6 — Soft daemon restart: cancels + re-instantiates Headliner / SubgoalSynthesizer / LinearCommentSyncer in place after re-reading `settings.json`. Returns `{restarted: string[]}`. The daemon process keeps its PID — hard restart (full launchd respawn) lives client-side. |
 
 ### Agent-side instrumentation (Claude Code, v0)
 
@@ -185,6 +188,10 @@ Agent prompt (system message added at workstream start) instructs the agent to c
 #### URL scheme (v1.3+)
 
 The macOS app registers `dispatch://` in its `CFBundleURLTypes`. Today only one shape is recognized: `dispatch://workstream/<slug>` selects the matching workstream in the Radar (or surfaces a "not found — open `claude` here to register" banner if the daemon hasn't seen that id yet). The Claude Code `/dispatcher` slash command (`commands/dispatcher.md`) derives a slug from the current git root using the same rules as `hooks/_common.sh:dispatch__slugify` and shells out to `open dispatch://workstream/<slug>` so the agent can drop the human into the matching card. Parser implementations: `daemon/src/url-scheme.ts` (canonical) and `client-macos/Dispatch/Daemon/DispatchURLParser.swift` (Swift port; same accept/reject set).
+
+#### Admin endpoints (v1.4.6 Diagnostics)
+
+Three POST endpoints on the daemon back the macOS Settings → Diagnostics tab. `POST /admin/llm/kill` and `POST /admin/llm/restart` resolve the configured local-LLM base URL through the same env > settings > default chain `SettingsStore.getResolvedOllamaUrl()` uses, find the listener PID via `lsof -i tcp:<port> -sTCP:LISTEN -t`, SIGTERM with a 3-second grace period before SIGKILL, and (for `restart`) run the user-configured `localLLMStartCommand` via `bash -lc <cmd>` detached + `unref()`. `POST /admin/restart` is a soft restart that cancels + re-instantiates the daemon's tickers (Headliner / SubgoalSynthesizer / LinearCommentSyncer) in place so a Settings change takes effect without exiting; the **hard** restart (full process respawn) is the macOS app's responsibility — it shells out to `launchctl kickstart -k gui/<uid>/com.dispatch.daemon` via `LaunchctlController` rather than hitting a daemon endpoint, because the daemon would die mid-response. Pure helpers in `daemon/src/admin.ts` (`parseHostPort`, `findPidOnPort`, `killWithEscalation`, `spawnDetached`) are the side-effect seams; every helper takes injectable mocks so the test suite never actually shells out.
 
 ### Orchestrator (v1.4 — autonomous mode)
 

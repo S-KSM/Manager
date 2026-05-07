@@ -2,6 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { createServer, type Server as HttpServer, type IncomingMessage } from 'node:http';
 import express, { type Express, type Request, type Response } from 'express';
 import { WebSocketServer, type WebSocket } from 'ws';
+import {
+  findPidOnPort as defaultFindPidOnPort,
+  killWithEscalation as defaultKillWithEscalation,
+  parseHostPort,
+  spawnDetached as defaultSpawnDetached,
+} from './admin.js';
 import { buildDigest } from './digest.js';
 import type { EventStore, ManagerEvent, ManagerEventType } from './event-store.js';
 import type { HandbookStore, SkillSource } from './handbook-store.js';
@@ -76,6 +82,31 @@ interface BuildOptions {
     fetchIssueByIdentifier: (identifier: string) =>
       Promise<{ id: string; identifier: string; url: string | null; state: string } | null>;
   };
+  /**
+   * v1.4.6 — callback that the `POST /admin/restart` endpoint invokes to
+   * cancel + re-instantiate the daemon's tickers (Headliner /
+   * SubgoalSynthesizer / LinearCommentSyncer) so a Settings change takes
+   * effect without process exit. Returns the list of restarted ticker
+   * names. When absent, the endpoint 404s.
+   *
+   * The supervisor lives in `cli.ts` (it owns the constructed instances);
+   * we pass only a callback so http-server.ts stays free of ticker
+   * construction details.
+   */
+  tickerRestarter?: () => string[];
+  /**
+   * v1.4.6 test seam — override the admin helpers for `/admin/llm/*` so
+   * the http-server tests don't actually shell out to lsof / spawn a
+   * real `bash`. Production wiring leaves these undefined, which falls
+   * back to the real `./admin.js` helpers.
+   */
+  adminImpls?: {
+    findPidOnPort?: (port: number) => Promise<number[]>;
+    killWithEscalation?: (
+      pid: number,
+    ) => Promise<{ escalated: boolean; dead: boolean }>;
+    spawnDetached?: (cmd: string) => Promise<{ ok: boolean; pid?: number; error?: string }>;
+  };
 }
 
 const VALID_REPORT_STATUSES: ReadonlySet<ReportStatus> = new Set(['draft', 'saved', 'archived']);
@@ -141,12 +172,19 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     orchestrator,
     settings,
     workstreamLinks,
+    tickerRestarter,
   } = opts;
   const getProvider = opts.getProvider ?? defaultGetProvider;
   const linearTrackerFactory =
     opts.linearTrackerFactory ??
     ((apiKey: string) =>
       new LinearTracker({ apiKey, projectSlug: 'unused-for-link-flow' }));
+  const adminFindPidOnPort = opts.adminImpls?.findPidOnPort ?? defaultFindPidOnPort;
+  const adminKillWithEscalation =
+    opts.adminImpls?.killWithEscalation ??
+    ((pid: number) => defaultKillWithEscalation(pid));
+  const adminSpawnDetached =
+    opts.adminImpls?.spawnDetached ?? ((cmd: string) => defaultSpawnDetached(cmd));
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
@@ -238,6 +276,125 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
       return;
     }
     res.json(settings.serializeForWire());
+  });
+
+  // ---- Admin: kill / restart (v1.4.6 Diagnostics tab) ---------------------
+
+  /**
+   * Kill the local LLM server. Resolves the configured base URL via the same
+   * env > settings > default chain SettingsStore uses, extracts the host:port,
+   * finds the listener PID via `lsof`, and SIGTERMs it (with a 3-second
+   * grace period before SIGKILL).
+   *
+   * Always returns 200. The body distinguishes between "nothing to kill"
+   * (`killed: null`) and a successful kill (`killed: <pid>`). `escalated`
+   * is true when SIGTERM didn't take and we had to SIGKILL.
+   */
+  app.post('/admin/llm/kill', async (_req: Request, res: Response) => {
+    const baseUrl = settings?.getResolvedOllamaUrl() ?? 'http://localhost:8080/v1';
+    const parsed = parseHostPort(baseUrl);
+    if (!parsed) {
+      res.status(200).json({
+        killed: null,
+        escalated: false,
+        error: `could not parse base URL: ${baseUrl}`,
+      });
+      return;
+    }
+    let pids: number[];
+    try {
+      pids = await adminFindPidOnPort(parsed.port);
+    } catch (err) {
+      res.status(200).json({
+        killed: null,
+        escalated: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    if (pids.length === 0) {
+      res.status(200).json({ killed: null, escalated: false });
+      return;
+    }
+    // Multiple PIDs on a port should be rare (it's a TCP listener) but lsof
+    // can return both the listener and forks of it. Just nuke the first one
+    // we found — the listener PID is normally first.
+    const pid = pids[0] as number;
+    const outcome = await adminKillWithEscalation(pid);
+    res.status(200).json({ killed: pid, escalated: outcome.escalated });
+  });
+
+  /**
+   * Kill, then spawn `localLLMStartCommand` via `bash -lc` detached. The
+   * detach + `unref()` make sure the daemon can keep running independent of
+   * the new server's lifecycle.
+   *
+   * 400 with `code: 'no_start_command'` when the user hasn't configured a
+   * command yet — the macOS UI uses that to render a tooltip.
+   */
+  app.post('/admin/llm/restart', async (_req: Request, res: Response) => {
+    const command = settings?.getLocalLLMStartCommand() ?? '';
+    if (command.length === 0) {
+      res.status(400).json({
+        error: 'localLLMStartCommand is not configured',
+        code: 'no_start_command',
+      });
+      return;
+    }
+
+    // Kill phase. Don't fail the whole request if the kill flow can't find a
+    // PID — the spawn might be the user's first launch, in which case there's
+    // nothing to kill.
+    let killedPid: number | null = null;
+    const baseUrl = settings?.getResolvedOllamaUrl() ?? 'http://localhost:8080/v1';
+    const parsed = parseHostPort(baseUrl);
+    if (parsed) {
+      try {
+        const pids = await adminFindPidOnPort(parsed.port);
+        if (pids.length > 0) {
+          const pid = pids[0] as number;
+          await adminKillWithEscalation(pid);
+          killedPid = pid;
+        }
+      } catch {
+        // Treat lsof failures as "nothing was listening".
+      }
+    }
+
+    const spawnResult = await adminSpawnDetached(command);
+    if (!spawnResult.ok) {
+      res.status(500).json({
+        killed_pid: killedPid,
+        started: false,
+        error: spawnResult.error ?? 'spawn failed',
+      });
+      return;
+    }
+    res.status(200).json({ killed_pid: killedPid, started: true });
+  });
+
+  /**
+   * Soft-restart: cancel + re-instantiate the daemon's background tickers
+   * so a Settings change takes effect without exiting the process. Hard
+   * restart (full daemon respawn) is handled client-side via
+   * `launchctl kickstart -k` — the daemon couldn't respond to its own
+   * shutdown anyway.
+   */
+  app.post('/admin/restart', (_req: Request, res: Response) => {
+    if (!tickerRestarter) {
+      res.status(404).json({ error: 'ticker restart not enabled' });
+      return;
+    }
+    let restarted: string[];
+    try {
+      restarted = tickerRestarter();
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    res.json({ restarted });
   });
 
   // ---- Orchestrator (v1.4+) ------------------------------------------------
