@@ -6,6 +6,10 @@ Versions are anchored on the macOS app's `CFBundleShortVersionString` (the Info.
 
 ## v1.4.6 — 2026-05-07 — Diagnostics tab (kill / restart)
 
+Tag [`v1.4.6`](https://github.com/S-KSM/Manager/releases/tag/v1.4.6). DMG + zip attached.
+
+This binary tag bundles three milestones merged the same day: **v1.2** (Kanban board + Linear-link UI), **v1.3** (MLX OpenAI-compatible local LLM + `dispatch://` URL scheme + `/dispatcher` slash command + `MANAGER_*` env-var fallback removed), and **v1.4.6** itself. See the v1.2 + v1.3 entries below for the milestone-level changelogs.
+
 Operational hygiene: the macOS Settings window grows a third tab — **Diagnostics** — with four buttons that let the user recover from the two failure modes that have shown up most often in v1.4.x dogfooding (a wedged local-LLM server, and a daemon that has read a stale settings.json). Wire schema additive; no migration required.
 
 ### New buttons
