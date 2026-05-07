@@ -456,4 +456,120 @@ final class MockDaemonClientTests: XCTestCase {
         XCTAssertEqual(client.interventions.map(\.kind), [.nudge, .rollback])
         XCTAssertNotEqual(client.interventions[0].id, client.interventions[1].id)
     }
+
+    // MARK: - v1.4.6: Diagnostics tab
+
+    func testKillLLMRecordsCallAndReturnsCannedResult() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        client.setKillLLMResult(KillLLMResult(killed: 4242, escalated: false, error: nil))
+
+        XCTAssertEqual(client.killLLMCallCount, 0)
+        let result = try await client.killLLM()
+        XCTAssertEqual(result.killed, 4242)
+        XCTAssertFalse(result.escalated)
+        XCTAssertEqual(client.killLLMCallCount, 1)
+    }
+
+    func testKillLLMReturnsNilWhenNothingRunning() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        // Default canned response: nothing was running.
+        let result = try await client.killLLM()
+        XCTAssertNil(result.killed)
+    }
+
+    func testRestartLLMRecordsCallAndReturnsCannedResult() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        client.setRestartLLMResult(
+            RestartLLMResult(killedPID: 999, started: true, error: nil)
+        )
+
+        XCTAssertEqual(client.restartLLMCallCount, 0)
+        let result = try await client.restartLLM()
+        XCTAssertEqual(result.killedPID, 999)
+        XCTAssertTrue(result.started)
+        XCTAssertEqual(client.restartLLMCallCount, 1)
+    }
+
+    func testRestartDaemonRecordsCallAndReturnsRestartedTickerNames() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        XCTAssertEqual(client.restartDaemonCallCount, 0)
+        let result = try await client.restartDaemon()
+        XCTAssertEqual(result.restarted, ["headliner", "subgoal_synth", "linear_sync"])
+        XCTAssertEqual(client.restartDaemonCallCount, 1)
+    }
+
+    func testDiagnosticsErrorPropagatesFromKillRestartCalls() async {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let injected = NSError(domain: "DiagnosticsTest", code: 42)
+        client.setDiagnosticsError(injected)
+
+        do {
+            _ = try await client.killLLM()
+            XCTFail("expected throw")
+        } catch {
+            // ok
+        }
+        do {
+            _ = try await client.restartLLM()
+            XCTFail("expected throw")
+        } catch {
+            // ok
+        }
+        do {
+            _ = try await client.restartDaemon()
+            XCTFail("expected throw")
+        } catch {
+            // ok
+        }
+        XCTAssertEqual(client.killLLMCallCount, 1)
+        XCTAssertEqual(client.restartLLMCallCount, 1)
+        XCTAssertEqual(client.restartDaemonCallCount, 1)
+    }
+
+    func testProviderSettingsLocalLLMStartCommandRoundTrips() async throws {
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        XCTAssertEqual(client.settingsSnapshot.localLLMStartCommand, "")
+
+        var patch = ProviderSettingsPatch()
+        patch.localLLMStartCommand = "mlx_lm.server --port 8080"
+        let after = try await client.patchSettings(patch)
+        XCTAssertEqual(after.localLLMStartCommand, "mlx_lm.server --port 8080")
+        XCTAssertEqual(client.settingsSnapshot.localLLMStartCommand,
+                       "mlx_lm.server --port 8080")
+
+        // Empty string clears.
+        var clear = ProviderSettingsPatch()
+        clear.localLLMStartCommand = ""
+        let cleared = try await client.patchSettings(clear)
+        XCTAssertEqual(cleared.localLLMStartCommand, "")
+    }
+
+    func testLaunchctlControllerSurfacesNonZeroExitAsError() {
+        // Pure unit: drive the runner seam with a stub. No /bin/launchctl.
+        let runner: LaunchctlController.Runner = { args in
+            XCTAssertEqual(args, ["kickstart", "-k", "gui/\(getuid())/com.dispatch.daemon"])
+            return (status: 113, stderr: "Operation not permitted")
+        }
+        let result = LaunchctlController.runLaunchctl(
+            ["kickstart", "-k", "gui/\(getuid())/com.dispatch.daemon"],
+            runner: runner
+        )
+        switch result {
+        case .success:
+            XCTFail("expected failure when launchctl exits non-zero")
+        case .failure(let err):
+            XCTAssertTrue(err.localizedDescription.contains("113"))
+            XCTAssertTrue(err.localizedDescription.contains("Operation not permitted"))
+        }
+    }
+
+    func testLaunchctlControllerSurfacesZeroExitAsSuccess() {
+        let runner: LaunchctlController.Runner = { _ in
+            (status: 0, stderr: "")
+        }
+        let result = LaunchctlController.runLaunchctl(["kickstart"], runner: runner)
+        if case .failure = result {
+            XCTFail("expected success on exit 0")
+        }
+    }
 }

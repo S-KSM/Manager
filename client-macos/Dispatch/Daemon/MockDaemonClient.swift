@@ -550,7 +550,8 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         headlineModel: "qwen3:4b",
         ollamaURL: "http://localhost:11434",
         anthropicAPIKeyConfigured: false,
-        linearAPIKeyConfigured: false
+        linearAPIKeyConfigured: false,
+        localLLMStartCommand: ""
     )
     /// Captured cleartext key for tests; never returned via the protocol.
     private var _settingsAnthropicKey: String?
@@ -603,6 +604,10 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
                 _settings.linearAPIKeyConfigured = true
             }
         }
+        if let cmd = patch.localLLMStartCommand {
+            // Same semantics as the daemon: empty string clears.
+            _settings.localLLMStartCommand = cmd
+        }
         return _settings
     }
 
@@ -645,6 +650,95 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         _links.removeValue(forKey: workstreamID)
+    }
+
+    // MARK: - v1.4.6: Diagnostics tab
+
+    /// Captured call-counts + canned responses so tests can verify the
+    /// Diagnostics view fires the right RPCs without a daemon. Mutators
+    /// run under `lock`; readers snapshot.
+    private var _killLLMCalls: Int = 0
+    private var _restartLLMCalls: Int = 0
+    private var _restartDaemonCalls: Int = 0
+    /// Pre-canned response for `killLLM()`; tests overwrite via the
+    /// `setKillLLMResult` helper. Default = "nothing was running".
+    private var _killLLMResult: KillLLMResult = KillLLMResult(
+        killed: nil, escalated: false, error: nil
+    )
+    /// Pre-canned response for `restartLLM()`. Default = success.
+    private var _restartLLMResult: RestartLLMResult = RestartLLMResult(
+        killedPID: 4242, started: true, error: nil
+    )
+    /// Pre-canned response for `restartDaemon()`. Default = the three
+    /// production tickers — mirrors the live daemon's restart payload.
+    private var _restartDaemonResult: RestartDaemonResult = RestartDaemonResult(
+        restarted: ["headliner", "subgoal_synth", "linear_sync"]
+    )
+    /// When non-nil, the next `killLLM` / `restartLLM` / `restartDaemon`
+    /// call throws this error instead of returning the canned result.
+    /// Tests use this to exercise the Diagnostics view's error toast.
+    private var _diagnosticsError: Error?
+
+    var killLLMCallCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return _killLLMCalls
+    }
+    var restartLLMCallCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return _restartLLMCalls
+    }
+    var restartDaemonCallCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return _restartDaemonCalls
+    }
+    func setKillLLMResult(_ result: KillLLMResult) {
+        lock.lock(); defer { lock.unlock() }
+        _killLLMResult = result
+    }
+    func setRestartLLMResult(_ result: RestartLLMResult) {
+        lock.lock(); defer { lock.unlock() }
+        _restartLLMResult = result
+    }
+    func setRestartDaemonResult(_ result: RestartDaemonResult) {
+        lock.lock(); defer { lock.unlock() }
+        _restartDaemonResult = result
+    }
+    func setDiagnosticsError(_ error: Error?) {
+        lock.lock(); defer { lock.unlock() }
+        _diagnosticsError = error
+    }
+
+    func killLLM() async throws -> KillLLMResult {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        _killLLMCalls += 1
+        let err = _diagnosticsError
+        let result = _killLLMResult
+        lock.unlock()
+        if let err { throw err }
+        return result
+    }
+
+    func restartLLM() async throws -> RestartLLMResult {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        _restartLLMCalls += 1
+        let err = _diagnosticsError
+        let result = _restartLLMResult
+        lock.unlock()
+        if let err { throw err }
+        return result
+    }
+
+    func restartDaemon() async throws -> RestartDaemonResult {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        _restartDaemonCalls += 1
+        let err = _diagnosticsError
+        let result = _restartDaemonResult
+        lock.unlock()
+        if let err { throw err }
+        return result
     }
 
     func listSchedulerJobs() async throws -> [SchedulerJob] {
