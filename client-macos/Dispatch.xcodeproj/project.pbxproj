@@ -43,6 +43,9 @@
 		A100000000000000000005A3 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005B3 /* WelcomeView.swift */; };
 		A100000000000000000005A4 /* AppRelocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005B4 /* AppRelocator.swift */; };
 		A100000000000000000006A1 /* WorkstreamCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006B1 /* WorkstreamCodableTests.swift */; };
+		A100000000000000000006A2 /* WorkstreamDragPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006B2 /* WorkstreamDragPayload.swift */; };
+		A100000000000000000006A3 /* KanbanBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006B3 /* KanbanBoardView.swift */; };
+		A100000000000000000006A4 /* KanbanLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006B4 /* KanbanLogicTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -92,6 +95,9 @@
 		A100000000000000000005B3 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		A100000000000000000005B4 /* AppRelocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRelocator.swift; sourceTree = "<group>"; };
 		A100000000000000000006B1 /* WorkstreamCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkstreamCodableTests.swift; sourceTree = "<group>"; };
+		A100000000000000000006B2 /* WorkstreamDragPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkstreamDragPayload.swift; sourceTree = "<group>"; };
+		A100000000000000000006B3 /* KanbanBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanBoardView.swift; sourceTree = "<group>"; };
+		A100000000000000000006B4 /* KanbanLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanLogicTests.swift; sourceTree = "<group>"; };
 		A100000000000000000000C0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A100000000000000000000C1 /* Dispatch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Dispatch.entitlements; sourceTree = "<group>"; };
 		A100000000000000000000C2 /* Dispatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dispatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -150,6 +156,7 @@
 				A100000000000000000002B6 /* DigestCodableTests.swift */,
 				A100000000000000000003B6 /* ReportCodableTests.swift */,
 				A100000000000000000006B1 /* WorkstreamCodableTests.swift */,
+				A100000000000000000006B4 /* KanbanLogicTests.swift */,
 			);
 			path = DispatchTests;
 			sourceTree = "<group>";
@@ -173,6 +180,7 @@
 				A100000000000000000002B1 /* Skill.swift */,
 				A100000000000000000002B2 /* Digest.swift */,
 				A100000000000000000003B1 /* Report.swift */,
+				A100000000000000000006B2 /* WorkstreamDragPayload.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -204,6 +212,7 @@
 				A100000000000000000004B1 /* RobotMascot.swift */,
 				A100000000000000000005B2 /* PreferencesView.swift */,
 				A100000000000000000005B3 /* WelcomeView.swift */,
+				A100000000000000000006B3 /* KanbanBoardView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -396,6 +405,8 @@
 				A100000000000000000005A3 /* WelcomeView.swift in Sources */,
 				A100000000000000000005A4 /* AppRelocator.swift in Sources */,
 				A100000000000000000000AB /* MockData.swift in Sources */,
+				A100000000000000000006A2 /* WorkstreamDragPayload.swift in Sources */,
+				A100000000000000000006A3 /* KanbanBoardView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -410,6 +421,7 @@
 				A100000000000000000002A6 /* DigestCodableTests.swift in Sources */,
 				A100000000000000000003A6 /* ReportCodableTests.swift in Sources */,
 				A100000000000000000006A1 /* WorkstreamCodableTests.swift in Sources */,
+				A100000000000000000006A4 /* KanbanLogicTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

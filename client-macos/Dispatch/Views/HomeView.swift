@@ -93,37 +93,27 @@ struct HomeView: View {
         }
     }
 
-    /// Apply the active digest-strip filter to the team-floor cards.
-    /// `.all` is identity. Other buckets prefer the daemon-supplied id list
-    /// (exact membership) and fall back to model-level predicates when the
-    /// list is empty (e.g. older daemons that don't ship `buckets` yet).
-    private var filteredWorkstreams: [Workstream] {
+    /// Set of workstream ids that match the current digest filter. Empty
+    /// when `.all` is active. Passed to the kanban so cards outside the set
+    /// dim in place rather than reflowing the columns.
+    private var filteredIDs: Set<String> {
         switch filter {
         case .all:
-            return workstreams
+            return []
         case .blocked:
-            if !lastBuckets.blocked.isEmpty {
-                let set = Set(lastBuckets.blocked)
-                return workstreams.filter { set.contains($0.id) }
-            }
-            return workstreams.filter { $0.needsAttention }
+            return !lastBuckets.blocked.isEmpty
+                ? Set(lastBuckets.blocked)
+                : Set(workstreams.filter { $0.needsAttention }.map(\.id))
         case .needsYou:
-            if !lastBuckets.needsAttention.isEmpty {
-                let set = Set(lastBuckets.needsAttention)
-                return workstreams.filter { set.contains($0.id) }
-            }
-            return workstreams.filter { $0.needsAttention }
+            return !lastBuckets.needsAttention.isEmpty
+                ? Set(lastBuckets.needsAttention)
+                : Set(workstreams.filter { $0.needsAttention }.map(\.id))
         case .active:
-            if !lastBuckets.active.isEmpty {
-                let set = Set(lastBuckets.active)
-                return workstreams.filter { set.contains($0.id) }
-            }
-            return workstreams.filter { $0.status == .active }
+            return !lastBuckets.active.isEmpty
+                ? Set(lastBuckets.active)
+                : Set(workstreams.filter { $0.status == .active }.map(\.id))
         case .shipped:
-            // No reliable model-level predicate for "shipped in window";
-            // depend on the daemon-supplied bucket. Empty list → empty floor.
-            let set = Set(lastBuckets.shipped)
-            return workstreams.filter { set.contains($0.id) }
+            return Set(lastBuckets.shipped)
         }
     }
 
@@ -158,12 +148,18 @@ struct HomeView: View {
                             Task { await resolver.retryConnection() }
                         }))
                     case .cards:
-                        TeamFloorView(
-                            workstreams: filteredWorkstreams,
-                            onSelect: onSelect,
+                        // v1.2: 4-column kanban replaces the old LazyVGrid.
+                        // Cards are draggable between columns; drop fires
+                        // PATCH /workstreams/:id with the new status. Filter
+                        // dimming is applied in-place rather than hiding
+                        // cards so columns don't reflow on every tap.
+                        KanbanBoardView(
+                            workstreams: workstreams,
+                            client: client,
+                            onCardTap: onSelect,
                             onLifecycleAction: onLifecycleAction,
                             activeFilter: filter,
-                            onClearFilter: { filter = .all }
+                            filteredIDs: filteredIDs
                         )
                     }
                 }
@@ -660,144 +656,7 @@ private struct HighlightRow: View {
     }
 }
 
-// MARK: - Team floor
-
-struct TeamFloorView: View {
-    let workstreams: [Workstream]
-    let onSelect: (Workstream) -> Void
-    let onLifecycleAction: (Workstream, HomeView.LifecycleAction) -> Void
-    /// Active digest-strip filter (`.all` when no filter is applied). Used
-    /// only to render the "Filtered to X — Clear" pill above the grid.
-    var activeFilter: HomeView.RadarFilter = .all
-    var onClearFilter: (() -> Void)? = nil
-
-    private let columns = [
-        GridItem(.adaptive(minimum: 280, maximum: 360), spacing: 16, alignment: .top)
-    ]
-
-    /// Floor renders only active + paused workstreams; retired ones live in
-    /// the sidebar's "Retired" disclosure group.
-    private var visibleWorkstreams: [Workstream] {
-        workstreams.filter { $0.status != .retired }
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if activeFilter != .all {
-                    filterPill
-                }
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                    ForEach(visibleWorkstreams) { ws in
-                        Button {
-                            onSelect(ws)
-                        } label: {
-                            WorkstreamCard(workstream: ws)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Open this workstream's timeline and memory")
-                        .contextMenu {
-                            cardMenu(for: ws)
-                        }
-                    }
-                }
-                if visibleWorkstreams.isEmpty && activeFilter != .all {
-                    emptyFilterMessage
-                }
-            }
-            .padding(20)
-        }
-        .background(Color(nsColor: .windowBackgroundColor))
-    }
-
-    private var filterLabel: String {
-        switch activeFilter {
-        case .all:      return ""
-        case .shipped:  return "Shipped"
-        case .blocked:  return "Blocked"
-        case .needsYou: return "Needs you"
-        case .active:   return "Active"
-        }
-    }
-
-    @ViewBuilder
-    private var filterPill: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "line.3.horizontal.decrease.circle.fill")
-                .imageScale(.small)
-                .foregroundStyle(.secondary)
-            Text("Filtered to ").font(.caption).foregroundStyle(.secondary)
-            + Text(filterLabel).font(.caption.weight(.semibold))
-            Spacer()
-            Button("Clear") { onClearFilter?() }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Clear the radar filter and show every workstream again")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.gray.opacity(0.08))
-        )
-    }
-
-    @ViewBuilder
-    private var emptyFilterMessage: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "tray")
-                .imageScale(.large)
-                .foregroundStyle(.tertiary)
-            Text("Nothing in this bucket right now.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
-    }
-
-    @ViewBuilder
-    private func cardMenu(for ws: Workstream) -> some View {
-        switch ws.status {
-        case .backlog:
-            Button {
-                onLifecycleAction(ws, .resume)
-            } label: {
-                Label("Move to Active", systemImage: "play.circle")
-            }
-            .help("Promote this workstream out of the backlog into the active column")
-        case .active:
-            Button {
-                onLifecycleAction(ws, .pause)
-            } label: {
-                Label("Pause", systemImage: "pause.circle")
-            }
-            .help("Pause this workstream — agents stop being scheduled, history is preserved")
-        case .paused:
-            Button {
-                onLifecycleAction(ws, .resume)
-            } label: {
-                Label("Resume", systemImage: "play.circle")
-            }
-            .help("Resume this workstream — agents become eligible to run again")
-        case .retired:
-            EmptyView()
-        }
-        Button {
-            onLifecycleAction(ws, .editTitle)
-        } label: {
-            Label("Edit title…", systemImage: "pencil")
-        }
-        .help("Rename this workstream")
-        Divider()
-        Button(role: .destructive) {
-            onLifecycleAction(ws, .retire)
-        } label: {
-            Label("Retire", systemImage: "archivebox")
-        }
-        .help("Archive this workstream — moves it out of the active grid")
-    }
-}
+// MARK: - Card
 
 struct WorkstreamCard: View {
     let workstream: Workstream

@@ -112,6 +112,24 @@ final class MockDaemonClientTests: XCTestCase {
         XCTAssertEqual(renamed.status, .paused)
     }
 
+    func testUpdateWorkstreamToBacklog() async throws {
+        // Kanban drag-from-Active-into-Backlog round-trips. Mock mirrors the
+        // daemon's `PATCH /workstreams/:id` shape, so verifying the mock is
+        // good proof that the wiring works end-to-end on the client side.
+        let client = MockDaemonClient(simulatedLatency: .zero)
+        let updated = try await client.updateWorkstream(
+            id: "frontend-refactor",
+            status: .backlog,
+            title: nil
+        )
+        XCTAssertEqual(updated.status, .backlog)
+        XCTAssertEqual(updated.id, "frontend-refactor")
+
+        let list = try await client.listWorkstreams()
+        let observed = try XCTUnwrap(list.first { $0.id == "frontend-refactor" })
+        XCTAssertEqual(observed.status, .backlog)
+    }
+
     func testUpdateUnknownWorkstreamThrows() async {
         let client = MockDaemonClient(simulatedLatency: .zero)
         do {
