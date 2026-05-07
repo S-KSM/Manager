@@ -7,8 +7,8 @@
 # so the daemon starts at login.
 #
 # Migrates legacy v1.1.x state (`~/.claude/manager/`, `com.manager.daemon`,
-# `claude mcp add manager`) to the v1.2 names. The MANAGER_* env vars are
-# still honored at runtime for one release (v1.3 removes them).
+# `claude mcp add manager`) to the v1.2 names. As of v1.3 the MANAGER_*
+# env-var fallback is gone — `DISPATCH_*` only.
 #
 # Usage:
 #   bash bin/install.sh           # interactive (confirms each step)
@@ -450,7 +450,7 @@ if confirm "Bootstrap $LABEL into $DOMAIN now?"; then
     ok "agent loaded"
     # Health probe.
     sleep 2
-    PORT="${DISPATCH_PORT:-${MANAGER_PORT:-9876}}"
+    PORT="${DISPATCH_PORT:-9876}"
     if curl -s --max-time 2 "http://127.0.0.1:$PORT/health" | grep -q '"ok":true'; then
       ok "daemon healthy on port $PORT"
     else

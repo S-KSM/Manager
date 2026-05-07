@@ -27,7 +27,7 @@ final class DaemonResolver: ObservableObject {
         case liveHealthy
         /// `/health` never answered after retries — assume the daemon is offline.
         case liveUnreachable
-        /// `DISPATCH_DAEMON=mock` (or legacy `MANAGER_DAEMON=mock`) env var.
+        /// `DISPATCH_DAEMON=mock` env var.
         case envOverride
         /// User picked it via the Cmd-Shift-M toggle.
         case userToggled
@@ -85,17 +85,8 @@ final class DaemonResolver: ObservableObject {
         }
 
         // Allow override via env var so devs can force mock mode without
-        // having to take the daemon down. `DISPATCH_DAEMON` is the v1.2+
-        // name; `MANAGER_DAEMON` is honored as a deprecated fallback for one
-        // release so existing scheme env vars don't silently stop working.
-        let env = ProcessInfo.processInfo.environment
-        let dispatchVar = env["DISPATCH_DAEMON"]
-        let legacyVar = env["MANAGER_DAEMON"]
-        if dispatchVar == nil, legacyVar != nil {
-            logger.notice("DaemonResolver: MANAGER_DAEMON is deprecated — set DISPATCH_DAEMON instead. Honoring legacy value for now.")
-        }
-        if let value = dispatchVar ?? legacyVar,
-           value.lowercased() == "mock" {
+        // having to take the daemon down.
+        if let mode = Self.pickModeFromEnv(ProcessInfo.processInfo.environment), mode == .mock {
             logger.info("DaemonResolver: DISPATCH_DAEMON=mock — using mock client.")
             switchTo(.mock, reason: .envOverride, client: MockDaemonClient())
             return
@@ -111,6 +102,20 @@ final class DaemonResolver: ObservableObject {
             // welcome screen with a Retry button, not five fake workstreams.
             logger.notice("DaemonResolver: no live daemon at \(self.liveBaseURL.absoluteString) after \(self.healthProbeAttempts) attempts — using empty client.")
             switchTo(.mock, reason: .liveUnreachable, client: MockDaemonClient.empty())
+        }
+    }
+
+    /// Resolve a `DISPATCH_DAEMON` env override into a Mode. Returns nil
+    /// when the var is unset or holds a value we don't recognize. Legacy
+    /// `MANAGER_DAEMON` is no longer honored — v1.3 deletes the fallback.
+    /// Pulled out as a static so it's testable without a full resolver;
+    /// `nonisolated` so XCTest can call it off the main actor.
+    nonisolated static func pickModeFromEnv(_ env: [String: String]) -> Mode? {
+        guard let raw = env["DISPATCH_DAEMON"]?.lowercased() else { return nil }
+        switch raw {
+        case "mock": return .mock
+        case "live": return .live
+        default: return nil
         }
     }
 

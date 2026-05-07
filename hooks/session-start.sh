@@ -9,8 +9,8 @@
 #           full document.
 #
 # Always exits 0. Skips the system-prompt nudge if DISPATCH_WORKSTREAM
-# (or legacy MANAGER_WORKSTREAM) is unset or jq isn't available
-# (degrade silently — never break the agent loop).
+# is unset or jq isn't available (degrade silently — never break the
+# agent loop).
 
 set -u
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -23,7 +23,7 @@ dispatch_post session-start
 
 # 2. SessionStart system-prompt nudge. Only emit if we know which workstream
 #    the session belongs to AND we have jq for safe JSON encoding.
-WS_FOR_NUDGE=$(dispatch__legacy_env DISPATCH_WORKSTREAM MANAGER_WORKSTREAM)
+WS_FOR_NUDGE="${DISPATCH_WORKSTREAM:-}"
 if [ -z "$WS_FOR_NUDGE" ]; then
   exit 0
 fi

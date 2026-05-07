@@ -52,6 +52,7 @@
 		A100000000000000000006A8 /* DispatchURLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006B8 /* DispatchURLParser.swift */; };
 		A100000000000000000006A9 /* URLRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006B9 /* URLRouter.swift */; };
 		A100000000000000000006AA /* DispatchURLParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006BA /* DispatchURLParserTests.swift */; };
+		A100000000000000000006AB /* DaemonResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006BB /* DaemonResolverTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -110,6 +111,7 @@
 		A100000000000000000006B8 /* DispatchURLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DispatchURLParser.swift; sourceTree = "<group>"; };
 		A100000000000000000006B9 /* URLRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLRouter.swift; sourceTree = "<group>"; };
 		A100000000000000000006BA /* DispatchURLParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DispatchURLParserTests.swift; sourceTree = "<group>"; };
+		A100000000000000000006BB /* DaemonResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonResolverTests.swift; sourceTree = "<group>"; };
 		A100000000000000000000C0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A100000000000000000000C1 /* Dispatch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Dispatch.entitlements; sourceTree = "<group>"; };
 		A100000000000000000000C2 /* Dispatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dispatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -171,6 +173,7 @@
 				A100000000000000000006B4 /* KanbanLogicTests.swift */,
 				A100000000000000000006B6 /* WorkstreamLinkCodableTests.swift */,
 				A100000000000000000006BA /* DispatchURLParserTests.swift */,
+				A100000000000000000006BB /* DaemonResolverTests.swift */,
 			);
 			path = DispatchTests;
 			sourceTree = "<group>";
@@ -446,6 +449,7 @@
 				A100000000000000000006A4 /* KanbanLogicTests.swift in Sources */,
 				A100000000000000000006A6 /* WorkstreamLinkCodableTests.swift in Sources */,
 				A100000000000000000006AA /* DispatchURLParserTests.swift in Sources */,
+				A100000000000000000006AB /* DaemonResolverTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
