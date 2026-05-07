@@ -3,11 +3,13 @@ import { EventStore } from './event-store.js';
 import {
   type LLMProvider,
   type LLMProviderName,
+  type ProviderOverrides,
   LLMConfigError,
   LLMUnreachableError,
   getProvider as defaultGetProvider,
 } from './llm/index.js';
 import { readEnvWithLegacy } from './config.js';
+import type { SettingsStore } from './settings-store.js';
 import type { WorkstreamRegistry } from './workstream.js';
 
 /**
@@ -33,7 +35,7 @@ import type { WorkstreamRegistry } from './workstream.js';
 export interface SubgoalSynthesizerOptions {
   registry: WorkstreamRegistry;
   eventStore: EventStore;
-  getProvider?: (name: LLMProviderName) => LLMProvider;
+  getProvider?: (name: LLMProviderName, overrides?: ProviderOverrides) => LLMProvider;
   /** Override default tick interval (ms). */
   tickIntervalMs?: number;
   /** Override default LLM provider name. */
@@ -42,6 +44,12 @@ export interface SubgoalSynthesizerOptions {
   model?: string;
   /** Minimum tool_use events in a row before we summarize. Default 8. */
   runThreshold?: number;
+  /**
+   * Optional settings source. When present, every tick re-reads provider /
+   * model / overrides — so a `PATCH /settings` from the macOS UI takes effect
+   * without restarting the daemon.
+   */
+  settings?: SettingsStore;
 }
 
 const DEFAULT_TICK_MS = 30_000;
@@ -69,11 +77,12 @@ interface ToolRun {
 export class SubgoalSynthesizer {
   private readonly registry: WorkstreamRegistry;
   private readonly eventStore: EventStore;
-  private readonly getProvider: (name: LLMProviderName) => LLMProvider;
+  private readonly getProvider: (name: LLMProviderName, overrides?: ProviderOverrides) => LLMProvider;
   private readonly tickIntervalMs: number;
   private readonly providerName: LLMProviderName;
   private readonly model: string;
   private readonly runThreshold: number;
+  private readonly settings: SettingsStore | undefined;
   private timer: NodeJS.Timeout | null = null;
   private running = false;
 
@@ -85,6 +94,7 @@ export class SubgoalSynthesizer {
     this.providerName = opts.providerName ?? resolveDefaultProvider();
     this.model = opts.model ?? resolveDefaultModel(this.providerName);
     this.runThreshold = opts.runThreshold ?? DEFAULT_RUN_THRESHOLD;
+    this.settings = opts.settings;
   }
 
   start(): void {
@@ -145,13 +155,27 @@ export class SubgoalSynthesizer {
     const lines = run.events.map(formatToolLine).filter((l) => l !== null);
     if (lines.length === 0) return null;
     const userPrompt = `Recent tool calls:\n${lines.join('\n')}`;
+
+    // Re-read provider/model/overrides from the settings store on every call
+    // so a runtime PATCH /settings takes effect without restart.
+    const providerName = this.settings?.getResolvedProvider() ?? this.providerName;
+    const model = this.settings?.getResolvedModel(providerName) ?? this.model;
+    const overrides: ProviderOverrides | undefined = this.settings
+      ? {
+          ...(this.settings.getResolvedAnthropicApiKey() !== undefined
+            ? { anthropicApiKey: this.settings.getResolvedAnthropicApiKey() as string }
+            : {}),
+          ollamaUrl: this.settings.getResolvedOllamaUrl(),
+        }
+      : undefined;
+
     let raw: string;
     try {
-      const llm = this.getProvider(this.providerName);
+      const llm = this.getProvider(providerName, overrides);
       raw = await llm.generate({
         system: SYSTEM_PROMPT,
         user: userPrompt,
-        model: this.model,
+        model,
         max_tokens: 80,
       });
     } catch (err) {

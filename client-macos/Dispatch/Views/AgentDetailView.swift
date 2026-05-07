@@ -72,7 +72,7 @@ struct AgentDetailView: View {
                     }
                 )
             }
-            .frame(minWidth: 360, idealWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
+            .frame(minWidth: 280, idealWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
 
             VStack(alignment: .leading, spacing: 0) {
                 memoryHeader
@@ -96,7 +96,7 @@ struct AgentDetailView: View {
                     isLoading: loadingMemory
                 )
             }
-            .frame(minWidth: 280, idealWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
+            .frame(minWidth: 220, idealWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle(workstream.title)
@@ -163,9 +163,16 @@ struct AgentDetailView: View {
             // thinks / blocks / sleeps based on the workstream's projection.
             RobotMascot(workstream: workstream, size: 56)
             VStack(alignment: .leading, spacing: 2) {
-                Text(workstream.title).font(.title2.weight(.semibold))
+                Text(workstream.title)
+                    .font(.title2.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 HStack(spacing: 6) {
-                    Text(workstream.id).font(.caption).foregroundStyle(.secondary)
+                    Text(workstream.id)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                     if let activity = currentActivityLine {
                         Text("·").foregroundStyle(.tertiary)
                         Image(systemName: "hammer")
@@ -179,15 +186,22 @@ struct AgentDetailView: View {
                     }
                 }
             }
-            Spacer()
+            .layoutPriority(1)
+            Spacer(minLength: 8)
             HStack(spacing: 6) {
                 Circle().fill(workstream.statusColor).frame(width: 8, height: 8)
-                Text(workstream.statusLabel).font(.caption)
+                Text(workstream.statusLabel)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .fixedSize()
             }
             if workstream.needsAttention {
                 Label("Needs you", systemImage: "exclamationmark.bubble.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.orange)
+                    .labelStyle(.titleAndIcon)
+                    .lineLimit(1)
+                    .fixedSize()
             }
             Button {
                 showInterventionPanel = true

@@ -19,6 +19,8 @@ v1.2 code-layer rename shipped. Daemon binary is `dispatch`, env vars are `DISPA
 
 **v1.4 Symphony orchestration shipped (substeps 0–4):** orchestrator state machine + retry/reconciliation, workspace manager + hooks, Claude Code agent runner (option A — spawn per turn), `WORKFLOW.md` loader + Linear adapter + dynamic reload, approval-required intervention kind + `/workstreams/:id/interventions/:intId/decide` endpoint + macOS Approve/Deny strip in `AgentDetailView`. Observation mode unchanged when no `--workflow` is passed. See `TODO.md` for deferred items (workstream_links SQLite join, gc CLI, MCP tool that emits approval requests).
 
+**v1.4.5 UX wave shipped:** Settings → **Providers** tab (`GET/PATCH /settings`, `~/.claude/dispatch/settings.json`, redacted API key on the wire) so local-model setup no longer needs env vars; Sleeping Robot mascot — daemon emits `live_session` per workstream (latest `session_start` newer than `session_end`), `RobotMascot` dims + closes eyes + floats `Zzz` when the underlying `claude` session ends; first-launch demo-data race fix in `DaemonResolver`; `WelcomeView` rewrite (3 numbered steps + copy-able `claude` snippet + Tutorial/Providers/Architecture links); `AgentDetailView` HSplitView reflows below 820 width; `DigestRailView` chips horizontal-scroll; tooltips across HomeView/WelcomeView/PreferencesView; bundled `TUTORIAL.md` + `LOCAL_MODELS.md` refreshed for v1.4 + Settings → Providers.
+
 Kanban + Linear-link UI (the v1.2 deliverables) and MLX-backed local LLM (v1.3) are not yet shipped — but the v1.4 Linear adapter implements the same GraphQL surface, so the v1.2 link UI is now mostly a presentation-layer task.
 
 ## Locked architectural decisions

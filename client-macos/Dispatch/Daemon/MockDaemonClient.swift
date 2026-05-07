@@ -193,7 +193,8 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
             needsAttention: false,
             todos: nil,
             latestActivity: nil,
-            lastEventAt: nil
+            lastEventAt: nil,
+            liveSession: false
         )
         lock.lock()
         // If a workstream with this id already exists, replace it. Otherwise
@@ -229,7 +230,8 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
             needsAttention: old.needsAttention,
             todos: old.todos,
             latestActivity: old.latestActivity,
-            lastEventAt: old.lastEventAt
+            lastEventAt: old.lastEventAt,
+            liveSession: old.liveSession
         )
         _workstreams[idx] = updated
         return updated
@@ -536,6 +538,53 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
     func deleteReport(id: String) async throws -> Report {
         // Soft-delete: flip to archived, mirror updateReport(.archived).
         return try await updateReport(id: id, fields: ReportUpdateFields(status: .archived))
+    }
+
+    // MARK: - v1.5: provider settings
+
+    /// In-memory mirror of the daemon's persisted settings file. Defaults
+    /// match `SettingsStore`'s fallbacks (Ollama, qwen3:4b, no API key).
+    /// Tests can verify roundtrips by inspecting `settingsSnapshot`.
+    private var _settings: ProviderSettings = ProviderSettings(
+        headlineProvider: .ollama,
+        headlineModel: "qwen3:4b",
+        ollamaURL: "http://localhost:11434",
+        anthropicAPIKeyConfigured: false
+    )
+    /// Captured cleartext key for tests; never returned via the protocol.
+    private var _settingsAnthropicKey: String?
+
+    var settingsSnapshot: ProviderSettings {
+        lock.lock()
+        defer { lock.unlock() }
+        return _settings
+    }
+
+    func getSettings() async throws -> ProviderSettings {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        defer { lock.unlock() }
+        return _settings
+    }
+
+    func patchSettings(_ patch: ProviderSettingsPatch) async throws -> ProviderSettings {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        defer { lock.unlock() }
+        if let p = patch.headlineProvider { _settings.headlineProvider = p }
+        if let m = patch.headlineModel { _settings.headlineModel = m }
+        if let u = patch.ollamaURL { _settings.ollamaURL = u }
+        if let key = patch.anthropicAPIKey {
+            // Empty string clears, anything else sets.
+            if key.isEmpty {
+                _settingsAnthropicKey = nil
+                _settings.anthropicAPIKeyConfigured = false
+            } else {
+                _settingsAnthropicKey = key
+                _settings.anthropicAPIKeyConfigured = true
+            }
+        }
+        return _settings
     }
 
     func listSchedulerJobs() async throws -> [SchedulerJob] {

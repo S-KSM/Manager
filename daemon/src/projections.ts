@@ -29,6 +29,16 @@ export interface WorkstreamProjections {
    * `todos` (the agent's actual plan) when present; this is the fallback.
    */
   latest_activity: string | null;
+  /**
+   * "Has a Claude Code session running right now" — derived as: the most
+   * recent `session_start` (by `ts`) is newer than the most recent
+   * `session_end` (by `ts`). `false` when no `session_start` has ever been
+   * emitted, or when the latest `session_end` is at-or-after the latest
+   * `session_start`. Pure presentation signal — independent of the
+   * workstream's lifecycle status (active / paused / retired). Drives the
+   * macOS Radar's awake/asleep robot mascot.
+   */
+  live_session: boolean;
 }
 
 /** Mirrors Claude Code's TodoWrite item shape; permissive on extras. */
@@ -86,6 +96,7 @@ export function projectFromEvents(events: ManagerEvent[]): WorkstreamProjections
       needs_attention: false,
       todos: null,
       latest_activity: null,
+      live_session: false,
     };
   }
 
@@ -108,6 +119,10 @@ export function projectFromEvents(events: ManagerEvent[]): WorkstreamProjections
   // latest_activity: humanized last tool_use string.
   let latestActivity: string | null = null;
   let latestActivityTs: string | null = null;
+
+  // live_session: latest session_start vs. latest session_end. Compared as ISO
+  // strings (lexicographic order matches chronological order for ISO-8601).
+  let latestSessionStartTs: string | null = null;
 
   for (const ev of events) {
     if (!ev || typeof ev !== 'object') continue;
@@ -163,6 +178,12 @@ export function projectFromEvents(events: ManagerEvent[]): WorkstreamProjections
           latestSessionEndAny = ts;
         }
       }
+    } else if (type === 'session_start') {
+      if (ts !== null) {
+        if (latestSessionStartTs === null || ts >= latestSessionStartTs) {
+          latestSessionStartTs = ts;
+        }
+      }
     } else if (type === 'tool_use') {
       // Update humanized "Currently:" projection on every tool_use, not just
       // TodoWrite — most calls are Edit/Read/Bash etc.
@@ -210,12 +231,25 @@ export function projectFromEvents(events: ManagerEvent[]): WorkstreamProjections
   const currentSubgoal =
     subgoalStack.length > 0 ? (subgoalStack[subgoalStack.length - 1] ?? null) : null;
 
+  // Awake iff there's a session_start newer than every session_end. No
+  // session_start ever ⇒ asleep. session_end newer than (or tied with) the
+  // latest session_start ⇒ asleep.
+  let liveSession = false;
+  if (latestSessionStartTs !== null) {
+    if (latestSessionEndAny === null) {
+      liveSession = true;
+    } else if (latestSessionStartTs > latestSessionEndAny) {
+      liveSession = true;
+    }
+  }
+
   return {
     current_subgoal: currentSubgoal,
     latest_confidence: latestConfidence,
     needs_attention: needsAttention,
     todos: latestTodos,
     latest_activity: latestActivity,
+    live_session: liveSession,
   };
 }
 

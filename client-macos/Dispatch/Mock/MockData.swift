@@ -50,7 +50,8 @@ enum MockData {
                      activeForm: "Dropping Redux from non-offline views")
             ],
             latestActivity: "Editing src/dashboard/billing/queries.ts",
-            lastEventAt: minutesAgo(2)
+            lastEventAt: minutesAgo(2),
+            liveSession: true
         ),
         Workstream(
             id: "auth-hardening",
@@ -65,7 +66,8 @@ enum MockData {
             // path in WorkstreamCard.
             todos: nil,
             latestActivity: "Running: ./scripts/replay_refresh_token.sh --concurrent",
-            lastEventAt: minutesAgo(7)
+            lastEventAt: minutesAgo(7),
+            liveSession: true
         ),
         Workstream(
             id: "infra-cost",
@@ -78,7 +80,10 @@ enum MockData {
             needsAttention: false,
             todos: nil,
             latestActivity: "Running: kubectl top nodes",
-            lastEventAt: minutesAgo(18)
+            lastEventAt: minutesAgo(18),
+            // Lifecycle is still active but the claude session has died —
+            // showcases the awake/asleep distinction.
+            liveSession: false
         ),
         Workstream(
             id: "marketing-copy",
@@ -91,7 +96,9 @@ enum MockData {
             needsAttention: false,
             todos: nil,
             latestActivity: nil,
-            lastEventAt: hoursAgo(6)
+            lastEventAt: hoursAgo(6),
+            // Paused + no live session — the typical "asleep" pairing.
+            liveSession: false
         ),
         Workstream(
             id: "search-rerank",
@@ -104,7 +111,8 @@ enum MockData {
             needsAttention: false,
             todos: nil,
             latestActivity: nil,
-            lastEventAt: daysAgo(1)
+            lastEventAt: daysAgo(1),
+            liveSession: false
         )
     ]
 

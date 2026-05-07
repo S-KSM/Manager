@@ -57,10 +57,27 @@ export class LLMRequestError extends Error {
   }
 }
 
-/** Factory returning a fresh provider for the given name. */
-export function getProvider(name: LLMProviderName): LLMProvider {
-  if (name === 'claude') return new ClaudeProvider();
-  if (name === 'ollama') return new OllamaProvider();
+/**
+ * Optional overrides used to seed the provider with values that came from the
+ * settings file rather than env vars. Either field may be omitted; in that
+ * case the provider falls back to its existing env-var lookup.
+ */
+export interface ProviderOverrides {
+  /** Anthropic API key. Wins over `ANTHROPIC_API_KEY`. */
+  anthropicApiKey?: string;
+  /** Ollama base URL. Wins over `OLLAMA_URL`. */
+  ollamaUrl?: string;
+}
+
+/**
+ * Factory returning a fresh provider for the given name. The optional second
+ * argument lets callers (the headliner, the report endpoint) inject the
+ * settings-store-resolved values so a user-typed API key / URL works without
+ * them having to be in the daemon's process env.
+ */
+export function getProvider(name: LLMProviderName, overrides?: ProviderOverrides): LLMProvider {
+  if (name === 'claude') return new ClaudeProvider(undefined, overrides?.anthropicApiKey);
+  if (name === 'ollama') return new OllamaProvider(overrides?.ollamaUrl);
   throw new LLMConfigError(`Unknown LLM provider: ${name}`);
 }
 

@@ -33,9 +33,16 @@ interface AnthropicClientLike {
 export class ClaudeProvider implements LLMProvider {
   readonly name = 'claude' as const;
   private client: AnthropicClientLike | null;
+  /**
+   * Optional API key override. When set, takes precedence over the
+   * `ANTHROPIC_API_KEY` env var so the daemon can authenticate using a key
+   * the user typed into the macOS Settings → Providers tab.
+   */
+  private readonly apiKey?: string;
 
-  constructor(client?: AnthropicClientLike) {
+  constructor(client?: AnthropicClientLike, apiKey?: string) {
     this.client = client ?? null;
+    if (apiKey !== undefined) this.apiKey = apiKey;
   }
 
   async generate(args: LLMGenerateArgs): Promise<string> {
@@ -63,10 +70,10 @@ export class ClaudeProvider implements LLMProvider {
 
   private ensureClient(): AnthropicClientLike {
     if (this.client) return this.client;
-    const apiKey = process.env['ANTHROPIC_API_KEY'];
+    const apiKey = this.apiKey ?? process.env['ANTHROPIC_API_KEY'];
     if (!apiKey) {
       throw new LLMConfigError(
-        'ANTHROPIC_API_KEY is not set. Export it in your shell before generating Claude reports.',
+        'Anthropic API key not set. Add it in Settings → Providers, or export ANTHROPIC_API_KEY in your shell.',
       );
     }
     this.client = new Anthropic({ apiKey }) as unknown as AnthropicClientLike;

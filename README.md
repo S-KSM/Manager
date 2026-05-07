@@ -4,6 +4,8 @@
 
 Air-traffic-control for AI agents. Agents are pilots; you're the head dispatcher. Watch the radar, trace methodology, intercept errors, broadcast new protocols across the fleet.
 
+> **New here?** Walk through [`docs/TUTORIAL.md`](docs/TUTORIAL.md) (also available in-app under **Help → Tutorial**, alongside Local model setup, Architecture, and the GitHub repo).
+
 > Originally codenamed **Manager**; rebranded to Dispatch in v1.1.x and the code-layer rename landed in v1.2 (binary `dispatch`, `DISPATCH_*` env vars, state at `~/.claude/dispatch/`). Legacy `MANAGER_*` env vars are still read as a backwards-compat fallback for one release and removed in v1.3.
 
 ## Quickstart (60 seconds)

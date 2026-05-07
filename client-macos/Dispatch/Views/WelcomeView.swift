@@ -63,9 +63,10 @@ struct WelcomeView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Welcome to Dispatch")
                         .font(.title2.weight(.semibold))
-                    Text("Mission control for AI agents.")
+                    Text("Mission control for AI agents — open a terminal in any project and run `claude`. This window is the Radar.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         case .daemonDown:
@@ -76,9 +77,10 @@ struct WelcomeView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Daemon not running")
                         .font(.title2.weight(.semibold))
-                    Text("Dispatch couldn't reach the brain on localhost:9876.")
+                    Text("Dispatch couldn't reach the brain on localhost:9876. Run `dispatch start` in a terminal, or check Settings → Daemon.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -88,21 +90,24 @@ struct WelcomeView: View {
     private func body(for mode: Mode) -> some View {
         switch mode {
         case .welcome:
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Start a workstream")
-                    .font(.headline)
-                Text("`cd` into any project and run `claude`. Dispatch's hooks register the session and a card lights up here within seconds.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 14) {
+                step(number: 1,
+                     title: "Daemon healthy",
+                     detail: "The brain on localhost:9876 is up. You're good to go.")
+                step(number: 2,
+                     title: "Open a terminal in any project, run `claude`",
+                     detail: "Dispatch's hooks register the session automatically — no extra setup.")
                 codeBlock
+                step(number: 3,
+                     title: "Watch the Radar populate",
+                     detail: "A workstream card lights up here within seconds. Click it to see the Trace and open an Intercept.")
             }
         case .daemonDown(let retry):
             VStack(alignment: .leading, spacing: 12) {
                 Text("Common causes")
                     .font(.headline)
                 VStack(alignment: .leading, spacing: 6) {
-                    bullet("First launch — the launchd agent is still starting. Click Retry.")
+                    bullet("First launch — the launchd agent is still starting. Click Start daemon below.")
                     bullet("Node 20+ not on PATH. The daemon shells out to `node`; install via `brew install node`.")
                     bullet("Port 9876 occupied by something else.")
                 }
@@ -121,7 +126,7 @@ struct WelcomeView: View {
                         if retrying {
                             ProgressView().controlSize(.small)
                         } else {
-                            Label("Retry", systemImage: "arrow.clockwise")
+                            Label("Start daemon", systemImage: "play.circle")
                         }
                     }
                     .controlSize(.large)
@@ -138,22 +143,29 @@ struct WelcomeView: View {
             HStack(spacing: 6) {
                 Image(systemName: "book")
                     .foregroundStyle(.tertiary)
-                Button("Open the tutorial") {
+                Button("Tutorial") {
                     if let url = bundledDoc("TUTORIAL.md") {
                         NSWorkspace.shared.open(url)
                     }
                 }
                 .buttonStyle(.link)
-                .help("docs/TUTORIAL.md — 30-minute walk-through.")
+                .help("Open the bundled tutorial — also available under Help → Tutorial.")
                 Text("·")
                     .foregroundStyle(.tertiary)
-                Button("Local model setup") {
-                    if let url = bundledDoc("LOCAL_MODELS.md") {
+                Button("Providers (local model)") {
+                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                }
+                .buttonStyle(.link)
+                .help("Open Settings → Providers (⌘,) to pick a local model or set ANTHROPIC_API_KEY.")
+                Text("·")
+                    .foregroundStyle(.tertiary)
+                Button("Architecture") {
+                    if let url = bundledDoc("ARCHITECTURE.md") {
                         NSWorkspace.shared.open(url)
                     }
                 }
                 .buttonStyle(.link)
-                .help("docs/LOCAL_MODELS.md — wire up Ollama or set ANTHROPIC_API_KEY.")
+                .help("docs/ARCHITECTURE.md — wire contract, event schema, components.")
             }
             .font(.callout)
         }
@@ -163,6 +175,26 @@ struct WelcomeView: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text("•")
             Text(.init(text))
+        }
+    }
+
+    private func step(number: Int, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(number)")
+                .font(.system(.callout, design: .rounded).weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 24, height: 24)
+                .background(
+                    Circle().fill(Color.accentColor)
+                )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(.init(title))
+                    .font(.callout.weight(.semibold))
+                Text(.init(detail))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -199,8 +231,9 @@ struct WelcomeView: View {
             }
             .buttonStyle(.bordered)
             .padding(8)
-            .help("Copy the snippet to the clipboard.")
+            .help("Copy command to the clipboard.")
         }
+        .padding(.leading, 36)
     }
 
     private func bundledDoc(_ name: String) -> URL? {

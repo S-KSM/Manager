@@ -23,6 +23,10 @@ ollama pull qwen3:8b
 
 No daemon restart, no env var, no config file. The daemon talks to Ollama on demand at `http://localhost:11434`.
 
+> You can also set the default provider/model app-wide in **Settings → Providers** (gear icon → Providers tab). New Updates inherit it; per-Update overrides still work in the Generate Update sheet. Headless setups that never open the macOS app should use the env-var route in [Pointing the daemon at a non-default Ollama URL](#pointing-the-daemon-at-a-non-default-ollama-url) and [Alternative: Anthropic API](#alternative-anthropic-api) below.
+
+**Supported providers today:** `claude` (Anthropic API) and `ollama` (any model Ollama can serve). MLX-backed local inference is on the roadmap (v1.3, deferred) — track it in [`ROADMAP.md`](ROADMAP.md).
+
 ## Recommended models
 
 The daemon defaults to `qwen3:8b` because it's the best quality-per-byte we've measured on Updates-style summarization. Anything Ollama can serve will work; some other reasonable picks:

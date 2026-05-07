@@ -2,6 +2,8 @@
 
 This is a hands-on walkthrough. By the end you'll have two agents running in parallel, you'll have intercepted one mid-flight, and you'll have promoted a skill to the team Protocol. Estimate: 20–30 minutes.
 
+> **You're reading this from the Help menu** (Help → Tutorial). The same doc is also bundled at `docs/TUTORIAL.md` in the repo. Other entries: **Help → Local model setup** (Ollama wiring), **Help → Architecture** (event schema, wire contract), **Help → GitHub repo**.
+
 > **Lexicon refresher** — Dispatch is mission control for AI agents. **Radar** = live multi-agent home view. **Trace** = methodology timeline. **Intercept** = mid-flight nudge / redirect / rollback. **Protocol** = team-wide skill broadcast. **Dossier** = per-workstream Markdown memory. The agent runtime is Claude Code; everything below assumes you've got `claude` on your `$PATH`.
 
 ## 0. Install (if you haven't)
@@ -26,8 +28,10 @@ curl -s http://localhost:9876/health
 Expect:
 
 ```json
-{"ok":true,"version":"1.1.x","uptime_ms":...}
+{"ok":true,"version":"1.4.x","uptime_ms":...}
 ```
+
+If you installed via the **DMG**, the .app self-installs the launchd agent on first launch — you don't need `bin/install.sh` for the daemon. You will still want it for the Claude Code lifecycle hooks (`bin/install.sh --skip-app`) so workstreams auto-register when you run `claude`.
 
 If you get `Connection refused`, kick it:
 
@@ -39,7 +43,7 @@ tail -f ~/Library/Logs/dispatch.daemon.err.log
 
 ## 2. Open the macOS app
 
-Launch **Manager** (the app's display name still says Manager until v1.2 — same binary, Dispatch brand). You'll see four areas:
+Launch **Dispatch** (`/Applications/Dispatch.app`). You'll see four areas:
 
 - **Sidebar (left)** — workstream list, lifecycle actions (create / pause / retire), and navigation between Radar / Updates / Protocol panes.
 - **The Radar (center, default view)** — digest rail at the top (today's headline numbers), team-floor cards for each active workstream, live event ticker. Glanceable status for every agent.
@@ -139,11 +143,24 @@ You've now got two workstreams with rich Traces, an intercept history, and a pro
 - **Where Dossiers live on disk** — `~/.claude/dispatch/memory/<workstream-id>.md`. Plain Markdown, agent-curated via `update_memory`. You can read or edit it by hand if you want to seed an agent with context.
 - **Where everything else lives** — `~/.claude/dispatch/db.sqlite` (workstream registry, intercept queue, skill proposals, saved Updates), `~/.claude/dispatch/events/<id>.jsonl` (append-only event log per workstream), `~/.claude/dispatch/handbook.md` (team Protocol). All local. No cloud, no auth, no remote access through v1.
 
+## 9. (Optional) Autonomous mode
+
+Everything above is **observation mode** — you launched `claude` by hand; Dispatch watched. Dispatch can also *drive*: an orchestrator polls a tracker (Linear or a JSON-mock), claims tickets, and spawns `claude` per turn inside a per-issue workspace. Same hooks, same MCP, same Trace — Radar and Intercept work identically for orchestrator-spawned agents.
+
+To turn it on you need a `WORKFLOW.md` file (frontmatter declares the tracker + workspace + agent runtime; the body is the per-turn prompt template). Then:
+
+```sh
+export LINEAR_TOKEN=lin_api_...                     # or use tracker.kind: mock
+dispatch start --workflow ~/dispatch/WORKFLOW.md
+```
+
+When an autonomous agent needs human authorization for a destructive action, an **approval_required** Intercept lands as an Approve / Deny strip in the agent detail view. Approving emits `intervention_delivered` with `approved: true` so the agent's next turn knows it was cleared. Full schema, tracker adapters, and error categories are in [`ARCHITECTURE.md`](ARCHITECTURE.md) under "Orchestrator (v1.4 — autonomous mode)".
+
 ## What's next
 
-- **Generate your first Update** — sidebar → Updates → +. Pick a period, pick a provider (Claude API needs `ANTHROPIC_API_KEY`; local models need Ollama running — see [`LOCAL_MODELS.md`](LOCAL_MODELS.md)).
+- **Generate your first Update** — sidebar → Updates → +. Pick a period, pick a provider (Claude API needs `ANTHROPIC_API_KEY`; local models need Ollama running — see [`LOCAL_MODELS.md`](LOCAL_MODELS.md), or open it from **Help → Local model setup**).
 - **Schedule weekly / monthly Updates** — Updates pane → Settings → Scheduler. Cron expressions are croner-flavored.
-- **Read the architecture** — [`ARCHITECTURE.md`](ARCHITECTURE.md) has the full event schema, HTTP+WebSocket contract, and component diagrams.
-- **Check the roadmap** — [`ROADMAP.md`](ROADMAP.md) for what's coming (v1.2 code-layer rename, v1.5 mobile / remote auth, v2 non-coding workflows).
+- **Read the architecture** — [`ARCHITECTURE.md`](ARCHITECTURE.md) (also **Help → Architecture**) has the full event schema, HTTP+WebSocket contract, and component diagrams.
+- **Check the roadmap** — [`ROADMAP.md`](ROADMAP.md) for what's shipped vs. coming (v1.5 mobile / remote auth, v2 non-coding workflows).
 
 If you get stuck, check `~/Library/Logs/dispatch.daemon.err.log` first — the daemon is verbose about hook payloads, MCP calls, and provider errors.

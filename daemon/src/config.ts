@@ -17,6 +17,12 @@ export interface DaemonConfig {
   readonly queuesDir: string;
   /** SQLite registry of workstreams + sessions. */
   readonly dbPath: string;
+  /**
+   * JSON file holding user-overridable LLM settings (provider, model, ollama
+   * URL, anthropic API key). Edited via `PATCH /settings` from the macOS
+   * Settings → Providers tab.
+   */
+  readonly settingsPath: string;
   /** HTTP/WS port. Default 9876, overridable with `DISPATCH_PORT`. */
   readonly httpPort: number;
 }
@@ -76,6 +82,7 @@ export function getConfig(): DaemonConfig {
     memoryDir: join(home, 'memory'),
     queuesDir: join(home, 'queues'),
     dbPath: join(home, 'db.sqlite'),
+    settingsPath: join(home, 'settings.json'),
     httpPort,
   };
 }

@@ -43,6 +43,14 @@ struct Workstream: Identifiable, Codable, Hashable, Sendable {
     let activityHeadline: String?
     let activityHeadlineAt: Date?
     let lastEventAt: Date?
+    /// "Has a Claude Code session running right now" — derived daemon-side
+    /// from the event log: latest `session_start` newer than latest
+    /// `session_end`. Pure presentation signal; independent of the
+    /// lifecycle `status`. Drives the awake/asleep robot mascot on the
+    /// Radar grid and on AgentDetailView's header. Defaults to `true`
+    /// (awake) when the daemon doesn't ship the field yet, so a pre-feature
+    /// daemon doesn't make every robot look dead.
+    let liveSession: Bool
 
     init(
         id: String,
@@ -58,7 +66,8 @@ struct Workstream: Identifiable, Codable, Hashable, Sendable {
         latestActivity: String? = nil,
         activityHeadline: String? = nil,
         activityHeadlineAt: Date? = nil,
-        lastEventAt: Date? = nil
+        lastEventAt: Date? = nil,
+        liveSession: Bool = true
     ) {
         self.id = id
         self.title = title
@@ -74,6 +83,7 @@ struct Workstream: Identifiable, Codable, Hashable, Sendable {
         self.activityHeadline = activityHeadline
         self.activityHeadlineAt = activityHeadlineAt
         self.lastEventAt = lastEventAt
+        self.liveSession = liveSession
     }
 
     enum CodingKeys: String, CodingKey {
@@ -91,6 +101,29 @@ struct Workstream: Identifiable, Codable, Hashable, Sendable {
         case activityHeadline = "activity_headline"
         case activityHeadlineAt = "activity_headline_at"
         case lastEventAt = "last_event_at"
+        case liveSession = "live_session"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(String.self, forKey: .id)
+        self.title = try c.decode(String.self, forKey: .title)
+        self.createdAt = try c.decode(Date.self, forKey: .createdAt)
+        self.status = try c.decode(Status.self, forKey: .status)
+        self.memoryPath = try c.decodeIfPresent(String.self, forKey: .memoryPath)
+        self.sessions = try c.decodeIfPresent([String].self, forKey: .sessions) ?? []
+        self.currentSubgoal = try c.decodeIfPresent(String.self, forKey: .currentSubgoal)
+        self.latestConfidence = try c.decodeIfPresent(Double.self, forKey: .latestConfidence)
+        self.needsAttention = try c.decodeIfPresent(Bool.self, forKey: .needsAttention) ?? false
+        self.todos = try c.decodeIfPresent([Todo].self, forKey: .todos)
+        self.latestActivity = try c.decodeIfPresent(String.self, forKey: .latestActivity)
+        self.activityHeadline = try c.decodeIfPresent(String.self, forKey: .activityHeadline)
+        self.activityHeadlineAt = try c.decodeIfPresent(Date.self, forKey: .activityHeadlineAt)
+        self.lastEventAt = try c.decodeIfPresent(Date.self, forKey: .lastEventAt)
+        // Default to awake for pre-feature daemons (no field on the wire) so
+        // we don't falsely accuse robots of sleeping during boot or against
+        // an older daemon.
+        self.liveSession = try c.decodeIfPresent(Bool.self, forKey: .liveSession) ?? true
     }
 }
 

@@ -15,12 +15,14 @@ import type {
 import {
   type LLMProvider,
   type LLMProviderName,
+  type ProviderOverrides,
   LLMConfigError,
   LLMUnreachableError,
   getProvider as defaultGetProvider,
 } from './llm/index.js';
 import type { MemoryStore } from './memory-store.js';
 import type { Orchestrator } from './orchestrator.js';
+import type { SettingsStore } from './settings-store.js';
 import { projectFromEvents } from './projections.js';
 import { assembleReport } from './report-engine.js';
 import { renderUserPrompt } from './report-prompt.js';
@@ -48,8 +50,15 @@ interface BuildOptions {
   headlineStore?: HeadlineStore;
   /** Optional orchestrator (v1.4+). When absent, /orchestrator/state returns 404. */
   orchestrator?: Orchestrator;
+  /**
+   * Persisted user-editable LLM settings. When present:
+   *   - `GET /settings` and `PATCH /settings` are served (404 otherwise),
+   *   - `/reports/generate` reads the stored API key + Ollama URL when the
+   *     caller doesn't override them per-request.
+   */
+  settings?: SettingsStore;
   /** Override the LLM provider factory; used by tests to inject mocks. */
-  getProvider?: (name: LLMProviderName) => LLMProvider;
+  getProvider?: (name: LLMProviderName, overrides?: ProviderOverrides) => LLMProvider;
 }
 
 const VALID_REPORT_STATUSES: ReadonlySet<ReportStatus> = new Set(['draft', 'saved', 'archived']);
@@ -108,6 +117,7 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     scheduler,
     headlineStore,
     orchestrator,
+    settings,
   } = opts;
   const getProvider = opts.getProvider ?? defaultGetProvider;
   const app = express();
@@ -147,6 +157,7 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
       needs_attention: projections.needs_attention,
       todos: projections.todos,
       latest_activity: projections.latest_activity,
+      live_session: projections.live_session,
       activity_headline: headline?.text ?? null,
       activity_headline_at: headline?.generatedAt ?? null,
       last_event_at: lastEventAt,
@@ -157,6 +168,49 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
 
   app.get('/health', (_req: Request, res: Response) => {
     res.json({ ok: true });
+  });
+
+  // ---- Settings (v1.5: surface LLM provider config in macOS Settings) ------
+
+  /**
+   * Read user-editable LLM settings. The Anthropic API key is redacted to a
+   * boolean (`anthropicApiKeyConfigured`) — clients never see the value, even
+   * one they themselves wrote, since it's a sensitive credential.
+   *
+   * Returns 404 when the daemon was built without a SettingsStore (test harness
+   * scenarios). Production always wires it.
+   */
+  app.get('/settings', (_req: Request, res: Response) => {
+    if (!settings) {
+      res.status(404).json({ error: 'settings store not enabled' });
+      return;
+    }
+    res.json(settings.serializeForWire());
+  });
+
+  /**
+   * Apply a partial settings patch and persist. Body shape mirrors the wire
+   * GET shape, but `anthropicApiKey` (the cleartext key) is accepted as a
+   * write-only field — pass an empty string to clear it.
+   *
+   * Validation lives in `SettingsStore.patch`; on bad input we surface the
+   * thrown error message as a 400 so the macOS Settings UI can render it
+   * verbatim. The 200 response is the redacted wire shape, matching GET.
+   */
+  app.patch('/settings', (req: Request, res: Response) => {
+    if (!settings) {
+      res.status(404).json({ error: 'settings store not enabled' });
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      settings.patch(body);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(400).json({ error: message });
+      return;
+    }
+    res.json(settings.serializeForWire());
   });
 
   // ---- Orchestrator (v1.4+) ------------------------------------------------
@@ -735,9 +789,20 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     });
 
     const model = typeof body.model === 'string' && body.model.length > 0 ? body.model : null;
+    // Pass settings-derived overrides so a key/URL the user typed into
+    // Settings → Providers reaches the provider without needing to be in the
+    // daemon's process env.
+    const overrides: ProviderOverrides | undefined = settings
+      ? {
+          ...(settings.getResolvedAnthropicApiKey() !== undefined
+            ? { anthropicApiKey: settings.getResolvedAnthropicApiKey() as string }
+            : {}),
+          ollamaUrl: settings.getResolvedOllamaUrl(),
+        }
+      : undefined;
     let bodyMd: string;
     try {
-      const llm = getProvider(provider);
+      const llm = getProvider(provider, overrides);
       bodyMd = await llm.generate({
         system: systemPrompt,
         user: userPrompt,

@@ -88,17 +88,24 @@ struct Digest: Codable, Sendable, Hashable {
     let totals: DigestTotals
     let buckets: DigestBuckets
     let highlights: [DigestHighlight]
+    /// Workstream ids whose latest `session_start` is newer than its latest
+    /// `session_end` — i.e. there's a Claude Code session running right now.
+    /// Empty when no daemon ever wrote the field (pre-feature build), which
+    /// the client treats as "unknown — render robots awake".
+    let liveSessions: [String]
 
     init(
         since: Date,
         totals: DigestTotals,
         buckets: DigestBuckets = DigestBuckets(),
-        highlights: [DigestHighlight]
+        highlights: [DigestHighlight],
+        liveSessions: [String] = []
     ) {
         self.since = since
         self.totals = totals
         self.buckets = buckets
         self.highlights = highlights
+        self.liveSessions = liveSessions
     }
 
     enum CodingKeys: String, CodingKey {
@@ -106,6 +113,7 @@ struct Digest: Codable, Sendable, Hashable {
         case totals
         case buckets
         case highlights
+        case liveSessions = "live_sessions"
     }
 
     init(from decoder: Decoder) throws {
@@ -115,5 +123,6 @@ struct Digest: Codable, Sendable, Hashable {
         // Backwards-compat: pre-bucket daemon responses won't include this.
         self.buckets = try c.decodeIfPresent(DigestBuckets.self, forKey: .buckets) ?? DigestBuckets()
         self.highlights = try c.decode([DigestHighlight].self, forKey: .highlights)
+        self.liveSessions = try c.decodeIfPresent([String].self, forKey: .liveSessions) ?? []
     }
 }

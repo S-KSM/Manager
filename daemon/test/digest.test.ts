@@ -220,6 +220,70 @@ describe('buildDigest', () => {
     expect(digest.highlights[0]!.summary).toContain('blocked');
   });
 
+  it('live_sessions lists workstreams whose latest session_start is newer than its latest session_end', async () => {
+    registry.create('alive', 'Alive');
+    registry.create('dead', 'Dead');
+    registry.create('reborn', 'Reborn');
+    registry.create('never', 'Never started');
+    // alive: started, no end
+    await eventStore.appendEvent(
+      'alive',
+      ev('alive', 'session_start', {
+        ts: '2026-05-02T10:00:00Z',
+        session_id: 's1',
+        id: 'ss_a',
+      }),
+    );
+    // dead: started, then ended later
+    await eventStore.appendEvent(
+      'dead',
+      ev('dead', 'session_start', {
+        ts: '2026-05-02T10:00:00Z',
+        session_id: 's2',
+        id: 'ss_d',
+      }),
+    );
+    await eventStore.appendEvent(
+      'dead',
+      ev('dead', 'session_end', {
+        ts: '2026-05-02T11:00:00Z',
+        session_id: 's2',
+        id: 'se_d',
+      }),
+    );
+    // reborn: started, ended, then started again
+    await eventStore.appendEvent(
+      'reborn',
+      ev('reborn', 'session_start', {
+        ts: '2026-05-02T10:00:00Z',
+        session_id: 's3',
+        id: 'ss_r1',
+      }),
+    );
+    await eventStore.appendEvent(
+      'reborn',
+      ev('reborn', 'session_end', {
+        ts: '2026-05-02T11:00:00Z',
+        session_id: 's3',
+        id: 'se_r1',
+      }),
+    );
+    await eventStore.appendEvent(
+      'reborn',
+      ev('reborn', 'session_start', {
+        ts: '2026-05-02T12:00:00Z',
+        session_id: 's4',
+        id: 'ss_r2',
+      }),
+    );
+    // never: no session events at all
+
+    const digest = await buildDigest({ registry, eventStore }, new Date('2026-05-01T00:00:00Z'));
+    expect(digest.live_sessions.sort()).toEqual(['alive', 'reborn']);
+    expect(digest.live_sessions).not.toContain('dead');
+    expect(digest.live_sessions).not.toContain('never');
+  });
+
   it('non-approval pending interventions (nudge/redirect) do NOT trigger needs_attention', async () => {
     registry.create('a', 'A');
     interventionQueue.enqueue('a', 'nudge', { message: 'consider X' });

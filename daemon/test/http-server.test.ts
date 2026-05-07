@@ -11,6 +11,7 @@ import { type LLMProvider, type LLMProviderName, LLMUnreachableError } from '../
 import { MemoryStore } from '../src/memory-store.js';
 import { ReportStore } from '../src/report-store.js';
 import { Scheduler } from '../src/scheduler.js';
+import { SettingsStore } from '../src/settings-store.js';
 import { SkillProposalsStore } from '../src/skill-proposals.js';
 import { WorkstreamRegistry } from '../src/workstream.js';
 
@@ -23,6 +24,7 @@ describe('HTTP server', () => {
   let skillProposalsStore: SkillProposalsStore;
   let reportStore: ReportStore;
   let scheduler: Scheduler;
+  let settings: SettingsStore;
   let handle: HttpServerHandle;
   let providerCalls: { name: LLMProviderName; system: string; user: string }[];
 
@@ -48,6 +50,7 @@ describe('HTTP server', () => {
         return `# Mock ${name} report\n\nbody for tests`;
       },
     });
+    settings = new SettingsStore(join(dir, 'settings.json'));
     handle = buildHttpServer({
       eventStore,
       memoryStore,
@@ -57,6 +60,7 @@ describe('HTTP server', () => {
       skillProposalsStore,
       reportStore,
       scheduler,
+      settings,
       getProvider: fakeProvider,
     });
   });
@@ -779,6 +783,78 @@ describe('HTTP server', () => {
       .patch('/scheduler/jobs/does_not_exist')
       .send({ enabled: true });
     expect(r.status).toBe(404);
+  });
+
+  // ---- Settings ------------------------------------------------------------
+
+  it('GET /settings returns defaults with anthropicApiKeyConfigured=false', async () => {
+    // Tests run in a tmp DISPATCH_HOME so the env-var fallback is the only
+    // possible source of an API key. Save+restore the key to keep the test
+    // hermetic.
+    const prior = process.env['ANTHROPIC_API_KEY'];
+    delete process.env['ANTHROPIC_API_KEY'];
+    try {
+      const r = await request(handle.app).get('/settings');
+      expect(r.status).toBe(200);
+      expect(r.body).toMatchObject({
+        headlineProvider: 'ollama',
+        ollamaUrl: 'http://localhost:11434',
+        anthropicApiKeyConfigured: false,
+      });
+      expect(typeof r.body.headlineModel).toBe('string');
+      expect(r.body.anthropicApiKey).toBeUndefined();
+    } finally {
+      if (prior !== undefined) process.env['ANTHROPIC_API_KEY'] = prior;
+    }
+  });
+
+  it('PATCH /settings persists provider+model+ollamaUrl and redacts key', async () => {
+    const r = await request(handle.app).patch('/settings').send({
+      headlineProvider: 'claude',
+      headlineModel: 'claude-haiku-4-5-20251001',
+      ollamaUrl: 'http://localhost:9999',
+      anthropicApiKey: 'sk-ant-test',
+    });
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({
+      headlineProvider: 'claude',
+      headlineModel: 'claude-haiku-4-5-20251001',
+      ollamaUrl: 'http://localhost:9999',
+      anthropicApiKeyConfigured: true,
+    });
+    // Key never round-trips back.
+    expect(r.body.anthropicApiKey).toBeUndefined();
+
+    // GET sees the same redacted shape.
+    const get = await request(handle.app).get('/settings');
+    expect(get.body.anthropicApiKeyConfigured).toBe(true);
+    expect(get.body.anthropicApiKey).toBeUndefined();
+
+    // In-process the resolver still has the cleartext key for the provider.
+    expect(settings.getResolvedAnthropicApiKey()).toBe('sk-ant-test');
+  });
+
+  it('PATCH /settings rejects bad provider with 400', async () => {
+    const r = await request(handle.app)
+      .patch('/settings')
+      .send({ headlineProvider: 'gpt-99' });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/headlineProvider/);
+  });
+
+  it('PATCH /settings with empty anthropicApiKey clears the stored value', async () => {
+    await request(handle.app).patch('/settings').send({ anthropicApiKey: 'sk-ant-test' });
+    expect(settings.getResolvedAnthropicApiKey()).toBe('sk-ant-test');
+    const prior = process.env['ANTHROPIC_API_KEY'];
+    delete process.env['ANTHROPIC_API_KEY'];
+    try {
+      const cleared = await request(handle.app).patch('/settings').send({ anthropicApiKey: '' });
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.anthropicApiKeyConfigured).toBe(false);
+      expect(settings.getResolvedAnthropicApiKey()).toBeUndefined();
+    } finally {
+      if (prior !== undefined) process.env['ANTHROPIC_API_KEY'] = prior;
+    }
   });
 });
 

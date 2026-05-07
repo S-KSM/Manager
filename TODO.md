@@ -21,6 +21,7 @@ Conventions: `[x]` shipped, `[~]` in progress, `[ ]` pending, `[-]` deferred. Ea
   - Stretch: pure-Swift MLX inside the macOS app via `mlx-swift-examples`.
 - [ ] **`/dispatcher <ws>` slash command + URL scheme** — register `dispatch://workstream/<id>` in macOS Info.plist + URL handler. Ship `~/.claude/commands/dispatcher.md`.
 - [ ] **Remove `MANAGER_*` env-var fallbacks** introduced in v1.2 (deprecation breadcrumb has fired for one release).
+- [x] **Tooltips + UX polish** — shipped in v1.4.5 (see below).
 - [x] **Activity headline (rolling LLM summary)** — shipped ahead of v1.3. Daemon's `Headliner` ticker generates one-sentence "Currently:" line per workstream every ~30s. Falls back gracefully to deterministic `latest_activity` when no LLM provider is configured. macOS app `Workstream.activityHeadline` field; HomeView card + AgentDetailView header prefer headline over `latestActivity`.
 - [x] **Story-level subgoal synthesis** — shipped ahead of v1.3. Daemon's `SubgoalSynthesizer` ticker watches each workstream for runs of ≥8 consecutive `post-tool-use` events with no agent narration; calls `qwen3:4b` (default, via Ollama) for a one-line story arc and writes it as a `subgoal_push` event with `payload.source: "synthesized"` + `payload.synth_anchor: "<firstId>..<lastId>"`. Anchor is read back from the log on each tick so synthesis is idempotent across daemon restarts (same window never summarized twice). Disable via `DISPATCH_SUBGOAL_SYNTH_ENABLED=0`. 9 unit tests cover detection, idempotency, multi-run splitting, and LLM-unreachable fallback.
 - [x] **Timeline UX — story over tool calls** — AgentDetailView now sorts events newest-on-top, collapses runs of consecutive `tool_use` rows into a single "N actions ▸" pill (tap to expand), and prefixes synthesized sub-goals with 🤖 so the user can tell agent-emitted narration from manager-inferred narration at a glance.
@@ -84,6 +85,22 @@ Detailed design in [`/Users/shobeir/.claude/plans/read-specs-md-and-try-refactor
 - [x] `docs/ARCHITECTURE.md` — new "Orchestrator (v1.4 — autonomous mode)" section covering state machine / tracker adapter / workflow loader / workspace manager / agent runner + telemetry equivalence + approval bridge + minimal WORKFLOW.md schema. Top-level system mermaid replaced with a dual-mode diagram showing observation + autonomous paths sharing the telemetry layer; added `intervention_enqueued` to the event-types list and documented the `subgoal_push.payload.source = "synthesized"` + `synth_anchor` extensions; added a "LLM-driven enrichment (Headliner + SubgoalSynthesizer)" section.
 - [x] `CLAUDE.md` — orchestrator/observation duality already lives in the Locked Architectural Decisions list ("Two operational modes share one telemetry path (v1.4+)…"). No change needed.
 - [x] `README.md` — Quickstart now links to a new "Autonomous mode (optional, v1.4)" section that shows a minimal WORKFLOW.md, the `dispatch start --workflow` invocation, the `--dry-run` + `--mock-tracker` knobs, and the approval-strip behaviour.
+
+---
+
+## v1.4.5 — UX feedback wave (Feedback.md)
+
+Driven entirely by `Feedback.md`. No architectural changes — additive fields only, all backwards compatible. Full notes in [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
+
+- [x] **Settings → Providers tab** — new `GET/PATCH /settings` endpoint backed by `~/.claude/dispatch/settings.json` (key redacted on the wire); `PreferencesView` Providers tab with provider/model/Ollama-URL/key fields + reachability probe. Env vars remain a fallback.
+- [x] **Sleeping Robot mascot** — daemon emits `live_session: bool` per workstream (latest `session_start` newer than `session_end`); `digest.live_sessions[]` for the rollup. `RobotMascot` gains `Asleep` state (dim + desaturate + closed-eye sleep arc + floating `Zzz`). Wired in HomeView card + AgentDetailView header.
+- [x] **First-launch demo data race** — `DaemonResolver` was seeded with the fixture `MockDaemonClient()`; now seeds `MockDaemonClient.empty()` so the Radar shows the WelcomeView empty state during the `/health` resolve window. Cmd-Shift-M toggle and SwiftUI previews still construct the fixture client.
+- [x] **`AgentDetailView` autoscale** — HSplitView pane mins reduced (640 → 500) so panes reflow below 820 width. Header truncates; status pill fixed-size.
+- [x] **`DigestRailView` chips** — wrapped in horizontal `ScrollView` so chips no longer clip at narrow widths.
+- [x] **`WelcomeView` rewrite** — lead sentence + 3 numbered steps + copy-able `claude` snippet + Tutorial / Settings → Providers / Architecture links; daemon-down recovery copy tightened.
+- [x] **Tooltips** — `.help(...)` added to every previously-tooltip-less Button across `HomeView` (4), `WelcomeView` (5), `PreferencesView` (2). Other view files audited and were already complete.
+- [x] **Tutorial + Help docs** — `docs/TUTORIAL.md` refreshed for v1.4 (autonomous mode + Settings → Providers + version refresh); `docs/LOCAL_MODELS.md` mentions Settings → Providers and confirms `claude` + `ollama` providers (MLX still v1.3-deferred); README pointer to in-app Help menu and `docs/TUTORIAL.md`.
+- [x] **Version bump** — `CFBundleShortVersionString 0.1.0 → 1.4.5`, `MARKETING_VERSION → 1.4.5`, `daemon/package.json 0.0.1 → 1.4.5`. `RELEASE_NOTES.md` introduced.
 
 ---
 

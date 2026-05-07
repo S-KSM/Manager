@@ -42,6 +42,15 @@ export interface Digest {
   totals: DigestTotals;
   buckets: DigestBuckets;
   highlights: DigestHighlight[];
+  /**
+   * Workstream ids that currently have a live Claude Code session — that is,
+   * the most recent `session_start` is newer than the most recent
+   * `session_end`. Workstreams whose session has been killed (or never had
+   * one) are absent from this list. Pure presentation signal — independent of
+   * lifecycle status — and used by the macOS Radar to render the
+   * awake/asleep robot mascot. Disjoint from the buckets above.
+   */
+  live_sessions: string[];
 }
 
 interface BuildDeps {
@@ -89,6 +98,7 @@ export async function buildDigest(deps: BuildDeps, since: Date): Promise<Digest>
   const blockedIds: string[] = [];
   const needsAttentionIds: string[] = [];
   const activeIds: string[] = [];
+  const liveSessionIds: string[] = [];
 
   for (const ws of registry.list()) {
     const { events } = await eventStore.readEvents(ws.id);
@@ -118,6 +128,9 @@ export async function buildDigest(deps: BuildDeps, since: Date): Promise<Digest>
     if (wasActive) {
       activeCount += 1;
       activeIds.push(ws.id);
+    }
+    if (projection.live_session) {
+      liveSessionIds.push(ws.id);
     }
 
     const summary = buildSummary({
@@ -174,6 +187,7 @@ export async function buildDigest(deps: BuildDeps, since: Date): Promise<Digest>
       active: activeIds,
     },
     highlights,
+    live_sessions: liveSessionIds,
   };
 }
 
@@ -214,9 +228,7 @@ function buildSummary(args: SummaryArgs): string {
       const reason = latestBlockedReason(eventsInWindow.length > 0 ? eventsInWindow : args.events);
       return reason ? `blocked: ${reason}` : 'blocked';
     }
-    return pendingApprovals === 1
-      ? 'awaiting approval'
-      : `awaiting ${pendingApprovals} approvals`;
+    return pendingApprovals === 1 ? 'awaiting approval' : `awaiting ${pendingApprovals} approvals`;
   }
 
   if (wasShipped) {

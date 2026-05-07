@@ -3,12 +3,14 @@ import { EventStore } from './event-store.js';
 import {
   type LLMProvider,
   type LLMProviderName,
+  type ProviderOverrides,
   LLMConfigError,
   LLMUnreachableError,
   getProvider as defaultGetProvider,
 } from './llm/index.js';
 import { HeadlineStore } from './headline-store.js';
 import { readEnvWithLegacy } from './config.js';
+import type { SettingsStore } from './settings-store.js';
 import type { WorkstreamRegistry } from './workstream.js';
 
 /**
@@ -29,13 +31,26 @@ export interface HeadlinerOptions {
   registry: WorkstreamRegistry;
   eventStore: EventStore;
   store: HeadlineStore;
-  getProvider?: (name: LLMProviderName) => LLMProvider;
+  /**
+   * Factory for the underlying LLM. Tests pass a mock here; production wires
+   * the real `getProvider` from `./llm/index.js`. The second argument carries
+   * settings-derived API key / Ollama URL overrides; tests can ignore it.
+   */
+  getProvider?: (name: LLMProviderName, overrides?: ProviderOverrides) => LLMProvider;
   /** Override default tick interval (ms). */
   tickIntervalMs?: number;
   /** Override default LLM provider name. */
   providerName?: LLMProviderName;
   /** Override default model. */
   model?: string;
+  /**
+   * Optional shared settings source. When present, every tick re-reads the
+   * resolved provider/model/overrides from it — so a `PATCH /settings` from
+   * the macOS Settings UI takes effect without a daemon restart. When absent
+   * (e.g. in unit tests) the constructor-time `providerName`/`model`
+   * resolution is used for every tick.
+   */
+  settings?: SettingsStore;
 }
 
 const DEFAULT_TICK_MS = 30_000;
@@ -59,10 +74,11 @@ export class Headliner {
   private readonly registry: WorkstreamRegistry;
   private readonly eventStore: EventStore;
   private readonly store: HeadlineStore;
-  private readonly getProvider: (name: LLMProviderName) => LLMProvider;
+  private readonly getProvider: (name: LLMProviderName, overrides?: ProviderOverrides) => LLMProvider;
   private readonly tickIntervalMs: number;
   private readonly providerName: LLMProviderName;
   private readonly model: string;
+  private readonly settings: SettingsStore | undefined;
   private timer: NodeJS.Timeout | null = null;
   private running = false;
 
@@ -74,6 +90,7 @@ export class Headliner {
     this.tickIntervalMs = opts.tickIntervalMs ?? DEFAULT_TICK_MS;
     this.providerName = opts.providerName ?? resolveDefaultProvider();
     this.model = opts.model ?? resolveDefaultModel(this.providerName);
+    this.settings = opts.settings;
   }
 
   start(): void {
@@ -134,13 +151,26 @@ export class Headliner {
     if (lines.length === 0) return null;
     const userPrompt = `Recent activity for workstream "${workstreamId}":\n${lines.join('\n')}`;
 
+    // Re-resolve provider/model from the settings store on every tick so a
+    // PATCH /settings from the macOS UI takes effect immediately.
+    const providerName = this.settings?.getResolvedProvider() ?? this.providerName;
+    const model = this.settings?.getResolvedModel(providerName) ?? this.model;
+    const overrides: ProviderOverrides | undefined = this.settings
+      ? {
+          ...(this.settings.getResolvedAnthropicApiKey() !== undefined
+            ? { anthropicApiKey: this.settings.getResolvedAnthropicApiKey() as string }
+            : {}),
+          ollamaUrl: this.settings.getResolvedOllamaUrl(),
+        }
+      : undefined;
+
     let raw: string;
     try {
-      const llm = this.getProvider(this.providerName);
+      const llm = this.getProvider(providerName, overrides);
       raw = await llm.generate({
         system: SYSTEM_PROMPT,
         user: userPrompt,
-        model: this.model,
+        model,
         max_tokens: 80,
       });
     } catch (err) {

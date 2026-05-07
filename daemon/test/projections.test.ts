@@ -23,6 +23,40 @@ describe('projectFromEvents', () => {
       needs_attention: false,
       todos: null,
       latest_activity: null,
+      live_session: false,
+    });
+  });
+
+  describe('live_session', () => {
+    it('false when no session_start has ever been emitted', () => {
+      const events: ManagerEvent[] = [
+        ev('tool_use', '2026-05-02T10:00:00Z', { id: 't1', payload: { tool_name: 'Read' } }),
+      ];
+      expect(projectFromEvents(events).live_session).toBe(false);
+    });
+
+    it('true when session_start has no matching session_end', () => {
+      const events: ManagerEvent[] = [
+        ev('session_start', '2026-05-02T10:00:00Z', { id: 'ss1', session_id: 's1' }),
+      ];
+      expect(projectFromEvents(events).live_session).toBe(true);
+    });
+
+    it('false when session_end is at or after the latest session_start', () => {
+      const events: ManagerEvent[] = [
+        ev('session_start', '2026-05-02T10:00:00Z', { id: 'ss1', session_id: 's1' }),
+        ev('session_end', '2026-05-02T11:00:00Z', { id: 'se1', session_id: 's1' }),
+      ];
+      expect(projectFromEvents(events).live_session).toBe(false);
+    });
+
+    it('true when a fresh session_start follows a previous session_end', () => {
+      const events: ManagerEvent[] = [
+        ev('session_start', '2026-05-02T10:00:00Z', { id: 'ss1', session_id: 's1' }),
+        ev('session_end', '2026-05-02T11:00:00Z', { id: 'se1', session_id: 's1' }),
+        ev('session_start', '2026-05-02T12:00:00Z', { id: 'ss2', session_id: 's2' }),
+      ];
+      expect(projectFromEvents(events).live_session).toBe(true);
     });
   });
 

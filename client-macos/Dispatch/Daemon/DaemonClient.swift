@@ -103,9 +103,65 @@ protocol DaemonClientProtocol: Sendable {
     func updateSchedulerJob(id: String,
                             fields: SchedulerJobUpdateFields) async throws -> SchedulerJob
 
+    // MARK: - v1.5: provider settings
+
+    /// `GET /settings` — fetch the daemon's persisted LLM provider config.
+    /// The response redacts the Anthropic API key to a boolean
+    /// (`anthropicApiKeyConfigured`) so credentials never round-trip back to
+    /// the client. The macOS Settings → Providers tab uses this to populate
+    /// the form on open.
+    func getSettings() async throws -> ProviderSettings
+
+    /// `PATCH /settings` — partial update of the persisted LLM provider
+    /// config. Pass `anthropicApiKey` cleartext to set, empty string to
+    /// clear, or `nil` to leave untouched. Returns the redacted wire shape
+    /// (same as GET).
+    func patchSettings(_ patch: ProviderSettingsPatch) async throws -> ProviderSettings
+
     /// Returns `false` on connection error; never throws. Used by
     /// `DaemonResolver` to choose live vs mock at startup.
     func health() async -> Bool
+}
+
+/// Redacted wire shape of `GET /settings`. Mirrors the daemon's
+/// `SettingsWire` (see `daemon/src/settings-store.ts`). Note the API key is
+/// represented only as a boolean — there is no `anthropicApiKey` field on
+/// this type by design.
+struct ProviderSettings: Codable, Equatable, Sendable {
+    enum Provider: String, Codable, Sendable, CaseIterable, Identifiable {
+        case claude
+        case ollama
+        var id: Self { self }
+        var displayName: String { self == .claude ? "Claude" : "Ollama (local)" }
+    }
+
+    var headlineProvider: Provider
+    var headlineModel: String
+    var ollamaURL: String
+    var anthropicAPIKeyConfigured: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case headlineProvider
+        case headlineModel
+        case ollamaURL = "ollamaUrl"
+        case anthropicAPIKeyConfigured = "anthropicApiKeyConfigured"
+    }
+}
+
+/// Wire shape of `PATCH /settings`. Each field is optional; only present
+/// keys are applied. Pass `anthropicAPIKey = ""` to clear the stored key.
+struct ProviderSettingsPatch: Codable, Equatable, Sendable {
+    var headlineProvider: ProviderSettings.Provider?
+    var headlineModel: String?
+    var ollamaURL: String?
+    var anthropicAPIKey: String?
+
+    enum CodingKeys: String, CodingKey {
+        case headlineProvider
+        case headlineModel
+        case ollamaURL = "ollamaUrl"
+        case anthropicAPIKey = "anthropicApiKey"
+    }
 }
 
 enum DaemonError: Error, LocalizedError {
@@ -423,6 +479,14 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
     func updateSchedulerJob(id: String,
                             fields: SchedulerJobUpdateFields) async throws -> SchedulerJob {
         try await sendJSON(method: "PATCH", path: "scheduler/jobs/\(id)", body: fields)
+    }
+
+    func getSettings() async throws -> ProviderSettings {
+        try await getJSON(path: "settings")
+    }
+
+    func patchSettings(_ patch: ProviderSettingsPatch) async throws -> ProviderSettings {
+        try await sendJSON(method: "PATCH", path: "settings", body: patch)
     }
 
     func streamEvents(workstreamID: String) -> AsyncStream<Event> {

@@ -398,6 +398,7 @@ private struct RadarEmptyStateView: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
             .padding(8)
+            .help("Copy this snippet to the clipboard")
         }
     }
 
@@ -437,7 +438,7 @@ struct DigestRailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 24) {
+            HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Today")
                         .font(.caption)
@@ -445,43 +446,53 @@ struct DigestRailView: View {
                         .textCase(.uppercase)
                     Text(headline)
                         .font(.title3.weight(.semibold))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
-                if let totals = digest?.totals {
-                    DigestStat(
-                        label: "Shipped",
-                        value: "\(totals.shipped)",
-                        systemImage: "checkmark.seal",
-                        tint: .blue,
-                        isSelected: filter == .shipped,
-                        onTap: { toggle(.shipped) }
-                    )
-                    DigestStat(
-                        label: "Blocked",
-                        value: "\(totals.blocked)",
-                        systemImage: "exclamationmark.octagon.fill",
-                        tint: .red,
-                        isSelected: filter == .blocked,
-                        onTap: { toggle(.blocked) }
-                    )
-                    DigestStat(
-                        label: "Needs you",
-                        value: "\(totals.needsAttention)",
-                        systemImage: "exclamationmark.bubble.fill",
-                        tint: .orange,
-                        isSelected: filter == .needsYou,
-                        onTap: { toggle(.needsYou) }
-                    )
-                    DigestStat(
-                        label: "Active",
-                        value: "\(totals.active)",
-                        systemImage: "bolt.horizontal.fill",
-                        tint: .green,
-                        isSelected: filter == .active,
-                        onTap: { toggle(.active) }
-                    )
-                } else if loading {
-                    ProgressView().controlSize(.small)
+                .layoutPriority(1)
+                Spacer(minLength: 8)
+                // Narrow windows can't fit four stats + the headline on one
+                // row; let the stats scroll horizontally instead of clipping.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        if let totals = digest?.totals {
+                            DigestStat(
+                                label: "Shipped",
+                                value: "\(totals.shipped)",
+                                systemImage: "checkmark.seal",
+                                tint: .blue,
+                                isSelected: filter == .shipped,
+                                onTap: { toggle(.shipped) }
+                            )
+                            DigestStat(
+                                label: "Blocked",
+                                value: "\(totals.blocked)",
+                                systemImage: "exclamationmark.octagon.fill",
+                                tint: .red,
+                                isSelected: filter == .blocked,
+                                onTap: { toggle(.blocked) }
+                            )
+                            DigestStat(
+                                label: "Needs you",
+                                value: "\(totals.needsAttention)",
+                                systemImage: "exclamationmark.bubble.fill",
+                                tint: .orange,
+                                isSelected: filter == .needsYou,
+                                onTap: { toggle(.needsYou) }
+                            )
+                            DigestStat(
+                                label: "Active",
+                                value: "\(totals.active)",
+                                systemImage: "bolt.horizontal.fill",
+                                tint: .green,
+                                isSelected: filter == .active,
+                                onTap: { toggle(.active) }
+                            )
+                        } else if loading {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+                    .fixedSize()
                 }
             }
 
@@ -754,12 +765,14 @@ struct TeamFloorView: View {
             } label: {
                 Label("Pause", systemImage: "pause.circle")
             }
+            .help("Pause this workstream — agents stop being scheduled, history is preserved")
         case .paused:
             Button {
                 onLifecycleAction(ws, .resume)
             } label: {
                 Label("Resume", systemImage: "play.circle")
             }
+            .help("Resume this workstream — agents become eligible to run again")
         case .retired:
             EmptyView()
         }
@@ -768,12 +781,14 @@ struct TeamFloorView: View {
         } label: {
             Label("Edit title…", systemImage: "pencil")
         }
+        .help("Rename this workstream")
         Divider()
         Button(role: .destructive) {
             onLifecycleAction(ws, .retire)
         } label: {
             Label("Retire", systemImage: "archivebox")
         }
+        .help("Archive this workstream — moves it out of the active grid")
     }
 }
 

@@ -37,7 +37,15 @@ final class DaemonResolver: ObservableObject {
 
     @Published private(set) var mode: Mode = .mock
     @Published private(set) var modeReason: ModeReason = .unknown
-    @Published private(set) var client: DaemonClientProtocol = MockDaemonClient()
+    /// Initial client is the *empty* mock, not the demo-fixture mock. SwiftUI
+    /// renders the view tree before `resolve()` finishes its `/health` probe
+    /// (~3s cold-start window with retries), and any view bound to
+    /// `resolver.client` will read this seed value during that race. Showing
+    /// real-looking demo workstreams to a first-launch user — who can't tell
+    /// fixtures from their own data — is the bug we're avoiding here. The
+    /// demo fixtures are still reachable via the explicit Cmd-Shift-M toggle
+    /// (`toggle()`) and via `forcedMode: .mock` (used by SwiftUI previews).
+    @Published private(set) var client: DaemonClientProtocol = MockDaemonClient.empty()
     /// Bumped whenever `mode` changes; SwiftUI views can use this in
     /// `.task(id:)` to reload data when the underlying client swaps.
     @Published private(set) var modeToken: Int = 0

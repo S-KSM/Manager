@@ -21,6 +21,7 @@ import { buildMcpServer, startMcpStdio } from './mcp-server.js';
 import { MemoryStore } from './memory-store.js';
 import { ReportStore } from './report-store.js';
 import { Scheduler } from './scheduler.js';
+import { SettingsStore } from './settings-store.js';
 import { SkillProposalsStore } from './skill-proposals.js';
 import { WorkstreamRegistry } from './workstream.js';
 
@@ -198,7 +199,8 @@ async function runStart(opts: {
   const reportStore = new ReportStore(cfg.dbPath);
   const scheduler = new Scheduler({ registry, eventStore, memoryStore, reportStore });
   const headlineStore = new HeadlineStore();
-  const headliner = new Headliner({ registry, eventStore, store: headlineStore });
+  const settings = new SettingsStore(cfg.settingsPath);
+  const headliner = new Headliner({ registry, eventStore, store: headlineStore, settings });
   // Orchestrator is built below if --mock-tracker was passed; we late-bind it
   // into the HTTP server via a closure-captured holder so the route can find it.
   const orchestratorHolder: { current: Orchestrator | null } = { current: null };
@@ -212,6 +214,7 @@ async function runStart(opts: {
     reportStore,
     scheduler,
     headlineStore,
+    settings,
     get orchestrator() {
       return orchestratorHolder.current ?? undefined;
     },
@@ -227,7 +230,7 @@ async function runStart(opts: {
     process.stderr.write('[dispatch] headliner started\n');
   }
   if (process.env['DISPATCH_SUBGOAL_SYNTH_ENABLED'] !== '0') {
-    const synth = new SubgoalSynthesizer({ registry, eventStore });
+    const synth = new SubgoalSynthesizer({ registry, eventStore, settings });
     synth.start();
     process.stderr.write('[dispatch] subgoal synthesizer started\n');
   }
