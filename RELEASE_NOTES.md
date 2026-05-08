@@ -4,6 +4,14 @@ Versions are anchored on the macOS app's `CFBundleShortVersionString` (the Info.
 
 ---
 
+## v1.4.9 — 2026-05-07 — feat: reactivate retired workstreams from Kanban context menu
+
+Tag [`v1.4.9`](https://github.com/S-KSM/Manager/releases/tag/v1.4.9). DMG + zip attached.
+
+Patch release. Retired Kanban cards already accepted drag-back-to-Active (every card is `.draggable(WorkstreamDragPayload)`, every column has `.dropDestination`, `handleDrop` PATCHes via the same path used by every other status flip), but the affordance was undiscoverable — the retired-card context menu rendered `EmptyView()` while every other status had a status-flip button. v1.4.9 replaces that with **Move to Active**, wired to the existing `.resume` lifecycle action which already maps to `status=.active` in `ContentView.applyLifecycleAction`. No daemon, schema, or wire-format change. `daemon/package.json` was drifting at 1.4.6; bumped to 1.4.9 to re-sync with `CFBundleShortVersionString`.
+
+---
+
 ## v1.4.8 — 2026-05-07 — fix: sidebar selection unresponsive
 
 Tag [`v1.4.8`](https://github.com/S-KSM/Manager/releases/tag/v1.4.8). DMG + zip attached.
