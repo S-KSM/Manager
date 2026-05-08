@@ -297,18 +297,30 @@ struct ProviderSettingsPatch: Codable, Equatable, Sendable {
 
 enum DaemonError: Error, LocalizedError {
     case badURL
-    case badResponse(Int)
+    case badResponse(Int, message: String? = nil)
     case decoding(Error)
     case transport(Error)
 
     var errorDescription: String? {
         switch self {
-        case .badURL:                 return "Bad daemon URL."
-        case .badResponse(let code):  return "Daemon returned HTTP \(code)."
-        case .decoding(let e):        return "Could not decode daemon response: \(e)"
-        case .transport(let e):       return "Transport error: \(e)"
+        case .badURL:
+            return "Bad daemon URL."
+        case .badResponse(let code, let message):
+            if let message, !message.isEmpty { return message }
+            return "Daemon returned HTTP \(code)."
+        case .decoding(let e):
+            return "Could not decode daemon response: \(e)"
+        case .transport(let e):
+            return "Transport error: \(e)"
         }
     }
+}
+
+/// Wire shape of the daemon's JSON error envelope: `{ "error": "...",
+/// "code": "...", "upstream_status": 404 }`. Only `error` is required;
+/// other fields are best-effort context for callers that want them.
+private struct DaemonErrorBody: Decodable {
+    let error: String?
 }
 
 /// HTTP + WebSocket client for the local daemon.
@@ -787,7 +799,7 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         }
         do {
             let (data, response) = try await session.data(for: req)
-            try Self.assertOK(response)
+            try Self.assertOK(response, data: data)
             do {
                 return try decoder.decode(T.self, from: data)
             } catch {
@@ -801,12 +813,27 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
     }
 
     private static func assertOK(_ response: URLResponse) throws {
+        try assertOK(response, data: nil)
+    }
+
+    private static func assertOK(_ response: URLResponse, data: Data?) throws {
         guard let http = response as? HTTPURLResponse else {
             throw DaemonError.badResponse(-1)
         }
         guard (200..<300).contains(http.statusCode) else {
-            throw DaemonError.badResponse(http.statusCode)
+            let message = data.flatMap(decodeDaemonErrorMessage)
+            throw DaemonError.badResponse(http.statusCode, message: message)
         }
+    }
+
+    private static func decodeDaemonErrorMessage(_ data: Data) -> String? {
+        guard !data.isEmpty,
+              let body = try? JSONDecoder().decode(DaemonErrorBody.self, from: data),
+              let message = body.error,
+              !message.isEmpty else {
+            return nil
+        }
+        return message
     }
 }
 

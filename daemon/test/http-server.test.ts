@@ -7,7 +7,12 @@ import { EventStore } from '../src/event-store.js';
 import { HandbookStore } from '../src/handbook-store.js';
 import { buildHttpServer, type HttpServerHandle } from '../src/http-server.js';
 import { InterventionQueue } from '../src/intervention-queue.js';
-import { type LLMProvider, type LLMProviderName, LLMUnreachableError } from '../src/llm/index.js';
+import {
+  type LLMProvider,
+  type LLMProviderName,
+  LLMRequestError,
+  LLMUnreachableError,
+} from '../src/llm/index.js';
 import { MemoryStore } from '../src/memory-store.js';
 import { ReportStore } from '../src/report-store.js';
 import { Scheduler } from '../src/scheduler.js';
@@ -799,6 +804,73 @@ describe('HTTP server', () => {
       });
     expect(r.status).toBe(503);
     expect(r.body.code).toBe('LLM_UNREACHABLE');
+  });
+
+  it('POST /reports/generate maps upstream 4xx (e.g. model not found) → 422', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'r404', title: 'R404' });
+    await handle.close();
+    handle = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      getProvider: (name) => ({
+        name,
+        generate: async () => {
+          throw new LLMRequestError(
+            "Local LLM HTTP 404: model 'qwen3:8b' not found",
+            404,
+          );
+        },
+      }),
+    });
+    const r = await request(handle.app)
+      .post('/reports/generate')
+      .send({
+        workstream_ids: ['r404'],
+        audience_preset: 'executive',
+        provider: 'ollama',
+        model: 'qwen3:8b',
+      });
+    expect(r.status).toBe(422);
+    expect(r.body.code).toBe('LLM_REQUEST');
+    expect(r.body.upstream_status).toBe(404);
+    expect(r.body.error).toContain("model 'qwen3:8b' not found");
+  });
+
+  it('POST /reports/generate maps upstream 5xx → 502', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'r502', title: 'R502' });
+    await handle.close();
+    handle = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      getProvider: (name) => ({
+        name,
+        generate: async () => {
+          throw new LLMRequestError('Local LLM HTTP 500: out of memory', 500);
+        },
+      }),
+    });
+    const r = await request(handle.app)
+      .post('/reports/generate')
+      .send({
+        workstream_ids: ['r502'],
+        audience_preset: 'executive',
+        provider: 'ollama',
+      });
+    expect(r.status).toBe(502);
+    expect(r.body.code).toBe('LLM_REQUEST');
+    expect(r.body.upstream_status).toBe(500);
   });
 
   it('GET /reports lists draft + saved by default; ?status=archived hides them', async () => {

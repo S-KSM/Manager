@@ -22,6 +22,7 @@ import {
   type LLMProviderName,
   type ProviderOverrides,
   LLMConfigError,
+  LLMRequestError,
   LLMUnreachableError,
   getProvider as defaultGetProvider,
 } from './llm/index.js';
@@ -1192,6 +1193,18 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
       }
       if (err instanceof LLMConfigError) {
         res.status(500).json({ error: err.message, code: err.code });
+        return;
+      }
+      if (err instanceof LLMRequestError) {
+        // Upstream 4xx is user-actionable (e.g. Ollama "model not found" when
+        // the requested model isn't pulled). Surface as 422 with the upstream
+        // detail so the client can render a helpful message instead of an
+        // opaque 500. Upstream 5xx / parse failures are bad-gateway-ish.
+        const upstreamIs4xx =
+          err.status !== null && err.status >= 400 && err.status < 500;
+        res
+          .status(upstreamIs4xx ? 422 : 502)
+          .json({ error: err.message, code: err.code, upstream_status: err.status });
         return;
       }
       const message = err instanceof Error ? err.message : String(err);

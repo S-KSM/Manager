@@ -91,9 +91,9 @@ struct LinkLinearSheet: View {
                 issueIdentifier: id
             )
             onLinked(link)
-        } catch let DaemonError.badResponse(code) where code == 503 {
+        } catch let DaemonError.badResponse(code, _) where code == 503 {
             error = "Linear API key isn't configured. Open Settings → Providers to set it."
-        } catch let DaemonError.badResponse(code) where code == 400 {
+        } catch let DaemonError.badResponse(code, _) where code == 400 {
             error = "Linear couldn't find issue \(id). Double-check the identifier."
         } catch let err {
             error = (err as? LocalizedError)?.errorDescription
