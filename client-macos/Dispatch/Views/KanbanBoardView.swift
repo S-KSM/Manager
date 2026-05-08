@@ -267,7 +267,12 @@ struct KanbanColumnView: View {
             }
             .help("Resume this workstream — agents become eligible to run again")
         case .retired:
-            EmptyView()
+            Button {
+                onLifecycleAction(ws, .resume)
+            } label: {
+                Label("Move to Active", systemImage: "play.circle")
+            }
+            .help("Reactivate this workstream — moves it back into the active column")
         }
         Button {
             onLifecycleAction(ws, .editTitle)
