@@ -105,6 +105,13 @@ private struct ProvidersSettings: View {
     /// disabled when this is empty.
     @State private var localLLMStartCommand: String = ""
 
+    /// v1.4.13 — pull-model button state. `pullStatus` carries the human
+    /// summary line shown under the Model field after a click; stays nil
+    /// until the user pulls. Errors get the same field — distinguished by
+    /// the leading icon when rendered.
+    @State private var pulling = false
+    @State private var pullStatus: PullStatus?
+
     @State private var saving = false
     @State private var saveError: String?
     @State private var savedAt: Date?
@@ -123,9 +130,43 @@ private struct ProvidersSettings: View {
                 }
                 .pickerStyle(.segmented)
 
-                TextField("Model", text: $model, prompt: Text(modelPlaceholder))
-                    .textFieldStyle(.roundedBorder)
-                    .help("The model id sent to the provider. Leave blank to use the daemon's default for this provider.")
+                HStack(alignment: .firstTextBaseline) {
+                    TextField("Model", text: $model, prompt: Text(modelPlaceholder))
+                        .textFieldStyle(.roundedBorder)
+                        .help("The model id sent to the provider. Leave blank to use the daemon's default for this provider.")
+                    // v1.4.13 — Pull-model button. Ollama-only because mlx_lm
+                    // and llama.cpp don't have a pull command (they fetch
+                    // from HuggingFace on first inference). Disabled when the
+                    // model field is empty or the provider is .claude.
+                    if provider == .ollama {
+                        Button {
+                            Task { await pullModel() }
+                        } label: {
+                            if pulling {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("Pull", systemImage: "arrow.down.circle")
+                            }
+                        }
+                        .disabled(pulling || model.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .help("Run `ollama pull <model>` against the configured local LLM. Use this when the daemon reports a 404 for an unknown model. mlx_lm.server fetches models on first use, so the button is Ollama-specific.")
+                    }
+                }
+
+                // v1.4.13 — pull result line. Mirrors the spot the saved-at /
+                // error timestamp uses; surfaces the tail of `ollama pull`'s
+                // stdout/stderr so the user can see why it failed.
+                if let status = pullStatus {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: status.systemImage)
+                            .foregroundStyle(status.iconColor)
+                        Text(status.line)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                            .textSelection(.enabled)
+                    }
+                }
 
                 if provider == .ollama {
                     TextField("Local LLM URL", text: $ollamaURL,
@@ -268,6 +309,32 @@ private struct ProvidersSettings: View {
         }
     }
 
+    /// v1.4.13 — Run `ollama pull <model>` via the daemon. Synchronous on
+    /// the wire (the daemon waits for the pull before responding), so the
+    /// button stays in `pulling` state until ollama is done. We surface the
+    /// last line of stdout/stderr so a typo / network fail / disk-full
+    /// message reaches the user without a separate logs screen.
+    private func pullModel() async {
+        let trimmed = model.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        pulling = true
+        pullStatus = .info("Pulling \(trimmed)…")
+        defer { pulling = false }
+        do {
+            let r = try await client.pullModel(trimmed)
+            let tail = lastNonEmptyLine(r.output) ?? r.error ?? "(no output)"
+            if r.ok {
+                pullStatus = .ok("Pulled \(trimmed). \(tail)")
+            } else if let err = r.error {
+                pullStatus = .error("Pull failed: \(err)")
+            } else {
+                pullStatus = .error("Pull failed (exit \(r.exitCode ?? -1)): \(tail)")
+            }
+        } catch {
+            pullStatus = .error("Pull failed: \(error.localizedDescription)")
+        }
+    }
+
     /// Cheap reachability check: daemon /health, then a quick HEAD/GET on the
     /// chosen provider. We deliberately keep this off the LLM API surface so
     /// it doesn't burn tokens.
@@ -350,6 +417,44 @@ private struct ProvidersSettings: View {
             Text("Unknown").foregroundStyle(.secondary)
         }
     }
+}
+
+/// v1.4.13 — Status of the most recent `Pull` button click. Drives the
+/// status line that renders below the Model field on the Providers tab.
+enum PullStatus: Equatable {
+    case info(String)
+    case ok(String)
+    case error(String)
+
+    var line: String {
+        switch self {
+        case .info(let s), .ok(let s), .error(let s): return s
+        }
+    }
+    var systemImage: String {
+        switch self {
+        case .info: return "ellipsis.circle"
+        case .ok: return "checkmark.circle.fill"
+        case .error: return "exclamationmark.circle.fill"
+        }
+    }
+    var iconColor: Color {
+        switch self {
+        case .info: return .secondary
+        case .ok: return .green
+        case .error: return .red
+        }
+    }
+}
+
+/// v1.4.13 — Pluck the last non-empty line of `text`, trimmed. Used to
+/// surface ollama's final progress / error line to the user without
+/// overwhelming them with multi-line output.
+private func lastNonEmptyLine(_ text: String) -> String? {
+    text
+        .split(whereSeparator: { $0.isNewline })
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .last(where: { !$0.isEmpty })
 }
 
 /// v1.4.6 — Diagnostics tab. Four buttons:

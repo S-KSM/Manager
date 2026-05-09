@@ -6,6 +6,7 @@ import {
   findPidOnPort as defaultFindPidOnPort,
   killWithEscalation as defaultKillWithEscalation,
   parseHostPort,
+  pullOllamaModel as defaultPullOllamaModel,
   spawnDetached as defaultSpawnDetached,
 } from './admin.js';
 import { buildDigest } from './digest.js';
@@ -113,6 +114,14 @@ interface BuildOptions {
     findPidOnPort?: (port: number) => Promise<number[]>;
     killWithEscalation?: (pid: number) => Promise<{ escalated: boolean; dead: boolean }>;
     spawnDetached?: (cmd: string) => Promise<{ ok: boolean; pid?: number; error?: string }>;
+    /**
+     * v1.4.13 test seam — override `pullOllamaModel` so http-server tests
+     * don't actually shell out to `ollama pull <gigs>`. Returns the same
+     * shape as the real helper.
+     */
+    pullOllamaModel?: (
+      model: string,
+    ) => Promise<{ ok: boolean; exit_code: number | null; output: string; error?: string }>;
   };
 }
 
@@ -192,6 +201,8 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     opts.adminImpls?.killWithEscalation ?? ((pid: number) => defaultKillWithEscalation(pid));
   const adminSpawnDetached =
     opts.adminImpls?.spawnDetached ?? ((cmd: string) => defaultSpawnDetached(cmd));
+  const adminPullOllamaModel =
+    opts.adminImpls?.pullOllamaModel ?? ((model: string) => defaultPullOllamaModel(model));
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
@@ -378,6 +389,26 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
       return;
     }
     res.status(200).json({ killed_pid: killedPid, started: true });
+  });
+
+  /**
+   * v1.4.13 — Pull a model into the local LLM runtime. Body: `{model}`.
+   * Synchronous: waits for `ollama pull <model>` to finish before responding
+   * so the UI can show a final state. Returns `{ok, exit_code, output,
+   * error?}`. Validates the model name pattern at the helper level. 400 on
+   * missing model; 200 with `ok=false` on a clean run that returned non-zero
+   * (e.g. unknown model, no network) so the UI can show the tail of the
+   * pull's output without treating the request itself as failed.
+   */
+  app.post('/admin/llm/pull-model', async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const model = typeof body.model === 'string' ? body.model.trim() : '';
+    if (!model) {
+      res.status(400).json({ error: 'model is required' });
+      return;
+    }
+    const result = await adminPullOllamaModel(model);
+    res.status(200).json(result);
   });
 
   /**

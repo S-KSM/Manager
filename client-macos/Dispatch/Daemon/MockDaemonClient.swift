@@ -707,6 +707,11 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
     private var _restartDaemonResult: RestartDaemonResult = RestartDaemonResult(
         restarted: ["headliner", "subgoal_synth", "linear_sync"]
     )
+    /// v1.4.13 — pre-canned response for `pullModel()`. Default = ok.
+    private var _pullModelResult: PullModelResult = PullModelResult(
+        ok: true, exitCode: 0, output: "success\n", error: nil
+    )
+    private var _pullModelCalls: [String] = []
     /// When non-nil, the next `killLLM` / `restartLLM` / `restartDaemon`
     /// call throws this error instead of returning the canned result.
     /// Tests use this to exercise the Diagnostics view's error toast.
@@ -735,6 +740,14 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
     func setRestartDaemonResult(_ result: RestartDaemonResult) {
         lock.lock(); defer { lock.unlock() }
         _restartDaemonResult = result
+    }
+    func setPullModelResult(_ result: PullModelResult) {
+        lock.lock(); defer { lock.unlock() }
+        _pullModelResult = result
+    }
+    var pullModelCalls: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return _pullModelCalls
     }
     func setDiagnosticsError(_ error: Error?) {
         lock.lock(); defer { lock.unlock() }
@@ -769,6 +782,17 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         _restartDaemonCalls += 1
         let err = _diagnosticsError
         let result = _restartDaemonResult
+        lock.unlock()
+        if let err { throw err }
+        return result
+    }
+
+    func pullModel(_ model: String) async throws -> PullModelResult {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        _pullModelCalls.append(model)
+        let err = _diagnosticsError
+        let result = _pullModelResult
         lock.unlock()
         if let err { throw err }
         return result

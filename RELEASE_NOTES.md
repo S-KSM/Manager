@@ -4,6 +4,16 @@ Versions are anchored on the macOS app's `CFBundleShortVersionString` (the Info.
 
 ---
 
+## v1.4.13 — 2026-05-09 — feat: pull-model button on Providers tab
+
+One-click path to download missing local-LLM models. Surfaced after a `model 'qwen3:8b' not found` 404 in dogfood — the user shouldn't have to drop to a terminal + remember `ollama pull` syntax to fix that.
+
+- **`daemon/src/admin.ts pullOllamaModel(model)`** — synchronous helper. Spawns `ollama pull <model>`, captures last ~4 KB of stdout+stderr (truncates verbose progress bars), validates model name against `[A-Za-z0-9._:/-]{1,128}`. ENOENT spawn errors map to a clear "ollama CLI not found on PATH" hint.
+- **`POST /admin/llm/pull-model`** — body `{model}`. Returns 400 missing-model, else always 200 with `{ok, exit_code, output, error?}` so the UI can show the tail of `ollama pull`'s output even when it failed cleanly (unknown model, no network, disk full).
+- **macOS Settings → Providers tab** — new "Pull" button next to the Model field. Ollama-only (mlx_lm.server / llama.cpp fetch on first inference). Disabled when model is empty or provider is `.claude`. Shows `ProgressView` while pulling; result line below the field reports last-non-empty-line of output with a colored icon (green check / red exclaim).
+- **Wire shape `PullModelResult`** + `LiveDaemonClient.pullModel(model:)` + `MockDaemonClient` stub with `setPullModelResult` / `pullModelCalls`.
+- +7 tests (4 admin helper, 3 http endpoint). 358/358 daemon tests green. macOS app build succeeds.
+
 ## v1.4.10 — 2026-05-09 — feat: tracker write-back (orchestrator claims Linear tickets on dispatch)
 
 Not yet tagged. Daemon-only change; macOS app + wire schema unchanged. Behind a `WORKFLOW.md` opt-in (`tracker.claim_on_dispatch: true`); absent that flag, daemon behavior is identical to v1.4.9.

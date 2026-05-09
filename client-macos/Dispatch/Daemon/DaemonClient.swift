@@ -167,6 +167,13 @@ protocol DaemonClientProtocol: Sendable {
     /// cancel + re-instantiate the background tickers (Headliner /
     /// SubgoalSynthesizer / LinearCommentSyncer). Process does NOT exit.
     func restartDaemon() async throws -> RestartDaemonResult
+
+    /// `POST /admin/llm/pull-model` — v1.4.13. Synchronously runs
+    /// `ollama pull <model>` and returns the captured tail of its
+    /// output + exit code. The HTTP layer always returns 200 (even on a
+    /// non-zero ollama exit) so the UI can surface the error message
+    /// from `output` rather than a generic HTTP failure.
+    func pullModel(_ model: String) async throws -> PullModelResult
 }
 
 // MARK: - v1.4.6 Diagnostics wire shapes
@@ -177,6 +184,23 @@ struct KillLLMResult: Codable, Equatable, Sendable {
     var killed: Int?
     var escalated: Bool
     var error: String?
+}
+
+/// Wire shape of `POST /admin/llm/pull-model` 200. `ok` is true only
+/// when ollama exited 0; non-zero exits surface as `ok=false` with the
+/// stderr tail in `output`.
+struct PullModelResult: Codable, Equatable, Sendable {
+    var ok: Bool
+    var exitCode: Int?
+    var output: String
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case exitCode = "exit_code"
+        case output
+        case error
+    }
 }
 
 /// Wire shape of `POST /admin/llm/restart` 200. The daemon reports the
@@ -714,6 +738,15 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
 
     func restartDaemon() async throws -> RestartDaemonResult {
         try await sendJSON(method: "POST", path: "admin/restart", body: EmptyBody())
+    }
+
+    func pullModel(_ model: String) async throws -> PullModelResult {
+        struct Body: Encodable { let model: String }
+        return try await sendJSON(
+            method: "POST",
+            path: "admin/llm/pull-model",
+            body: Body(model: model)
+        )
     }
 
     func streamEvents(workstreamID: String) -> AsyncStream<Event> {

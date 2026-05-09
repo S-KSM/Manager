@@ -127,6 +127,18 @@ Smallest escalation toward "Dispatch manages Linear" (option 1 of 3 — daemon w
 - [x] **Tests** — `daemon/test/trackers/linear.test.ts` +7 cases (viewer cache, viewer-null error, claim success, claim collision, release clears assignee, unassigned filter clause, self filter clause). `daemon/test/orchestrator.test.ts` +3 cases (claim collision skips dispatch, claim ok → release on terminal, claim throw → `claim_failed` log). `workflow-loader.test.ts` +1 case (default-off, opt-in flips assign_to_self + unassigned_only). 320 / 320 daemon tests green.
 - [x] **Docs** — `docs/ARCHITECTURE.md` Orchestrator section gains "Tracker write-back (v1.4.10)" subsection. `RELEASE_NOTES.md` v1.4.10 entry. `CLAUDE.md` status block bumped.
 
+### v1.4.13 — Pull-model button (one-click `ollama pull` from Settings) ✅
+
+Surfaced after a `model 'qwen3:8b' not found` 404 in dogfood — users shouldn't have to drop to a terminal to download a missing model.
+
+- [x] `pullOllamaModel(model)` helper in `daemon/src/admin.ts`. Spawns `ollama pull <model>`, captures truncated stdout+stderr tail (~4 KB), validates model name pattern, maps ENOENT to a clear hint.
+- [x] `POST /admin/llm/pull-model` endpoint. 400 missing-model, always 200 otherwise so the UI can show the failure tail without treating the request itself as failed.
+- [x] macOS Settings → Providers tab "Pull" button next to Model field. Ollama-only; disabled when model empty or provider is `.claude`. `ProgressView` while pulling; result line with colored icon below.
+- [x] `LiveDaemonClient.pullModel(_:)` + `PullModelResult` Codable + `MockDaemonClient` stub.
+- [x] +7 tests (4 admin helper, 3 http endpoint). 358/358 daemon tests green. macOS app build succeeds.
+
+Future: a similar one-click "fetch from HuggingFace" button for mlx_lm.server, plus an action button on the in-app `model not found` error toast that deep-links to Settings → Providers and pre-fills the model name.
+
 ### v1.4.12 — Linear → Radar full mirror as backlog workstreams ✅
 
 Option #3 of the original three-tier escalation. Surfaces all Linear work in the Radar without manual linking.

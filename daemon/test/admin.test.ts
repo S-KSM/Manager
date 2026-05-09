@@ -1,9 +1,11 @@
+import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import {
   findPidOnPort,
   killPid,
   killWithEscalation,
   parseHostPort,
+  pullOllamaModel,
   spawnDetached,
 } from '../src/admin.js';
 
@@ -194,5 +196,96 @@ describe('admin.spawnDetached', () => {
     });
     expect(result.ok).toBe(false);
     expect(spawnImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('admin.pullOllamaModel (v1.4.13)', () => {
+  /**
+   * Build a fake ChildProcess that emits stdout/stderr chunks then closes
+   * with `exitCode`. Lets the test exercise the helper's data-collection +
+   * tail-truncation logic without a real `ollama` binary.
+   */
+  function fakeChild(opts: {
+    stdoutChunks?: string[];
+    stderrChunks?: string[];
+    exitCode?: number | null;
+    error?: Error;
+  }): unknown {
+    const proc = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+    };
+    proc.stdout = new EventEmitter();
+    proc.stderr = new EventEmitter();
+    queueMicrotask(() => {
+      for (const c of opts.stdoutChunks ?? []) proc.stdout.emit('data', Buffer.from(c));
+      for (const c of opts.stderrChunks ?? []) proc.stderr.emit('data', Buffer.from(c));
+      if (opts.error) proc.emit('error', opts.error);
+      else proc.emit('close', opts.exitCode ?? 0);
+    });
+    return proc;
+  }
+
+  it('rejects an invalid model name without spawning', async () => {
+    const spawnImpl = vi.fn();
+    const r = await pullOllamaModel('rm -rf /', {
+      spawnImpl: spawnImpl as unknown as Parameters<typeof pullOllamaModel>[1] extends infer T
+        ? T extends { spawnImpl?: infer S }
+          ? S
+          : never
+        : never,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('invalid model name');
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it('captures stdout + returns ok=true on exit 0', async () => {
+    const r = await pullOllamaModel('qwen3:8b', {
+      spawnImpl: (() =>
+        fakeChild({
+          stdoutChunks: ['pulling manifest\n', 'pulling layer abc\n', 'success\n'],
+          exitCode: 0,
+        })) as unknown as Parameters<typeof pullOllamaModel>[1] extends infer T
+        ? T extends { spawnImpl?: infer S }
+          ? S
+          : never
+        : never,
+    });
+    expect(r.ok).toBe(true);
+    expect(r.exit_code).toBe(0);
+    expect(r.output).toContain('success');
+  });
+
+  it('returns ok=false with stderr tail when ollama exits non-zero', async () => {
+    const r = await pullOllamaModel('qwen3:8b', {
+      spawnImpl: (() =>
+        fakeChild({
+          stderrChunks: ['Error: pull model manifest: file does not exist\n'],
+          exitCode: 1,
+        })) as unknown as Parameters<typeof pullOllamaModel>[1] extends infer T
+        ? T extends { spawnImpl?: infer S }
+          ? S
+          : never
+        : never,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.exit_code).toBe(1);
+    expect(r.output).toContain('Error: pull model manifest');
+  });
+
+  it('surfaces ENOENT spawn error with a "ollama CLI not found" hint', async () => {
+    const r = await pullOllamaModel('qwen3:8b', {
+      spawnImpl: (() =>
+        fakeChild({
+          error: Object.assign(new Error('spawn ollama ENOENT'), { code: 'ENOENT' }),
+        })) as unknown as Parameters<typeof pullOllamaModel>[1] extends infer T
+        ? T extends { spawnImpl?: infer S }
+          ? S
+          : never
+        : never,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('ollama CLI not found');
   });
 });

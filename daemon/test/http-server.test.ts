@@ -1488,6 +1488,68 @@ describe('HTTP server admin endpoints (v1.4.6 Diagnostics)', () => {
     const r = await request(handle.app).get('/settings');
     expect(r.body.localLLMStartCommand).toBe('mlx_lm.server --port 8080');
   });
+
+  // ---- v1.4.13 /admin/llm/pull-model -------------------------------------
+
+  it('POST /admin/llm/pull-model 400 when model is missing', async () => {
+    const r = await request(handle.app).post('/admin/llm/pull-model').send({});
+    expect(r.status).toBe(400);
+    expect(r.body.error).toContain('model is required');
+  });
+
+  it('POST /admin/llm/pull-model forwards to pullOllamaModel and returns its result', async () => {
+    await handle.close();
+    let capturedModel = '';
+    handle = buildHttpServer({
+      eventStore,
+      memoryStore,
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      adminImpls: {
+        pullOllamaModel: async (model) => {
+          capturedModel = model;
+          return { ok: true, exit_code: 0, output: 'success\n' };
+        },
+      },
+    });
+    const r = await request(handle.app).post('/admin/llm/pull-model').send({ model: 'qwen3:8b' });
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ ok: true, exit_code: 0, output: 'success\n' });
+    expect(capturedModel).toBe('qwen3:8b');
+  });
+
+  it('POST /admin/llm/pull-model returns 200 with ok:false on a clean non-zero exit', async () => {
+    await handle.close();
+    handle = buildHttpServer({
+      eventStore,
+      memoryStore,
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      adminImpls: {
+        pullOllamaModel: async () => ({
+          ok: false,
+          exit_code: 1,
+          output: 'Error: model not found\n',
+        }),
+      },
+    });
+    const r = await request(handle.app).post('/admin/llm/pull-model').send({ model: 'qwen3:8b' });
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(false);
+    expect(r.body.output).toContain('model not found');
+  });
 });
 
 // Suppress unused var warning when vi isn't otherwise used.

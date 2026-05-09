@@ -215,3 +215,87 @@ export async function spawnDetached(
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
+
+/**
+ * v1.4.13 — Pull a model into the local LLM runtime. Currently delegates to
+ * `ollama pull <model>` since Ollama is the dominant local runtime that
+ * supports a pull command. mlx_lm.server / llama.cpp don't have an
+ * equivalent (they fetch from HuggingFace on first inference); for those the
+ * caller is expected to surface a friendlier "no pull needed" message.
+ *
+ * Synchronous: waits for the pull to finish before resolving so the UI can
+ * show a final "done" state. Captures stdout + stderr (truncated to keep the
+ * HTTP response small — Ollama's pull output is verbose progress bars).
+ */
+export interface PullModelResult {
+  ok: boolean;
+  exit_code: number | null;
+  /** Last ~4 KB of combined stdout+stderr. Useful for surfacing errors in the UI. */
+  output: string;
+  error?: string;
+}
+
+const PULL_OUTPUT_TAIL_BYTES = 4096;
+const MODEL_NAME_PATTERN = /^[A-Za-z0-9._:/-]{1,128}$/;
+
+export async function pullOllamaModel(
+  model: string,
+  opts: { spawnImpl?: SpawnImpl } = {},
+): Promise<PullModelResult> {
+  const trimmed = model.trim();
+  if (!MODEL_NAME_PATTERN.test(trimmed)) {
+    return {
+      ok: false,
+      exit_code: null,
+      output: '',
+      error: `invalid model name: must match ${MODEL_NAME_PATTERN.source}`,
+    };
+  }
+  const spawnImpl = opts.spawnImpl ?? ((c, a, o) => spawn(c, a, o));
+  return await new Promise<PullModelResult>((resolve) => {
+    let child: ChildProcess;
+    try {
+      child = spawnImpl('ollama', ['pull', trimmed], { stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (err) {
+      resolve({
+        ok: false,
+        exit_code: null,
+        output: '',
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    const onData = (buf: Buffer): void => {
+      chunks.push(buf);
+      totalBytes += buf.length;
+      // Keep at most 2× the tail size in memory so a multi-GB pull's progress
+      // output can't blow up the daemon. We slice down to `tail` on resolve.
+      while (totalBytes > PULL_OUTPUT_TAIL_BYTES * 2 && chunks.length > 1) {
+        const removed = chunks.shift();
+        if (removed) totalBytes -= removed.length;
+      }
+    };
+    child.stdout?.on('data', onData);
+    child.stderr?.on('data', onData);
+    child.on('error', (err) => {
+      // ENOENT here means `ollama` isn't on PATH — surface a clear hint.
+      const msg = err instanceof Error ? err.message : String(err);
+      resolve({
+        ok: false,
+        exit_code: null,
+        output: Buffer.concat(chunks).toString('utf8').slice(-PULL_OUTPUT_TAIL_BYTES),
+        error: msg.includes('ENOENT') ? `ollama CLI not found on PATH: ${msg}` : msg,
+      });
+    });
+    child.on('close', (code) => {
+      const out = Buffer.concat(chunks).toString('utf8').slice(-PULL_OUTPUT_TAIL_BYTES);
+      resolve({
+        ok: code === 0,
+        exit_code: typeof code === 'number' ? code : null,
+        output: out,
+      });
+    });
+  });
+}
