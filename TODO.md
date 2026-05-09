@@ -114,6 +114,29 @@ Lands on top of v1.2 (Kanban + Linear UI) and v1.3 (MLX + URL scheme + MANAGER_*
 
 ---
 
+## v1.4.10 — Tracker write-back: daemon claims Linear tickets on dispatch (in flight)
+
+Smallest escalation toward "Dispatch manages Linear" (option 1 of 3 — daemon writes to existing tickets; ticket creation + full-mirror are deferred to v1.4.8 / v1.4.9). Wire schema additive — new optional `tracker.claim_*` block in `WORKFLOW.md`, new methods on the `Tracker` interface, no breaking change to existing observation-only setups. Without `claim_on_dispatch: true`, behavior is identical to v1.4.6.
+
+- [x] **Tracker interface gains write ops** — `claimIssue(issueId, { stateId?, assigneeId? })` + `releaseIssue(issueId, { stateId? })` added to `Tracker` (`daemon/src/trackers/index.ts`) as optional methods (orchestrator probes for presence). Mock impl is an in-memory assignee map keyed by issue.id (test inspection via `claimedAssignees()`). Linear impl maps to a generalized `issueUpdate` mutation. New `TrackerError` codes: `linear_assignee_taken` (claim collided — different user already assigned) + `linear_self_user_failed` (viewer query returned no id).
+- [x] **Linear viewer cache** — `LinearTracker.selfUserId()` resolves `query { viewer { id } }` lazily on first call, caches in-memory. Used for assigning + the `assignee=self` GraphQL filter.
+- [x] **Assignee filter on `fetchCandidateIssues`** — optional second arg `{ assigneeFilter?: 'any' | 'unassigned' | 'self' }`. Default `'any'` (current behavior). Mock filters in-memory; Linear inlines the clause as a string fragment (`assignee: { null: { eq: true } }` or `assignee: { id: { eq: "<selfId>" } }`) since GraphQL typed variables can't carry "is null". Multi-daemon races bounded — strict `unassigned` filter means a second daemon won't even see a ticket the first one has claimed.
+- [x] **WORKFLOW.md `tracker.claim_*` block** — `claim_on_dispatch: bool` (default false), `assign_to_self: bool` (defaults true when claim is on), `claim_state: string | null` (optional Linear state name; **parsed but not yet acted on in v1.4.10** — state-id resolution is a v1.4.10.x follow-up, see deferred list), `unassigned_only: bool` (defaults true when claim is on). `coerceTracker` in `workflow-loader.ts` resolves them; hot-reload threads `assigneeFilter` through `applyConfig`. Toggling `claim_on_dispatch` live still requires daemon restart (claim/release hook closures aren't hot-swappable yet).
+- [x] **Orchestrator claim-before-spawn** — pre-dispatch `claimHook` runs inside `dispatchInternal`'s async IIFE BEFORE `dispatchOne`. On `{ ok:false, collided:true }` (TrackerError code `linear_assignee_taken`) the orchestrator drops local `running`/`claimed` state and logs `orchestrator.claim_collided` — next tick re-evaluates from scratch. On `{ ok:false, error }` it logs `orchestrator.claim_failed` and skips. The retry-fire path bypasses the assignee filter (uses `'any'`) so a known issue id we already hold can still be re-fetched after the assignee was set.
+- [x] **Orchestrator release-on-terminal** — `reconcileRunning` fires `releaseHook({ issueId, identifier })` as best-effort fire-and-forget when an issue moves to a terminal state. Failures log `orchestrator.release_failed` but never block reconciliation. (Initial design considered release-on-worker-failure; rejected because the next retry re-claims cleanly and the failed-then-retried sequence is more common than a permanent abort.)
+- [x] **Tests** — `daemon/test/trackers/linear.test.ts` +7 cases (viewer cache, viewer-null error, claim success, claim collision, release clears assignee, unassigned filter clause, self filter clause). `daemon/test/orchestrator.test.ts` +3 cases (claim collision skips dispatch, claim ok → release on terminal, claim throw → `claim_failed` log). `workflow-loader.test.ts` +1 case (default-off, opt-in flips assign_to_self + unassigned_only). 320 / 320 daemon tests green.
+- [x] **Docs** — `docs/ARCHITECTURE.md` Orchestrator section gains "Tracker write-back (v1.4.10)" subsection. `RELEASE_NOTES.md` v1.4.10 entry. `CLAUDE.md` status block bumped.
+
+Deferred to v1.4.10.x / v1.4.8+:
+- `claim_state` Linear state-name → state-id resolver (needs `workflowStates` GraphQL query scoped by team — pulled from one project issue's `team.id`, cached). Until shipped, `claim_state` in `WORKFLOW.md` logs a one-line warning at startup and is otherwise ignored.
+- Multi-instance crash recovery: if Daemon A claims and dies, Daemon B's strict `unassigned` filter never re-discovers the ticket. Need either a stale-claim TTL (released after N minutes of no `live_session` from the assignee user) or an `unassigned_or_self` filter variant.
+- Hot-swap of claim/release hooks on `WORKFLOW.md` reload.
+- Ticket creation (`tracker.createIssue`) for triage-agent + Mascot-emitted bug reports.
+- Full Linear → Radar draft-workstream mirror.
+- Multi-tracker write abstraction (Jira / GH Issues swap-in).
+
+---
+
 ## v1.5 — Remote / mobile
 
 - [ ] Daemon binds to non-localhost interface with token auth.

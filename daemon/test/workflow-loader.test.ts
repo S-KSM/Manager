@@ -89,4 +89,33 @@ describe('loadWorkflow', () => {
     const wf = await loadWorkflow(path);
     expect(wf.prompt_template).toBe('no front matter, just text');
   });
+
+  it('claim_on_dispatch defaults false; flipping it on flips assign_to_self + unassigned_only', async () => {
+    const a = join(tmp, 'A.md');
+    await writeFile(a, ['---', 'tracker: { kind: linear }', '---', ''].join('\n'));
+    const wfa = await loadWorkflow(a);
+    expect(wfa.config.tracker.claim_on_dispatch).toBe(false);
+    expect(wfa.config.tracker.assign_to_self).toBe(false);
+    expect(wfa.config.tracker.unassigned_only).toBe(false);
+    expect(wfa.config.tracker.claim_state).toBeNull();
+
+    const b = join(tmp, 'B.md');
+    await writeFile(
+      b,
+      [
+        '---',
+        'tracker:',
+        '  kind: linear',
+        '  claim_on_dispatch: true',
+        '  claim_state: In Progress',
+        '---',
+        '',
+      ].join('\n'),
+    );
+    const wfb = await loadWorkflow(b);
+    expect(wfb.config.tracker.claim_on_dispatch).toBe(true);
+    expect(wfb.config.tracker.assign_to_self).toBe(true);
+    expect(wfb.config.tracker.unassigned_only).toBe(true);
+    expect(wfb.config.tracker.claim_state).toBe('In Progress');
+  });
 });

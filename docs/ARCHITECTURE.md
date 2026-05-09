@@ -203,7 +203,7 @@ Five components, all in `daemon/src/`:
 | Component | File | Responsibility |
 |---|---|---|
 | **State machine** | `orchestrator.ts` | Symphony §7 — per-issue lifecycle (`Unclaimed → Claimed → Running → RetryQueued / Released`). Symphony §8 candidate selection + sort. §8.4 retry/backoff. §8.5 reconciliation tick. |
-| **Tracker adapter** | `trackers/{linear,mock}.ts` | Pluggable. Symphony §11 GraphQL for Linear; the mock reads a JSON file for tests. Common interface: `listIssues`, `claim`, `release`, `setState`. |
+| **Tracker adapter** | `trackers/{linear,mock}.ts` | Pluggable. Symphony §11 GraphQL for Linear; the mock reads a JSON file for tests. Required reads: `fetchCandidateIssues` (now with optional `assigneeFilter`), `fetchIssuesByStates`, `fetchIssueStatesByIds`. Optional v1.4.10 writes: `claimIssue`, `releaseIssue` — orchestrator probes for presence. |
 | **Workflow loader** | `workflow-loader.ts` | Reads `WORKFLOW.md` — YAML front matter + Markdown prompt template. Env var indirection (`api_key: $LINEAR_TOKEN`). Dynamic reload via `fs.watch` + 60-second backstop poll. |
 | **Workspace manager** | `workspaces.ts` | Symphony §9 — one directory per claimed issue under `workspace.root`. Sanitized key `[A-Za-z0-9._-]`, safety invariants (path containment, refusal to delete outside root). Pre/post hooks via `bash -lc` with timeout. Reuses the dir across runs of the same issue. |
 | **Agent runner** | `agent-runner.ts` | Spawns `claude` per turn inside the workspace (option A of Symphony §10). Sets `DISPATCH_WORKSTREAM` + `DISPATCH_SESSION_ID` so the existing hooks + MCP route events to the right workstream — no parallel telemetry path. Captures stderr tail, maps exit codes to Symphony §10.6 error categories (`turn_timeout`, `turn_failed`, `codex_not_found`, `spawn_error`). |
@@ -213,6 +213,17 @@ Five components, all in `daemon/src/`:
 **Approval bridge (v1.4.4).** When an autonomous agent needs human authorization for a destructive or out-of-scope action it enqueues an `approval_required` intervention. The macOS `AgentDetailView` renders an `ApprovalStrip` between the header and the timeline; tapping Approve / Deny calls `POST /workstreams/:id/interventions/:intId/decide`, which atomically merges the decision into the queue and emits `intervention_delivered` with `approved: bool`. The agent-side trigger (an MCP tool that enqueues approval requests) is deferred to v1.4.5; until then the queue + API + UI infra ships ahead of any source that fills it.
 
 **Question bridge (v1.4.7).** Same shape as the approval bridge, one intervention kind down: `ask_user` MCP tool → `question_required` intervention → `QuestionStrip` between the header and the timeline → `POST /workstreams/:id/interventions/:intId/answer` with `{choice?, freetext?}`. The MCP handler blocks the agent's tool call (polling SQLite once per second, capped at the agent-supplied `timeout_seconds`, default 300) and returns the manager's pick to the agent. Lets the agent route a question to Dispatch instead of blocking the terminal session — the user picks an option in the app and the agent unblocks.
+
+**Tracker write-back (v1.4.10).** Adds two optional methods on the `Tracker` interface — `claimIssue(issueId, { stateId?, assigneeId? })` and `releaseIssue(issueId, opts?)` — so the orchestrator can mark a Linear ticket "owned by Dispatch" before spawning an agent and release it on terminal-state transition. Activated only when `WORKFLOW.md` has `tracker.claim_on_dispatch: true`; absent that flag, behavior is identical to v1.4.9 (read-only tracker). `LinearTracker` resolves `viewer.id` lazily on first use and caches it; `fetchCandidateIssues` accepts `{ assigneeFilter: 'any' | 'unassigned' | 'self' }` to keep multi-daemon setups from racing on the same ticket. Sequence:
+
+1. Orchestrator's `tick()` fetches with `assigneeFilter: 'unassigned'` (or `'any'` if claim is off).
+2. For each eligible candidate, `dispatchInternal` enters the running map locally THEN awaits `claimHook(issue)` inside its async IIFE.
+3. `claimHook` calls `tracker.claimIssue(id, { assigneeId: selfUserId })`. Linear peeks `assignee` first, throws `linear_assignee_taken` if a different user already holds it.
+4. On `{ ok:false, collided:true }` orchestrator drops local state (`running.delete`, `claimed.delete`), logs `orchestrator.claim_collided`, and leaves the issue for the next tick. On other claim errors it logs `orchestrator.claim_failed` and skips.
+5. On success, `dispatchOne` runs as in v1.4.6.
+6. When `reconcileRunning` later sees the issue in `terminal_states`, it fires `releaseHook({ issueId, identifier })` as best-effort fire-and-forget — failures log `orchestrator.release_failed` but never block reconciliation.
+
+The `tracker.claim_state` workflow knob (move the issue into a named Linear state on claim) is parsed but not yet acted on — the state-name → state-id resolver is a v1.4.10.x follow-up and currently logs a one-line warning at startup if set. Worker-failure-then-retry does NOT release: the next retry just re-claims (assignee mutation is idempotent for self).
 
 **WORKFLOW.md schema (minimum viable):**
 
@@ -224,6 +235,11 @@ tracker:
   api_key: $LINEAR_TOKEN    # env var indirection — loader resolves at boot
   active_states: [Todo, In Progress]
   terminal_states: [Done, Cancelled]
+  # v1.4.10 write-back (all optional, default off):
+  claim_on_dispatch: true   # daemon claims the ticket before spawning
+  assign_to_self: true      # default true when claim_on_dispatch is on
+  unassigned_only: true     # default true when claim_on_dispatch is on
+  claim_state: In Progress  # optional Linear state to move into; null/omitted = leave state alone (parsed-only in v1.4.10)
 polling:
   interval_ms: 30000
 workspace:

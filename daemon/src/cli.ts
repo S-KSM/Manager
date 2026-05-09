@@ -10,10 +10,16 @@ import { Headliner } from './headliner.js';
 import { LinearCommentSyncer } from './linear-comment-syncer.js';
 import { SubgoalSynthesizer } from './subgoal-synthesizer.js';
 import { buildHttpServer } from './http-server.js';
-import { Orchestrator, type DispatchOutcome } from './orchestrator.js';
+import {
+  Orchestrator,
+  type ClaimHook,
+  type ClaimOutcome,
+  type DispatchOutcome,
+  type ReleaseHook,
+} from './orchestrator.js';
 import { MockTracker } from './trackers/mock.js';
 import { LinearTracker } from './trackers/linear.js';
-import type { Tracker } from './trackers/index.js';
+import { type AssigneeFilter, type Tracker, TrackerError } from './trackers/index.js';
 import { loadWorkflow, watchWorkflow, WorkflowError } from './workflow-loader.js';
 import { WorkspaceManager } from './workspaces.js';
 import { AgentRunner } from './agent-runner.js';
@@ -62,10 +68,7 @@ export function buildCli(): Command {
       '--workflow <path>',
       'v1.4.3: load WORKFLOW.md from <path> and enable the orchestrator + agent runner.',
     )
-    .option(
-      '--dry-run',
-      'v1.4.x: orchestrator logs "would dispatch" instead of spawning an agent.',
-    )
+    .option('--dry-run', 'v1.4.x: orchestrator logs "would dispatch" instead of spawning an agent.')
     .action(
       async (opts: {
         mcpStdio?: boolean;
@@ -334,6 +337,14 @@ async function runStart(opts: {
     let terminalStates = ['Done', 'Closed', 'Cancelled', 'Canceled', 'Duplicate'];
     let pollIntervalMs = 5_000;
     let maxConcurrent = 5;
+    // v1.4.7 — defaults match v1.4.6 (no tracker write). The workflow path
+    // overwrites these from cfg.tracker.
+    let claimConfig: ClaimConfig = {
+      enabled: false,
+      assignToSelf: false,
+      claimState: null,
+      unassignedOnly: false,
+    };
 
     if (opts.workflow) {
       let wf;
@@ -351,6 +362,17 @@ async function runStart(opts: {
       terminalStates = cfg.tracker.terminal_states;
       pollIntervalMs = cfg.polling.interval_ms;
       maxConcurrent = cfg.agent.max_concurrent_agents;
+      claimConfig = {
+        enabled: cfg.tracker.claim_on_dispatch,
+        assignToSelf: cfg.tracker.assign_to_self,
+        claimState: cfg.tracker.claim_state,
+        unassignedOnly: cfg.tracker.unassigned_only,
+      };
+      if (claimConfig.enabled && claimConfig.claimState) {
+        process.stderr.write(
+          `[dispatch] claim_state="${claimConfig.claimState}" parsed but not yet applied (v1.4.7 ships assignee-only claims; state move is a follow-up)\n`,
+        );
+      }
       workspaceMgr = new WorkspaceManager({
         ...(cfg.workspace.root ? { root: cfg.workspace.root } : {}),
         hooks: cfg.hooks,
@@ -382,12 +404,22 @@ async function runStart(opts: {
       agentRunner = new AgentRunner(workspaceMgr);
     }
 
+    // v1.4.7 — claim/release hooks built from workflow config. Without
+    // claim_on_dispatch the hooks are null and behavior is identical to
+    // v1.4.6. claim_state (state-name move) is parsed but not yet acted on
+    // — it requires a Linear workflowStates resolver (TODO follow-up).
+    const claimHook = buildClaimHook(tracker, claimConfig);
+    const releaseHook = buildReleaseHook(tracker, claimConfig);
+
     orchestrator = new Orchestrator({
       tracker,
       activeStates,
       terminalStates,
       pollIntervalMs,
       maxConcurrentAgents: maxConcurrent,
+      assigneeFilter: assigneeFilterFor(claimConfig),
+      ...(claimHook ? { claimHook } : {}),
+      ...(releaseHook ? { releaseHook } : {}),
       dispatchOne: async (issue, attempt) => {
         if (dryRun) {
           process.stderr.write(
@@ -432,11 +464,16 @@ async function runStart(opts: {
           return;
         }
         const cfg = next.config;
+        // v1.4.7 — claim hooks themselves are not hot-swappable today (no
+        // applyConfig path for them), but the assigneeFilter is — so a
+        // workflow edit that flips unassigned_only takes effect immediately.
+        // Toggling claim_on_dispatch live requires daemon restart for now.
         orchestrator?.applyConfig({
           activeStates: cfg.tracker.active_states,
           terminalStates: cfg.tracker.terminal_states,
           pollIntervalMs: cfg.polling.interval_ms,
           maxConcurrentAgents: cfg.agent.max_concurrent_agents,
+          assigneeFilter: assigneeFilterFor({ unassignedOnly: cfg.tracker.unassigned_only }),
         });
         workspaceMgr.applyConfig({
           ...(cfg.workspace.root ? { root: cfg.workspace.root } : {}),
@@ -449,7 +486,13 @@ async function runStart(opts: {
 
   let mcpRunning = false;
   if (opts.mcpStdio) {
-    const mcp = buildMcpServer({ eventStore, memoryStore, registry, skillProposalsStore, interventionQueue });
+    const mcp = buildMcpServer({
+      eventStore,
+      memoryStore,
+      registry,
+      skillProposalsStore,
+      interventionQueue,
+    });
     await startMcpStdio(mcp);
     mcpRunning = true;
     process.stderr.write('[dispatch] MCP server bound to stdio\n');
@@ -505,7 +548,13 @@ async function runMcp(): Promise<void> {
   const memoryStore = new MemoryStore(cfg.memoryDir);
   const interventionQueue = new InterventionQueue(cfg.dbPath);
   const skillProposalsStore = new SkillProposalsStore(cfg.dbPath);
-  const mcp = buildMcpServer({ eventStore, memoryStore, registry, skillProposalsStore, interventionQueue });
+  const mcp = buildMcpServer({
+    eventStore,
+    memoryStore,
+    registry,
+    skillProposalsStore,
+    interventionQueue,
+  });
   await startMcpStdio(mcp);
   process.stderr.write(`[dispatch] MCP stdio bound; state at ${cfg.home}\n`);
 
@@ -533,7 +582,14 @@ async function runMcp(): Promise<void> {
  * arbitrary expressions.
  */
 function renderPrompt(
-  issue: { identifier: string; title: string; description: string | null; state: string; url: string | null; labels: string[] },
+  issue: {
+    identifier: string;
+    title: string;
+    description: string | null;
+    state: string;
+    url: string | null;
+    labels: string[];
+  },
   attempt: number | null,
 ): string {
   const head = [
@@ -558,4 +614,66 @@ function pad(s: string, w: number): string {
 
 function shellQuote(s: string): string {
   return /^[A-Za-z0-9_./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * v1.4.7 — internal claim/release config carried from workflow into the
+ * orchestrator hooks. Mirrors `WorkflowConfig.tracker.claim_*` but flat.
+ */
+interface ClaimConfig {
+  enabled: boolean;
+  assignToSelf: boolean;
+  /** Linear state name; not yet acted on in v1.4.7 (state-id resolver TODO). */
+  claimState: string | null;
+  unassignedOnly: boolean;
+}
+
+/**
+ * v1.4.7 — Build the orchestrator's pre-dispatch claim hook from workflow
+ * config. Returns null when claim is off or the tracker doesn't implement
+ * `claimIssue` (in which case the orchestrator runs the v1.4.6 path).
+ *
+ * Tracker collisions surface as `linear_assignee_taken` and become
+ * `{ ok: false, collided: true }`. Anything else becomes
+ * `{ ok: false, collided: false, error }` so the orchestrator can pick
+ * skip-this-tick vs skip-this-issue.
+ */
+function buildClaimHook(tracker: Tracker, cfg: ClaimConfig): ClaimHook | null {
+  if (!cfg.enabled) return null;
+  if (typeof tracker.claimIssue !== 'function') return null;
+  return async (issue): Promise<ClaimOutcome> => {
+    try {
+      // assigneeId: undefined = let tracker pick self (Linear's default in
+      // claimIssue); explicit null when assign_to_self is false would
+      // *clear* the assignee — never useful for a claim, so don't pass.
+      const opts: { assigneeId?: string | null } = {};
+      if (cfg.assignToSelf) {
+        // Leave undefined so LinearTracker.claimIssue resolves selfUserId.
+      }
+      await tracker.claimIssue!(issue.id, opts);
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof TrackerError && err.code === 'linear_assignee_taken') {
+        return { ok: false, collided: true };
+      }
+      return {
+        ok: false,
+        collided: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  };
+}
+
+function buildReleaseHook(tracker: Tracker, cfg: ClaimConfig): ReleaseHook | null {
+  if (!cfg.enabled) return null;
+  if (typeof tracker.releaseIssue !== 'function') return null;
+  return async (ref): Promise<void> => {
+    await tracker.releaseIssue!(ref.issueId);
+  };
+}
+
+/** v1.4.7 — Translate cfg.unassignedOnly into the assignee filter param. */
+export function assigneeFilterFor(cfg: { unassignedOnly: boolean }): AssigneeFilter {
+  return cfg.unassignedOnly ? 'unassigned' : 'any';
 }

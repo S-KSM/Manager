@@ -94,9 +94,9 @@ describe('Orchestrator', () => {
   it('skips issues already running or claimed (no double dispatch)', async () => {
     const issues = [issue({ id: '1', identifier: 'A', priority: 1 })];
     const tracker = new StaticTracker(issues);
-    const dispatch: DispatchHook = vi.fn().mockImplementation(
-      () => new Promise<DispatchOutcome>(() => {}),
-    );
+    const dispatch: DispatchHook = vi
+      .fn()
+      .mockImplementation(() => new Promise<DispatchOutcome>(() => {}));
     const orch = new Orchestrator({
       tracker,
       activeStates: ['Todo'],
@@ -185,12 +185,93 @@ describe('Orchestrator', () => {
     orch.stop();
   });
 
+  // ---- v1.4.7 claim/release hooks --------------------------------------------
+
+  it('claimHook is awaited before dispatchOne; dispatchOne not called on collision', async () => {
+    const issues = [issue({ id: '1', identifier: 'A', priority: 1 })];
+    const tracker = new StaticTracker(issues);
+    const order: string[] = [];
+    const dispatch: DispatchHook = vi.fn().mockImplementation(async () => {
+      order.push('dispatch');
+      return new Promise<DispatchOutcome>(() => {});
+    });
+    const claim = vi.fn().mockImplementation(async () => {
+      order.push('claim');
+      return { ok: false, collided: true } as const;
+    });
+    const orch = new Orchestrator({
+      tracker,
+      activeStates: ['Todo'],
+      terminalStates: ['Done'],
+      dispatchOne: dispatch,
+      claimHook: claim,
+    });
+    await orch.tick();
+    // Let the async IIFE inside dispatchInternal resolve.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(claim).toHaveBeenCalledTimes(1);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(order).toEqual(['claim']);
+    expect(orch.snapshot().counts.running).toBe(0);
+    orch.stop();
+  });
+
+  it('claimHook ok=true allows dispatchOne; release fires when reconciliation sees terminal', async () => {
+    const live = issue({ id: '1', identifier: 'A', state: 'In Progress' });
+    const tracker = new StaticTracker([live]);
+    const dispatch: DispatchHook = vi
+      .fn()
+      .mockImplementation(() => new Promise<DispatchOutcome>(() => {}));
+    const claim = vi.fn().mockResolvedValue({ ok: true });
+    const release = vi.fn().mockResolvedValue(undefined);
+    const orch = new Orchestrator({
+      tracker,
+      activeStates: ['Todo', 'In Progress'],
+      terminalStates: ['Done'],
+      dispatchOne: dispatch,
+      claimHook: claim,
+      releaseHook: release,
+    });
+    await orch.tick();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(claim).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    // Flip to terminal — reconcile must call release.
+    tracker.setIssues([{ ...live, state: 'Done' }]);
+    await orch.tick();
+    // releaseHook is fire-and-forget inside reconcile; flush the microtask queue.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(release).toHaveBeenCalledWith({ issueId: '1', identifier: 'A' });
+    orch.stop();
+  });
+
+  it('claimHook thrown error is logged as orchestrator.claim_failed and skips dispatch', async () => {
+    const issues = [issue({ id: '1', identifier: 'A' })];
+    const tracker = new StaticTracker(issues);
+    const dispatch: DispatchHook = vi.fn();
+    const claim = vi.fn().mockRejectedValue(new Error('network down'));
+    const logs: string[] = [];
+    const orch = new Orchestrator({
+      tracker,
+      activeStates: ['Todo'],
+      terminalStates: ['Done'],
+      dispatchOne: dispatch,
+      claimHook: claim,
+      log: (m) => logs.push(m),
+    });
+    await orch.tick();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(logs).toContain('orchestrator.claim_failed');
+    orch.stop();
+  });
+
   it('reconciliation drops running entries whose tracker state went terminal', async () => {
     const live = issue({ id: '1', identifier: 'A', state: 'In Progress' });
     const tracker = new StaticTracker([live]);
-    const dispatch: DispatchHook = vi.fn().mockImplementation(
-      () => new Promise<DispatchOutcome>(() => {}),
-    );
+    const dispatch: DispatchHook = vi
+      .fn()
+      .mockImplementation(() => new Promise<DispatchOutcome>(() => {}));
     const orch = new Orchestrator({
       tracker,
       activeStates: ['Todo', 'In Progress'],

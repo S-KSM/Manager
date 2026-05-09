@@ -1,4 +1,11 @@
-import { type BlockerRef, type Issue, type Tracker, TrackerError } from './index.js';
+import {
+  type AssigneeFilter,
+  type BlockerRef,
+  type ClaimOptions,
+  type Issue,
+  type Tracker,
+  TrackerError,
+} from './index.js';
 
 /**
  * LinearTracker — Symphony SPEC.md §11.2 (Linear-compatible).
@@ -16,30 +23,40 @@ import { type BlockerRef, type Issue, type Tracker, TrackerError } from './index
 const NETWORK_TIMEOUT_MS = 30_000;
 const PAGE_SIZE = 50;
 
-const CANDIDATE_QUERY = `
-  query CandidateIssues($projectSlug: String!, $states: [String!]!, $first: Int!, $after: String) {
-    issues(
-      first: $first
-      after: $after
-      filter: {
-        project: { slugId: { eq: $projectSlug } }
-        state: { name: { in: $states } }
-      }
-    ) {
-      pageInfo { hasNextPage endCursor }
-      nodes {
-        id identifier title description priority url branchName createdAt updatedAt
-        labels { nodes { name } }
-        state { name }
-        inverseRelations(first: 50, filter: { type: { eq: "blocks" } }) {
-          nodes {
-            issue { id identifier state { name } }
+/**
+ * v1.4.7 — `$assigneeFilter` is composed in TS and inlined as a literal map.
+ * Linear's GraphQL schema does not let us pass `null` through a typed variable
+ * for "is null", so the filter clause is built as a string fragment outside
+ * the query template.
+ */
+function buildCandidateQuery(assigneeClause: string): string {
+  return `
+    query CandidateIssues($projectSlug: String!, $states: [String!]!, $first: Int!, $after: String) {
+      issues(
+        first: $first
+        after: $after
+        filter: {
+          project: { slugId: { eq: $projectSlug } }
+          state: { name: { in: $states } }
+          ${assigneeClause}
+        }
+      ) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id identifier title description priority url branchName createdAt updatedAt
+          labels { nodes { name } }
+          state { name }
+          assignee { id }
+          inverseRelations(first: 50, filter: { type: { eq: "blocks" } }) {
+            nodes {
+              issue { id identifier state { name } }
+            }
           }
         }
       }
     }
-  }
-`;
+  `;
+}
 
 const STATES_QUERY = `
   query IssuesByStates($projectSlug: String!, $states: [String!]!, $first: Int!) {
@@ -88,6 +105,37 @@ const SET_ISSUE_STATE_MUTATION = `
   }
 `;
 
+const VIEWER_QUERY = `query Viewer { viewer { id } }`;
+
+/**
+ * v1.4.7 — Read assignee + state right before claim mutate so we can detect
+ * "someone else got there first". `linear_assignee_taken` is thrown when the
+ * fetched `assignee.id` is non-null and != the user we'd assign to.
+ */
+const ISSUE_ASSIGNEE_QUERY = `
+  query IssueAssignee($id: String!) {
+    issue(id: $id) {
+      id
+      assignee { id }
+      state { id name }
+    }
+  }
+`;
+
+/**
+ * v1.4.7 — Generalized issueUpdate. AssigneeId / stateId both optional so a
+ * caller can flip either or both. Linear treats `null` as "clear" for
+ * assignee. Omitting a key leaves the field alone.
+ */
+const UPDATE_ISSUE_MUTATION = `
+  mutation UpdateIssue($issueId: String!, $input: IssueUpdateInput!) {
+    issueUpdate(id: $issueId, input: $input) {
+      success
+      issue { id assignee { id } state { id name } }
+    }
+  }
+`;
+
 const ADD_ISSUE_COMMENT_MUTATION = `
   mutation AddIssueComment($issueId: String!, $body: String!) {
     commentCreate(input: { issueId: $issueId, body: $body }) {
@@ -111,6 +159,8 @@ export class LinearTracker implements Tracker {
   private readonly projectSlug: string;
   private readonly endpoint: string;
   private readonly fetchImpl: typeof fetch;
+  /** v1.4.7 — cached `viewer.id` resolved on first claim/filter-by-self. */
+  private cachedSelfUserId: string | null = null;
 
   constructor(opts: LinearTrackerOptions) {
     if (!opts.apiKey) {
@@ -128,12 +178,25 @@ export class LinearTracker implements Tracker {
     this.fetchImpl = opts.fetchImpl ?? fetch;
   }
 
-  async fetchCandidateIssues(activeStates: string[]): Promise<Issue[]> {
+  async fetchCandidateIssues(
+    activeStates: string[],
+    opts?: { assigneeFilter?: AssigneeFilter },
+  ): Promise<Issue[]> {
+    const filter = opts?.assigneeFilter ?? 'any';
+    let assigneeClause = '';
+    if (filter === 'unassigned') {
+      assigneeClause = 'assignee: { null: { eq: true } }';
+    } else if (filter === 'self') {
+      const selfId = await this.selfUserId();
+      // GraphQL string interpolation is safe here: selfId comes from Linear, never user input.
+      assigneeClause = `assignee: { id: { eq: "${selfId}" } }`;
+    }
+    const query = buildCandidateQuery(assigneeClause);
     const out: Issue[] = [];
     let after: string | null = null;
     // Hard cap pagination at 20 pages so a misconfigured project can't run away.
     for (let i = 0; i < 20; i++) {
-      const data: CandidatesPayload = await this.gql<CandidatesPayload>(CANDIDATE_QUERY, {
+      const data: CandidatesPayload = await this.gql<CandidatesPayload>(query, {
         projectSlug: this.projectSlug,
         states: activeStates,
         first: PAGE_SIZE,
@@ -150,6 +213,77 @@ export class LinearTracker implements Tracker {
       after = data.issues.pageInfo.endCursor;
     }
     return out;
+  }
+
+  /**
+   * v1.4.7 — Resolve `viewer.id` once and cache. Used by the `self` assignee
+   * filter and by claimIssue when callers don't supply an assigneeId.
+   */
+  async selfUserId(): Promise<string> {
+    if (this.cachedSelfUserId) return this.cachedSelfUserId;
+    const data = await this.gql<{ viewer: { id: string } | null }>(VIEWER_QUERY, {});
+    const id = data.viewer?.id;
+    if (!id) {
+      throw new TrackerError(
+        'linear_self_user_failed',
+        'Linear viewer query returned no id — check API key has user scope',
+      );
+    }
+    this.cachedSelfUserId = id;
+    return id;
+  }
+
+  /**
+   * v1.4.7 — Claim an issue: read current assignee, abort with
+   * `linear_assignee_taken` if a different user already holds it, otherwise
+   * write assignee + (optional) state in one mutation. Caller resolves the
+   * tracker-native stateId; this method does NOT do name→id mapping.
+   */
+  async claimIssue(issueId: string, opts: ClaimOptions): Promise<void> {
+    const assigneeId = opts.assigneeId === undefined ? await this.selfUserId() : opts.assigneeId;
+    if (assigneeId) {
+      const peek = await this.gql<{ issue: { assignee: { id: string } | null } | null }>(
+        ISSUE_ASSIGNEE_QUERY,
+        { id: issueId },
+      );
+      const current = peek.issue?.assignee?.id ?? null;
+      if (current && current !== assigneeId) {
+        throw new TrackerError(
+          'linear_assignee_taken',
+          `Linear issue ${issueId} already assigned to ${current}`,
+        );
+      }
+    }
+    await this.applyIssueUpdate(issueId, { assigneeId, stateId: opts.stateId ?? undefined });
+  }
+
+  /**
+   * v1.4.7 — Release an issue: clear assignee unless caller supplies a value
+   * (passing assigneeId: undefined still clears, since release semantics are
+   * "let it go"). Optional state move on the way out (e.g., back to "Todo").
+   */
+  async releaseIssue(issueId: string, opts?: ClaimOptions): Promise<void> {
+    const assigneeId = opts?.assigneeId === undefined ? null : opts.assigneeId;
+    await this.applyIssueUpdate(issueId, { assigneeId, stateId: opts?.stateId ?? undefined });
+  }
+
+  private async applyIssueUpdate(
+    issueId: string,
+    fields: { assigneeId?: string | null; stateId?: string | null },
+  ): Promise<void> {
+    const input: Record<string, unknown> = {};
+    if (fields.assigneeId !== undefined) input.assigneeId = fields.assigneeId;
+    if (fields.stateId !== undefined && fields.stateId !== null) input.stateId = fields.stateId;
+    if (Object.keys(input).length === 0) return; // No-op write — skip the round-trip.
+    const data = await this.gql<{
+      issueUpdate: { success: boolean; issue: { id: string } | null };
+    }>(UPDATE_ISSUE_MUTATION, { issueId, input });
+    if (!data.issueUpdate?.success) {
+      throw new TrackerError(
+        'linear_state_not_found',
+        `Linear issueUpdate did not succeed for issue=${issueId} input=${JSON.stringify(input)}`,
+      );
+    }
   }
 
   async fetchIssuesByStates(stateNames: string[]): Promise<Issue[]> {
@@ -308,7 +442,11 @@ interface LinearIssueNode {
   state?: { name?: string | null } | null;
   inverseRelations?: {
     nodes?: Array<{
-      issue?: { id?: string | null; identifier?: string | null; state?: { name?: string | null } | null } | null;
+      issue?: {
+        id?: string | null;
+        identifier?: string | null;
+        state?: { name?: string | null } | null;
+      } | null;
     }>;
   } | null;
 }
@@ -331,7 +469,8 @@ function normalizeNode(node: LinearIssueNode): Issue {
     identifier: node.identifier,
     title: node.title ?? '',
     description: node.description ?? null,
-    priority: typeof node.priority === 'number' && Number.isInteger(node.priority) ? node.priority : null,
+    priority:
+      typeof node.priority === 'number' && Number.isInteger(node.priority) ? node.priority : null,
     state: node.state?.name ?? '',
     branch_name: node.branchName ?? null,
     url: node.url ?? null,

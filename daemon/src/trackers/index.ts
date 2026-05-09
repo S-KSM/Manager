@@ -37,15 +37,37 @@ export interface BlockerRef {
   state: string | null;
 }
 
-/** Symphony §11.1 — REQUIRED tracker operations. */
+/** v1.4.7 — Filter applied at fetch time so two daemons don't race the same issue. */
+export type AssigneeFilter = 'any' | 'unassigned' | 'self';
+
+/** v1.4.7 — Optional knobs on a claim/release write. */
+export interface ClaimOptions {
+  /** Tracker-native state id (already resolved from a name). Null/undef = leave state alone. */
+  stateId?: string | null;
+  /** Tracker-native user id. Null = clear assignee. Undef = leave assignee alone. */
+  assigneeId?: string | null;
+}
+
+/** Symphony §11.1 — REQUIRED tracker operations + v1.4.7 optional write ops. */
 export interface Tracker {
   readonly kind: string;
   /** Issues whose state is in the configured `active_states`. */
-  fetchCandidateIssues(activeStates: string[]): Promise<Issue[]>;
+  fetchCandidateIssues(
+    activeStates: string[],
+    opts?: { assigneeFilter?: AssigneeFilter },
+  ): Promise<Issue[]>;
   /** Used by §8.6 startup terminal cleanup. */
   fetchIssuesByStates(stateNames: string[]): Promise<Issue[]>;
   /** Used by §8.5 active-run reconciliation. Map keyed by issue.id. */
   fetchIssueStatesByIds(issueIds: string[]): Promise<Map<string, string>>;
+  /**
+   * v1.4.7 — Write operations. Optional on the interface so observation-only
+   * trackers don't need to implement them; orchestrator probes for presence
+   * before calling. Implementors that DO support claim should also support
+   * release so a failed run doesn't leave a ticket assigned forever.
+   */
+  claimIssue?(issueId: string, opts: ClaimOptions): Promise<void>;
+  releaseIssue?(issueId: string, opts?: ClaimOptions): Promise<void>;
 }
 
 /**
@@ -65,6 +87,8 @@ export type TrackerErrorCode =
   | 'linear_unknown_identifier'
   | 'linear_state_not_found'
   | 'linear_comment_failed'
+  | 'linear_assignee_taken'
+  | 'linear_self_user_failed'
   | 'mock_source_missing'
   | 'mock_source_invalid';
 

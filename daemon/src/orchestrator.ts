@@ -1,4 +1,4 @@
-import { type Issue, type Tracker, TrackerError } from './trackers/index.js';
+import { type AssigneeFilter, type Issue, type Tracker, TrackerError } from './trackers/index.js';
 
 /**
  * Orchestrator — Symphony SPEC.md §7 state machine + §8 dispatch loop +
@@ -64,6 +64,12 @@ export interface OrchestratorOptions {
   /** Symphony §5.3.6. Stall detection threshold; <=0 disables. */
   stallTimeoutMs?: number;
   /**
+   * v1.4.7 — Filter applied to candidate fetch. 'unassigned' is the multi-
+   * daemon safe default when claim_on_dispatch is on. Retry-fires bypass
+   * this filter (since we already hold the id and just need a state check).
+   */
+  assigneeFilter?: AssigneeFilter;
+  /**
    * Hook the orchestrator calls when it has decided to dispatch one issue.
    * Returns a promise that resolves when the worker exits. Resolution value
    * tells the orchestrator which retry path to take.
@@ -73,6 +79,21 @@ export interface OrchestratorOptions {
    * replaces it with a real spawn → wait-for-exit.
    */
   dispatchOne: DispatchHook;
+  /**
+   * v1.4.7 — Optional: run BEFORE dispatchOne. If absent, no tracker write
+   * happens (current behavior). If present, returning `collided` means
+   * another worker (Dispatch instance or human) already owns the ticket;
+   * orchestrator drops it and moves to the next candidate. Returning
+   * `error` triggers skip-this-tick — the orchestrator stops dispatching
+   * this tick and tries again on the next poll.
+   */
+  claimHook?: ClaimHook;
+  /**
+   * v1.4.7 — Optional: run AFTER reconcileRunning detects a terminal-state
+   * transition. Idempotent — if the tracker has already cleared the
+   * assignee (e.g., human marked Done in Linear), this is a no-op.
+   */
+  releaseHook?: ReleaseHook;
   /** Optional clock injector for tests. Defaults to `Date.now`. */
   now?: () => number;
   /** Optional logger. Defaults to no-op (test-friendly). */
@@ -91,6 +112,18 @@ export interface DispatchOutcome {
 
 export type DispatchHook = (issue: Issue, attempt: number) => Promise<DispatchOutcome>;
 
+/** v1.4.7 — Pre-dispatch tracker write. */
+export type ClaimOutcome =
+  | { ok: true }
+  | { ok: false; collided: true }
+  | { ok: false; collided: false; error: string };
+export type ClaimHook = (issue: Issue) => Promise<ClaimOutcome>;
+/**
+ * v1.4.7 — Release hook gets just the ids the orchestrator has on hand from
+ * its running-map entry; full Issue payloads are not retained between ticks.
+ */
+export type ReleaseHook = (ref: { issueId: string; identifier: string }) => Promise<void>;
+
 const DEFAULT_POLL_MS = 30_000;
 const DEFAULT_MAX_CONCURRENT = 10;
 const DEFAULT_MAX_RETRY_BACKOFF_MS = 300_000;
@@ -100,6 +133,8 @@ const CONTINUATION_DELAY_MS = 1_000;
 export class Orchestrator {
   private readonly tracker: Tracker;
   private readonly dispatchOne: DispatchHook;
+  private readonly claimHook: ClaimHook | null;
+  private readonly releaseHook: ReleaseHook | null;
   private readonly now: () => number;
   private readonly log: (msg: string, ctx?: Record<string, unknown>) => void;
 
@@ -111,6 +146,7 @@ export class Orchestrator {
   private maxConcurrentAgentsByState: PerStateCaps;
   private maxRetryBackoffMs: number;
   private stallTimeoutMs: number;
+  private assigneeFilter: AssigneeFilter;
 
   // Symphony §4.1.8 runtime state.
   private readonly running = new Map<string, RunningEntry>();
@@ -125,6 +161,8 @@ export class Orchestrator {
   constructor(opts: OrchestratorOptions) {
     this.tracker = opts.tracker;
     this.dispatchOne = opts.dispatchOne;
+    this.claimHook = opts.claimHook ?? null;
+    this.releaseHook = opts.releaseHook ?? null;
     this.activeStates = opts.activeStates;
     this.terminalStates = opts.terminalStates;
     this.pollIntervalMs = opts.pollIntervalMs ?? DEFAULT_POLL_MS;
@@ -132,6 +170,7 @@ export class Orchestrator {
     this.maxConcurrentAgentsByState = normalizeCaps(opts.maxConcurrentAgentsByState ?? {});
     this.maxRetryBackoffMs = opts.maxRetryBackoffMs ?? DEFAULT_MAX_RETRY_BACKOFF_MS;
     this.stallTimeoutMs = opts.stallTimeoutMs ?? 0;
+    this.assigneeFilter = opts.assigneeFilter ?? 'any';
     this.now = opts.now ?? (() => Date.now());
     this.log = opts.log ?? (() => undefined);
   }
@@ -196,7 +235,9 @@ export class Orchestrator {
       // (2-5) Fetch candidates → sort → dispatch while slots remain.
       let candidates: Issue[];
       try {
-        candidates = await this.tracker.fetchCandidateIssues(this.activeStates);
+        candidates = await this.tracker.fetchCandidateIssues(this.activeStates, {
+          assigneeFilter: this.assigneeFilter,
+        });
       } catch (err) {
         if (err instanceof TrackerError) {
           this.log('orchestrator.candidates_failed', { code: err.code, message: err.message });
@@ -237,6 +278,7 @@ export class Orchestrator {
     }
     if (opts.maxRetryBackoffMs) this.maxRetryBackoffMs = opts.maxRetryBackoffMs;
     if (opts.stallTimeoutMs !== undefined) this.stallTimeoutMs = opts.stallTimeoutMs;
+    if (opts.assigneeFilter !== undefined) this.assigneeFilter = opts.assigneeFilter;
   }
 
   // ---- Internal: dispatch + worker outcome ---------------------------------
@@ -261,6 +303,35 @@ export class Orchestrator {
 
     // Fire-and-track. The hook handles its own errors and reports an outcome.
     void (async () => {
+      // v1.4.7 — pre-spawn tracker write. If the claim collides (someone else
+      // owns the ticket) or errors, drop local state without scheduling a
+      // retry; the next tick re-evaluates eligibility from scratch.
+      if (this.claimHook) {
+        let claim: ClaimOutcome;
+        try {
+          claim = await this.claimHook(issue);
+        } catch (err) {
+          claim = {
+            ok: false,
+            collided: false,
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+        if (!claim.ok) {
+          this.running.delete(issue.id);
+          this.claimed.delete(issue.id);
+          if (claim.collided) {
+            this.log('orchestrator.claim_collided', { issue: issue.identifier });
+          } else {
+            this.log('orchestrator.claim_failed', {
+              issue: issue.identifier,
+              error: claim.error,
+            });
+          }
+          return;
+        }
+      }
+
       let outcome: DispatchOutcome;
       try {
         outcome = await this.dispatchOne(issue, attempt ?? 0);
@@ -361,9 +432,22 @@ export class Orchestrator {
         // Caller will usually receive its own SIGTERM via the dispatch hook;
         // we just clear orchestrator state here. Graceful agent termination is
         // the runner's job in v1.4.2.
+        const entry = this.running.get(id);
         this.running.delete(id);
         this.claimed.delete(id);
         this.completed.add(id);
+        // v1.4.7 — release the tracker-side claim too. Best-effort: a failed
+        // release just means the next reconcile pass tries again (or a human
+        // unassigns in Linear). Do NOT block reconciliation on it.
+        if (this.releaseHook && entry) {
+          const ref = { issueId: id, identifier: entry.identifier };
+          void this.releaseHook(ref).catch((err: unknown) => {
+            this.log('orchestrator.release_failed', {
+              issue: entry.identifier,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+        }
       } else if (!activeSet.has(lc)) {
         // Neither active nor terminal: still drop the run entry (no workspace cleanup).
         this.running.delete(id);

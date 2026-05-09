@@ -22,6 +22,11 @@ import yaml from 'js-yaml';
  *     active_states: [Todo, In Progress]
  *     terminal_states: [Done, Closed, Cancelled]
  *     source: /path/to/file.json   # Mock only
+ *     # v1.4.7 write-back (all optional, default off):
+ *     claim_on_dispatch: true        # daemon writes back to the tracker
+ *     assign_to_self: true           # default true when claim is on
+ *     claim_state: "In Progress"     # null/omitted = leave state alone
+ *     unassigned_only: true          # default true when claim is on
  *   polling:
  *     interval_ms: 30000
  *   workspace:
@@ -66,6 +71,17 @@ export interface TrackerConfig {
   terminal_states: string[];
   /** mock only — absolute path resolved relative to workflow dir. */
   source?: string;
+  /**
+   * v1.4.7 — write-back knobs. When `claim_on_dispatch` is false (default),
+   * the orchestrator never calls into the tracker's claim/release methods —
+   * Dispatch behaves exactly as it did in v1.4.6.
+   */
+  claim_on_dispatch: boolean;
+  assign_to_self: boolean;
+  /** Optional Linear state name moved into on claim. Null = leave state alone. */
+  claim_state: string | null;
+  /** When true, fetchCandidateIssues uses assigneeFilter='unassigned'. */
+  unassigned_only: boolean;
 }
 
 export interface PollingConfig {
@@ -196,6 +212,7 @@ function coerceTracker(raw: unknown, workflowDir: string): TrackerConfig {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const kindRaw = strOr(r['kind'], 'mock');
   const kind = kindRaw === 'linear' || kindRaw === 'mock' ? kindRaw : 'mock';
+  const claimOnDispatch = boolOr(r['claim_on_dispatch'], false);
   return {
     kind,
     endpoint: strOr(r['endpoint'], kind === 'linear' ? DEFAULT_LINEAR_ENDPOINT : ''),
@@ -204,6 +221,12 @@ function coerceTracker(raw: unknown, workflowDir: string): TrackerConfig {
     active_states: strArr(r['active_states'], DEFAULT_ACTIVE_STATES),
     terminal_states: strArr(r['terminal_states'], DEFAULT_TERMINAL_STATES),
     source: r['source'] ? resolveRelative(strOr(r['source'], ''), workflowDir) : undefined,
+    claim_on_dispatch: claimOnDispatch,
+    // assign_to_self / unassigned_only default true ONLY when claim is on, so a
+    // workflow that opts in by flipping one bit gets the safe defaults.
+    assign_to_self: boolOr(r['assign_to_self'], claimOnDispatch),
+    claim_state: strOrNull(r['claim_state']),
+    unassigned_only: boolOr(r['unassigned_only'], claimOnDispatch),
   };
 }
 
@@ -267,6 +290,9 @@ function strArr(v: unknown, fallback: string[]): string[] {
 }
 function numOr(v: unknown, fallback: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+}
+function boolOr(v: unknown, fallback: boolean): boolean {
+  return typeof v === 'boolean' ? v : fallback;
 }
 function clampInt(v: unknown, fallback: number): number {
   const n = numOr(v, fallback);

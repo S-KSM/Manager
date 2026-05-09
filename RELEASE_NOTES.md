@@ -4,6 +4,32 @@ Versions are anchored on the macOS app's `CFBundleShortVersionString` (the Info.
 
 ---
 
+## v1.4.10 — 2026-05-09 — feat: tracker write-back (orchestrator claims Linear tickets on dispatch)
+
+Not yet tagged. Daemon-only change; macOS app + wire schema unchanged. Behind a `WORKFLOW.md` opt-in (`tracker.claim_on_dispatch: true`); absent that flag, daemon behavior is identical to v1.4.9.
+
+### What's new
+
+- **`Tracker` interface gains optional write ops** — `claimIssue(issueId, { stateId?, assigneeId? })` and `releaseIssue(issueId, opts?)`. Observation-only adapters skip them; the orchestrator probes for presence before calling. New `TrackerError` codes: `linear_assignee_taken` (claim collided), `linear_self_user_failed` (viewer query returned no id).
+- **`LinearTracker.selfUserId()`** — resolves `query { viewer { id } }` lazily on first use, caches in-memory. Used both for assigning the current user and for the `assignee=self` GraphQL filter.
+- **`fetchCandidateIssues` assignee filter** — optional `{ assigneeFilter: 'any' | 'unassigned' | 'self' }`. Default `'any'` (current behavior). Linear inlines the clause as a string fragment because typed GraphQL variables can't carry "is null".
+- **`WORKFLOW.md` `tracker.claim_*` block** — `claim_on_dispatch` / `assign_to_self` / `unassigned_only` / `claim_state`. Defaults off; flipping `claim_on_dispatch: true` flips `assign_to_self` + `unassigned_only` to true unless explicitly overridden. Hot-reload threads the assignee filter through `applyConfig`; toggling `claim_on_dispatch` itself still requires daemon restart (claim/release hook closures aren't hot-swappable yet). `claim_state` is parsed but not yet acted on — state-name → state-id resolver is a v1.4.10.x follow-up.
+- **Orchestrator claim-before-spawn** — `dispatchInternal`'s async IIFE awaits `claimHook(issue)` BEFORE `dispatchOne`. Collisions (`{ ok:false, collided:true }`) drop local state + log `orchestrator.claim_collided` + skip-this-issue. Other claim errors log `orchestrator.claim_failed` + skip-this-tick. The retry-fire path bypasses the assignee filter so a known issue id stays re-fetchable after the assignee was set.
+- **Orchestrator release-on-terminal** — `reconcileRunning` fires `releaseHook({ issueId, identifier })` as best-effort fire-and-forget when an issue moves into `terminal_states`. Failures log `orchestrator.release_failed` but never block reconciliation.
+
+### Tests
+
+- 320/320 daemon tests pass (+11 across `trackers/linear` / `orchestrator` / `workflow-loader`).
+- macOS app unchanged; no UI work.
+
+### Known limits (deferred to v1.4.10.x / v1.4.11)
+
+- `claim_state` Linear state-name → state-id resolver. Until shipped, a workflow that sets `claim_state` logs a one-line warning at startup.
+- Multi-instance crash recovery: if Daemon A claims and dies, Daemon B's strict `unassigned` filter never re-discovers the ticket. Need either a stale-claim TTL or an `unassigned_or_self` filter variant.
+- Hot-swap of claim/release hooks on `WORKFLOW.md` reload.
+
+---
+
 ## v1.4.9 — 2026-05-07 — feat: reactivate retired workstreams from Kanban context menu
 
 Tag [`v1.4.9`](https://github.com/S-KSM/Manager/releases/tag/v1.4.9). DMG + zip attached.

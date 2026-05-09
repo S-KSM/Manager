@@ -41,9 +41,7 @@ describe('LinearTracker', () => {
                   labels: { nodes: [{ name: 'Bug' }] },
                   state: { name: 'Todo' },
                   inverseRelations: {
-                    nodes: [
-                      { issue: { id: 'b1', identifier: 'ENG-9', state: { name: 'Done' } } },
-                    ],
+                    nodes: [{ issue: { id: 'b1', identifier: 'ENG-9', state: { name: 'Done' } } }],
                   },
                 },
               ],
@@ -80,9 +78,7 @@ describe('LinearTracker', () => {
     expect(out.map((i) => i.identifier)).toEqual(['ENG-1', 'ENG-2']);
     expect(out[0]?.priority).toBe(2);
     expect(out[0]?.labels).toEqual(['bug']);
-    expect(out[0]?.blocked_by).toEqual([
-      { id: 'b1', identifier: 'ENG-9', state: 'Done' },
-    ]);
+    expect(out[0]?.blocked_by).toEqual([{ id: 'b1', identifier: 'ENG-9', state: 'Done' }]);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
@@ -147,9 +143,7 @@ describe('LinearTracker', () => {
   });
 
   it('fetchIssueByIdentifier returns null when nodes is empty', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
-      jsonResp({ data: { issues: { nodes: [] } } }),
-    );
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResp({ data: { issues: { nodes: [] } } }));
     const tracker = new LinearTracker({
       apiKey: 'k',
       projectSlug: 'proj',
@@ -201,9 +195,7 @@ describe('LinearTracker', () => {
   it('addIssueComment maps success=false to linear_comment_failed', async () => {
     const fetchImpl = vi
       .fn()
-      .mockResolvedValue(
-        jsonResp({ data: { commentCreate: { success: false, comment: null } } }),
-      );
+      .mockResolvedValue(jsonResp({ data: { commentCreate: { success: false, comment: null } } }));
     const tracker = new LinearTracker({
       apiKey: 'k',
       projectSlug: 'proj',
@@ -278,5 +270,151 @@ describe('LinearTracker', () => {
     const out = await tracker.fetchIssueStatesByIds(['a', 'b']);
     expect(out.get('a')).toBe('In Progress');
     expect(out.get('b')).toBe('Done');
+  });
+
+  // ---- v1.4.7 write ops ----------------------------------------------------
+
+  it('selfUserId resolves viewer.id once and caches across calls', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResp({ data: { viewer: { id: 'u_self' } } }));
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(await tracker.selfUserId()).toBe('u_self');
+    expect(await tracker.selfUserId()).toBe('u_self');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('selfUserId throws linear_self_user_failed when viewer is null', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResp({ data: { viewer: null } }));
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await expect(tracker.selfUserId()).rejects.toMatchObject({
+      code: 'linear_self_user_failed',
+    });
+  });
+
+  it('claimIssue assigns to viewer + writes issueUpdate when issue unassigned', async () => {
+    const calls: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    const fetchImpl = vi.fn().mockImplementation(async (_url, init: RequestInit) => {
+      const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}');
+      calls.push(body);
+      if (body.query.includes('Viewer')) {
+        return jsonResp({ data: { viewer: { id: 'u_self' } } });
+      }
+      if (body.query.includes('IssueAssignee')) {
+        return jsonResp({ data: { issue: { id: 'iss_1', assignee: null, state: null } } });
+      }
+      // UpdateIssue mutation
+      return jsonResp({
+        data: {
+          issueUpdate: {
+            success: true,
+            issue: { id: 'iss_1', assignee: { id: 'u_self' }, state: null },
+          },
+        },
+      });
+    });
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await tracker.claimIssue('iss_1', { stateId: 's_in_progress' });
+    expect(calls).toHaveLength(3);
+    const updateCall = calls.find((c) => c.query.includes('UpdateIssue'));
+    expect(updateCall?.variables).toMatchObject({
+      issueId: 'iss_1',
+      input: { assigneeId: 'u_self', stateId: 's_in_progress' },
+    });
+  });
+
+  it('claimIssue throws linear_assignee_taken when someone else holds the ticket', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async (_url, init: RequestInit) => {
+      const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}');
+      if (body.query.includes('Viewer')) {
+        return jsonResp({ data: { viewer: { id: 'u_self' } } });
+      }
+      if (body.query.includes('IssueAssignee')) {
+        return jsonResp({
+          data: { issue: { id: 'iss_1', assignee: { id: 'u_other' }, state: null } },
+        });
+      }
+      throw new Error('UpdateIssue should not be called when claim collides');
+    });
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await expect(tracker.claimIssue('iss_1', {})).rejects.toMatchObject({
+      code: 'linear_assignee_taken',
+    });
+  });
+
+  it('releaseIssue clears assignee by writing assigneeId: null', async () => {
+    let updateInput: Record<string, unknown> | undefined;
+    const fetchImpl = vi.fn().mockImplementation(async (_url, init: RequestInit) => {
+      const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}');
+      if (body.query.includes('UpdateIssue')) {
+        updateInput = body.variables.input;
+        return jsonResp({
+          data: {
+            issueUpdate: { success: true, issue: { id: 'iss_1', assignee: null, state: null } },
+          },
+        });
+      }
+      return jsonResp({ data: {} });
+    });
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await tracker.releaseIssue('iss_1');
+    expect(updateInput).toEqual({ assigneeId: null });
+  });
+
+  it('fetchCandidateIssues with assigneeFilter=unassigned inlines the null clause', async () => {
+    let capturedQuery = '';
+    const fetchImpl = vi.fn().mockImplementation(async (_url, init: RequestInit) => {
+      const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}');
+      capturedQuery = body.query;
+      return jsonResp({
+        data: { issues: { pageInfo: { hasNextPage: false, endCursor: 'c0' }, nodes: [] } },
+      });
+    });
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await tracker.fetchCandidateIssues(['Todo'], { assigneeFilter: 'unassigned' });
+    expect(capturedQuery).toContain('assignee: { null: { eq: true } }');
+  });
+
+  it('fetchCandidateIssues with assigneeFilter=self resolves viewer + inlines id', async () => {
+    let capturedQuery = '';
+    const fetchImpl = vi.fn().mockImplementation(async (_url, init: RequestInit) => {
+      const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}');
+      if (body.query.includes('Viewer')) {
+        return jsonResp({ data: { viewer: { id: 'u_self' } } });
+      }
+      capturedQuery = body.query;
+      return jsonResp({
+        data: { issues: { pageInfo: { hasNextPage: false, endCursor: 'c0' }, nodes: [] } },
+      });
+    });
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await tracker.fetchCandidateIssues(['Todo'], { assigneeFilter: 'self' });
+    expect(capturedQuery).toContain('assignee: { id: { eq: "u_self" } }');
   });
 });

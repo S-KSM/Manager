@@ -1,5 +1,11 @@
 import { readFile } from 'node:fs/promises';
-import { type Issue, type Tracker, TrackerError } from './index.js';
+import {
+  type AssigneeFilter,
+  type ClaimOptions,
+  type Issue,
+  type Tracker,
+  TrackerError,
+} from './index.js';
 
 /**
  * MockTracker — reads issues from a JSON file. Two purposes:
@@ -19,15 +25,43 @@ import { type Issue, type Tracker, TrackerError } from './index.js';
 export class MockTracker implements Tracker {
   readonly kind = 'mock';
   private readonly source: string;
+  /**
+   * v1.4.7 — In-memory assignee map keyed by issue.id. Tests inspect it via
+   * `claimedAssignees`. The mock JSON file stays read-only; claim/release
+   * effects live only here.
+   */
+  private readonly assignees = new Map<string, string | null>();
+  /** v1.4.7 — Stable id returned by `selfUserId()` so 'self' filter works in tests. */
+  private readonly selfId: string;
 
-  constructor(source: string) {
+  constructor(source: string, opts?: { selfUserId?: string }) {
     this.source = source;
+    this.selfId = opts?.selfUserId ?? 'mock-self';
   }
 
-  async fetchCandidateIssues(activeStates: string[]): Promise<Issue[]> {
+  async selfUserId(): Promise<string> {
+    return this.selfId;
+  }
+
+  /** Inspect what the orchestrator has claimed. Test-only. */
+  claimedAssignees(): ReadonlyMap<string, string | null> {
+    return this.assignees;
+  }
+
+  async fetchCandidateIssues(
+    activeStates: string[],
+    opts?: { assigneeFilter?: AssigneeFilter },
+  ): Promise<Issue[]> {
     const all = await this.readAll();
     const set = new Set(activeStates.map((s) => s.toLowerCase()));
-    return all.filter((i) => set.has(i.state.toLowerCase()));
+    const filter = opts?.assigneeFilter ?? 'any';
+    return all.filter((i) => {
+      if (!set.has(i.state.toLowerCase())) return false;
+      if (filter === 'any') return true;
+      const a = this.assignees.get(i.id) ?? null;
+      if (filter === 'unassigned') return a === null;
+      return a === this.selfId; // 'self'
+    });
   }
 
   async fetchIssuesByStates(stateNames: string[]): Promise<Issue[]> {
@@ -44,6 +78,23 @@ export class MockTracker implements Tracker {
       if (wanted.has(i.id)) out.set(i.id, i.state);
     }
     return out;
+  }
+
+  async claimIssue(issueId: string, opts: ClaimOptions): Promise<void> {
+    const desired = opts.assigneeId === undefined ? this.selfId : opts.assigneeId;
+    const current = this.assignees.get(issueId) ?? null;
+    if (current && desired && current !== desired) {
+      throw new TrackerError(
+        'linear_assignee_taken',
+        `Mock issue ${issueId} already assigned to ${current}`,
+      );
+    }
+    this.assignees.set(issueId, desired);
+  }
+
+  async releaseIssue(issueId: string, opts?: ClaimOptions): Promise<void> {
+    const desired = opts?.assigneeId === undefined ? null : opts.assigneeId;
+    this.assignees.set(issueId, desired);
   }
 
   private async readAll(): Promise<Issue[]> {
