@@ -8,6 +8,7 @@ import { HandbookStore } from './handbook-store.js';
 import { HeadlineStore } from './headline-store.js';
 import { Headliner } from './headliner.js';
 import { LinearCommentSyncer } from './linear-comment-syncer.js';
+import { TrackerMirror } from './tracker-mirror.js';
 import { SubgoalSynthesizer } from './subgoal-synthesizer.js';
 import { buildHttpServer } from './http-server.js';
 import {
@@ -332,6 +333,7 @@ async function runStart(opts: {
   // continues exactly as today.
   let orchestrator: Orchestrator | null = null;
   let workflowWatcher: { close: () => void } | null = null;
+  let trackerMirror: TrackerMirror | null = null;
   if (opts.workflow || opts.mockTracker) {
     const dryRun = !!opts.dryRun;
 
@@ -342,6 +344,15 @@ async function runStart(opts: {
     let terminalStates = ['Done', 'Closed', 'Cancelled', 'Canceled', 'Duplicate'];
     let pollIntervalMs = 5_000;
     let maxConcurrent = 5;
+    // v1.4.12 — Radar mirror config. Off by default; workflow path
+    // overwrites from cfg.tracker. macOS app sees mirrored issues as new
+    // backlog workstreams after the first tick.
+    let mirrorConfig: MirrorConfig = {
+      enabled: false,
+      mirrorStates: [],
+      intervalMs: 60_000,
+      maxAgeDays: null,
+    };
     // v1.4.7 — defaults match v1.4.6 (no tracker write). The workflow path
     // overwrites these from cfg.tracker.
     let claimConfig: ClaimConfig = {
@@ -376,6 +387,15 @@ async function runStart(opts: {
         claimStateId: null,
         unassignedOnly: cfg.tracker.unassigned_only,
         staleClaimTtlMs: cfg.tracker.stale_claim_ttl_ms,
+      };
+      mirrorConfig = {
+        enabled: cfg.tracker.mirror_to_radar,
+        mirrorStates:
+          cfg.tracker.mirror_states.length > 0
+            ? cfg.tracker.mirror_states
+            : Array.from(new Set([...cfg.tracker.active_states, 'Backlog', 'Triage'])),
+        intervalMs: cfg.tracker.mirror_interval_ms,
+        maxAgeDays: cfg.tracker.mirror_max_age_days,
       };
       workspaceMgr = new WorkspaceManager({
         ...(cfg.workspace.root ? { root: cfg.workspace.root } : {}),
@@ -471,6 +491,22 @@ async function runStart(opts: {
     // v1.4.11 — also expose the tracker so HTTP /trackers/issues + the
     // file_ticket MCP tool can call createIssue against it.
     trackerHolder.current = tracker;
+    // v1.4.12 — Radar mirror. Off by default; opt-in via mirror_to_radar.
+    if (mirrorConfig.enabled && workstreamLinks) {
+      trackerMirror = new TrackerMirror({
+        tracker,
+        registry,
+        links: workstreamLinks,
+        mirrorStates: mirrorConfig.mirrorStates,
+        intervalMs: mirrorConfig.intervalMs,
+        maxAgeDays: mirrorConfig.maxAgeDays,
+        log: (m, c) => process.stderr.write(`[dispatch] ${m}${c ? ` ${JSON.stringify(c)}` : ''}\n`),
+      });
+      trackerMirror.start();
+      process.stderr.write(
+        `[dispatch] tracker mirror started (states=${mirrorConfig.mirrorStates.join(',')})\n`,
+      );
+    }
     process.stderr.write(
       `[dispatch] orchestrator started (workflow=${opts.workflow ?? 'mock'}, dry-run=${dryRun})\n`,
     );
@@ -509,6 +545,40 @@ async function runStart(opts: {
             }
           }
           claimConfig = newConfig;
+          // v1.4.12 — mirror reload. Like claim hooks, we can hot-swap
+          // the active config but flipping enabled→disabled (or vice versa)
+          // requires creating/stopping the ticker.
+          mirrorConfig = {
+            enabled: cfg.tracker.mirror_to_radar,
+            mirrorStates:
+              cfg.tracker.mirror_states.length > 0
+                ? cfg.tracker.mirror_states
+                : Array.from(new Set([...cfg.tracker.active_states, 'Backlog', 'Triage'])),
+            intervalMs: cfg.tracker.mirror_interval_ms,
+            maxAgeDays: cfg.tracker.mirror_max_age_days,
+          };
+          if (mirrorConfig.enabled && trackerMirror) {
+            trackerMirror.applyConfig({
+              mirrorStates: mirrorConfig.mirrorStates,
+              intervalMs: mirrorConfig.intervalMs,
+              maxAgeDays: mirrorConfig.maxAgeDays,
+            });
+          } else if (mirrorConfig.enabled && !trackerMirror && workstreamLinks) {
+            trackerMirror = new TrackerMirror({
+              tracker,
+              registry,
+              links: workstreamLinks,
+              mirrorStates: mirrorConfig.mirrorStates,
+              intervalMs: mirrorConfig.intervalMs,
+              maxAgeDays: mirrorConfig.maxAgeDays,
+              log: (m, c) =>
+                process.stderr.write(`[dispatch] ${m}${c ? ` ${JSON.stringify(c)}` : ''}\n`),
+            });
+            trackerMirror.start();
+          } else if (!mirrorConfig.enabled && trackerMirror) {
+            trackerMirror.stop();
+            trackerMirror = null;
+          }
           orchestrator?.applyConfig({
             activeStates: cfg.tracker.active_states,
             terminalStates: cfg.tracker.terminal_states,
@@ -548,6 +618,7 @@ async function runStart(opts: {
     try {
       workflowWatcher?.close();
       orchestrator?.stop();
+      trackerMirror?.stop();
       // Read through the supervisor refs so we stop the latest restart
       // generation, not whatever was constructed at boot.
       linearSyncerRef?.stop();
@@ -680,6 +751,14 @@ interface ClaimConfig {
   unassignedOnly: boolean;
   /** v1.4.10.5 — see `WorkflowConfig.tracker.stale_claim_ttl_ms`. */
   staleClaimTtlMs: number;
+}
+
+/** v1.4.12 — internal Radar-mirror config carried from workflow into TrackerMirror. */
+interface MirrorConfig {
+  enabled: boolean;
+  mirrorStates: string[];
+  intervalMs: number;
+  maxAgeDays: number | null;
 }
 
 /**

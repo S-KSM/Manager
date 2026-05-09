@@ -28,6 +28,11 @@ import yaml from 'js-yaml';
  *     claim_state: "In Progress"     # null/omitted = leave state alone
  *     unassigned_only: true          # default true when claim is on
  *     stale_claim_ttl_ms: 600000     # v1.4.10.5: release self-claims older than 10min not in our running map
+ *     # v1.4.12 Radar mirror (defaults off; opt in to surface unstarted Linear issues in the Kanban):
+ *     mirror_to_radar: true
+ *     mirror_states: [Backlog, Triage, Todo, In Progress]
+ *     mirror_interval_ms: 60000
+ *     mirror_max_age_days: 90
  *   polling:
  *     interval_ms: 30000
  *   workspace:
@@ -90,6 +95,23 @@ export interface TrackerConfig {
    * (i.e. left behind by a previous-instance daemon crash).
    */
   stale_claim_ttl_ms: number;
+  /**
+   * v1.4.12 — Linear → Radar mirror. When true a background ticker creates a
+   * `status='backlog'` workstream + link for every issue in `mirror_states`
+   * (default = active_states ∪ ['Backlog', 'Triage']) so upcoming work
+   * surfaces in the Kanban without manual linking.
+   */
+  mirror_to_radar: boolean;
+  /** v1.4.12 — States to mirror. Defaults to active_states ∪ ['Backlog', 'Triage']. */
+  mirror_states: string[];
+  /** v1.4.12 — Mirror tick cadence in ms. Default 60_000. */
+  mirror_interval_ms: number;
+  /**
+   * v1.4.12 — Skip issues whose `created_at` is older than this many days.
+   * Stops historical-burst on first run against a long-lived project. Null
+   * (or 0) disables the cutoff.
+   */
+  mirror_max_age_days: number | null;
 }
 
 export interface PollingConfig {
@@ -236,6 +258,15 @@ function coerceTracker(raw: unknown, workflowDir: string): TrackerConfig {
     claim_state: strOrNull(r['claim_state']),
     unassigned_only: boolOr(r['unassigned_only'], claimOnDispatch),
     stale_claim_ttl_ms: numOr(r['stale_claim_ttl_ms'], 0),
+    mirror_to_radar: boolOr(r['mirror_to_radar'], false),
+    // Default mirror_states is computed in the cli (it needs active_states),
+    // but if the user supplied an explicit list we honor it as-is.
+    mirror_states: strArr(r['mirror_states'], []),
+    mirror_interval_ms: numOr(r['mirror_interval_ms'], 60_000),
+    mirror_max_age_days:
+      typeof r['mirror_max_age_days'] === 'number' && Number.isFinite(r['mirror_max_age_days'])
+        ? (r['mirror_max_age_days'] as number)
+        : null,
   };
 }
 

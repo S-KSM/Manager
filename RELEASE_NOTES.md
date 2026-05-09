@@ -22,6 +22,16 @@ Not yet tagged. Daemon-only change; macOS app + wire schema unchanged. Behind a 
 - 320/320 daemon tests pass (+11 across `trackers/linear` / `orchestrator` / `workflow-loader`).
 - macOS app unchanged; no UI work.
 
+### v1.4.12 — Linear → Radar mirror as backlog workstreams (2026-05-09)
+
+Option #3 of the original three-tier "Dispatch manages Linear" plan. Daemon now surfaces every Linear issue in a configured state set as a `status='backlog'` workstream the moment it appears in the tracker — no manual link required. Pairs with the existing `LinearCommentSyncer` reverse-sync that mirrors tracker-state → workstream-status transitions.
+
+- **`daemon/src/tracker-mirror.ts`** — new `TrackerMirror` ticker. Fetches `mirror_states` issues every `intervalMs` and, for each issue NOT already linked, creates a workstream + link. Never demotes existing `active`/`paused` workstreams. Logs `mirror.workstream_created` per insertion, `mirror.fetch_failed` on tracker error (best-effort — never aborts the daemon).
+- **`WorkstreamLinksStore.findByIssueId(issueId)`** — new reverse-lookup using the existing `idx_links_issue` index. O(log N) idempotency check.
+- **`WORKFLOW.md` `tracker.mirror_*` knobs** — `mirror_to_radar: bool` (default off), `mirror_states: [...]` (defaults to `active_states ∪ ['Backlog', 'Triage']`), `mirror_interval_ms` (default 60_000), `mirror_max_age_days` (default null = no cutoff). All hot-reloadable; flipping `mirror_to_radar` in/out starts/stops the ticker.
+- **macOS app**: zero changes needed. Mirrored issues appear as new cards in the existing Backlog Kanban column; user drags to Active to spawn (orchestrator picks them up if `claim_on_dispatch` is on).
+- +6 tests: `tracker-mirror.test.ts` (creates / idempotent / no downgrade / age cutoff / fetch error) + workflow-loader (mirror knobs default off + opt-in). 351/351 daemon tests green.
+
 ### v1.4.11 — `Tracker.createIssue` + `file_ticket` MCP tool (2026-05-09)
 
 Option #2 of the original three-tier "Dispatch manages Linear" plan: daemon now files **new** tickets, not just operates on existing ones. Same opt-in posture as v1.4.10.x — without a wired tracker, the new HTTP endpoint 404s and the MCP tool errors. Triage-agent workflow remains a v1.4.11.x follow-up; this ships the plumbing the triage agent will use.

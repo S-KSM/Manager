@@ -125,9 +125,7 @@ export class WorkstreamLinksStore {
 
   /** Idempotent: deleting a non-existent link is a no-op. */
   unlink(workstreamId: string): void {
-    this.db
-      .prepare('DELETE FROM workstream_links WHERE workstream_id = ?')
-      .run(workstreamId);
+    this.db.prepare('DELETE FROM workstream_links WHERE workstream_id = ?').run(workstreamId);
   }
 
   get(workstreamId: string): WorkstreamLink | null {
@@ -139,6 +137,24 @@ export class WorkstreamLinksStore {
          WHERE workstream_id = ?`,
       )
       .get(workstreamId) as LinkRow | undefined;
+    return row ? this.rowToWire(row) : null;
+  }
+
+  /**
+   * v1.4.12 — Reverse lookup so the tracker mirror can ask "is this issue
+   * already represented by a workstream?" without scanning. The
+   * `idx_links_issue` index makes this O(log N).
+   */
+  findByIssueId(issueId: string): WorkstreamLink | null {
+    const row = this.db
+      .prepare(
+        `SELECT workstream_id, tracker_kind, issue_id, issue_identifier, issue_url,
+                last_seen_state, last_synced_at, created_at
+         FROM workstream_links
+         WHERE issue_id = ?
+         LIMIT 1`,
+      )
+      .get(issueId) as LinkRow | undefined;
     return row ? this.rowToWire(row) : null;
   }
 

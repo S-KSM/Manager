@@ -119,6 +119,37 @@ describe('loadWorkflow', () => {
     expect(wfb.config.tracker.claim_state).toBe('In Progress');
   });
 
+  it('mirror_to_radar parses from front matter, defaults off (v1.4.12)', async () => {
+    const a = join(tmp, 'A3.md');
+    await writeFile(a, ['---', 'tracker: { kind: linear }', '---', ''].join('\n'));
+    const wfa = await loadWorkflow(a);
+    expect(wfa.config.tracker.mirror_to_radar).toBe(false);
+    expect(wfa.config.tracker.mirror_states).toEqual([]);
+    expect(wfa.config.tracker.mirror_interval_ms).toBe(60_000);
+    expect(wfa.config.tracker.mirror_max_age_days).toBeNull();
+
+    const b = join(tmp, 'B3.md');
+    await writeFile(
+      b,
+      [
+        '---',
+        'tracker:',
+        '  kind: linear',
+        '  mirror_to_radar: true',
+        '  mirror_states: [Backlog, Triage]',
+        '  mirror_interval_ms: 30000',
+        '  mirror_max_age_days: 30',
+        '---',
+        '',
+      ].join('\n'),
+    );
+    const wfb = await loadWorkflow(b);
+    expect(wfb.config.tracker.mirror_to_radar).toBe(true);
+    expect(wfb.config.tracker.mirror_states).toEqual(['Backlog', 'Triage']);
+    expect(wfb.config.tracker.mirror_interval_ms).toBe(30_000);
+    expect(wfb.config.tracker.mirror_max_age_days).toBe(30);
+  });
+
   it('stale_claim_ttl_ms parses from front matter, defaults 0 (v1.4.10.5)', async () => {
     const a = join(tmp, 'A2.md');
     await writeFile(a, ['---', 'tracker: { kind: linear }', '---', ''].join('\n'));

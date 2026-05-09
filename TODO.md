@@ -127,6 +127,17 @@ Smallest escalation toward "Dispatch manages Linear" (option 1 of 3 — daemon w
 - [x] **Tests** — `daemon/test/trackers/linear.test.ts` +7 cases (viewer cache, viewer-null error, claim success, claim collision, release clears assignee, unassigned filter clause, self filter clause). `daemon/test/orchestrator.test.ts` +3 cases (claim collision skips dispatch, claim ok → release on terminal, claim throw → `claim_failed` log). `workflow-loader.test.ts` +1 case (default-off, opt-in flips assign_to_self + unassigned_only). 320 / 320 daemon tests green.
 - [x] **Docs** — `docs/ARCHITECTURE.md` Orchestrator section gains "Tracker write-back (v1.4.10)" subsection. `RELEASE_NOTES.md` v1.4.10 entry. `CLAUDE.md` status block bumped.
 
+### v1.4.12 — Linear → Radar full mirror as backlog workstreams ✅
+
+Option #3 of the original three-tier escalation. Surfaces all Linear work in the Radar without manual linking.
+
+- [x] `daemon/src/tracker-mirror.ts` — new `TrackerMirror` ticker. Creates `status='backlog'` workstream + link for each unlinked candidate issue. Never demotes existing `active`/`paused` workstreams. Idempotent via `WorkstreamLinksStore.findByIssueId`.
+- [x] `WorkstreamLinksStore.findByIssueId(issueId)` reverse lookup added (uses existing `idx_links_issue` index).
+- [x] `WORKFLOW.md` `tracker.mirror_to_radar` / `mirror_states` / `mirror_interval_ms` / `mirror_max_age_days` knobs. Defaults off; `mirror_states` falls back to `active_states ∪ ['Backlog', 'Triage']` when unset.
+- [x] CLI lifecycle: instantiate when enabled at boot, hot-swap (start/stop) on workflow reload, stop alongside orchestrator on shutdown.
+- [x] macOS app: zero changes — mirrored issues appear as new cards in the existing Backlog Kanban column; user drags to Active to promote.
+- [x] +6 tests across `tracker-mirror` + `workflow-loader`. 351/351 daemon tests green.
+
 ### v1.4.11 — Tracker.createIssue + file_ticket MCP tool ✅
 
 Option #2 of the original three-tier escalation. Daemon now files new tickets, not just claims existing ones.
