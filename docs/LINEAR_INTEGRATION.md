@@ -8,13 +8,13 @@ Last touched: 2026-05-09. Authoritative on direction; specific line numbers / fi
 
 ## TL;DR
 
-Dispatch already does **read-side** Linear integration (orchestrator polls candidates, `LinearCommentSyncer` mirrors decisions out + status back). The "manage Linear" thread layers **write-side** integration on top in three escalation tiers:
+Dispatch already does **read-side** Linear integration (orchestrator polls candidates, `LinearCommentSyncer` mirrors decisions out + status back). The "manage Linear" thread layers **write-side** integration on top in three escalation tiers, **all shipped:**
 
-1. **Daemon claims existing tickets on dispatch** — DONE in v1.4.10.x. Daemon picks an unassigned (or self-claimed) Linear issue, optionally moves it into a configured state, spawns the agent, releases on terminal.
-2. **Daemon files new tickets** — IN FLIGHT (v1.4.11). Triage agents and Mascot bug-reports route through `tracker.createIssue`; same hook-driven Radar plumbing observes the resulting work.
-3. **Linear ↔ Radar full mirror** — IN FLIGHT (v1.4.12). Every Linear issue surfaces in the Radar as a `draft` workstream; human promotes to `active` to spawn an agent. Pairs with reverse-sync for status mirror.
+1. **Daemon claims existing tickets on dispatch** — DONE in v1.4.10.x. Daemon picks an unassigned (or self-claimed) Linear issue, optionally moves it into a configured state, spawns the agent, releases on terminal. Multi-team, multi-instance recovery, and hot-swap workflow toggles all wired.
+2. **Daemon files new tickets** — DONE in v1.4.11. `Tracker.createIssue` + `dispatch__file_ticket` MCP tool. Plumbing complete; a triage-agent prompt template is the only remaining piece (small follow-up).
+3. **Linear → Radar full mirror** — DONE in v1.4.12. Every Linear issue surfaces in the Radar as a `status='backlog'` workstream the moment it appears in the tracker; human drags to Active to promote. macOS app needs zero changes.
 
-Tier 1 is the smallest blast radius; each tier opens the next. Future work (v1.4.13) lifts the Linear-specific write paths behind a `TrackerWriter` interface so Jira / GH Issues can swap in.
+Tier 1 is the smallest blast radius; each tier opens the next. Future v1.4.13 (`TrackerWriter` abstraction for Jira / GH swap) is **deliberately deferred** — see "When to revisit v1.4.13" below.
 
 ---
 
@@ -62,9 +62,46 @@ These are settled. Don't relitigate without a reason.
 
 ---
 
-## In-flight plans
+## Shipped — v1.4.10.4 / v1.4.10.5 / v1.4.11 / v1.4.12
 
-### v1.4.10.4 — Per-issue team `resolveStateIdByName` for multi-team projects
+### v1.4.10.4 — Per-issue team resolution (`a3854a6`)
+
+`Tracker.resolveStateIdByName(name, opts?: { teamId? })` extended; `LinearTracker.cachedStateIdByNameByTeam` keyed by team.id; `ISSUE_ASSIGNEE_QUERY` peek now also fetches `team.id`. `claimIssue` resolves `stateName` against the issue's actual team in multi-team projects, falls back to caller-supplied `stateId` on miss. `ClaimOptions.stateName` added; CLI passes both.
+
+### v1.4.10.5 — Stale-claim TTL sweeper (`3c2607e`)
+
+`Tracker.fetchStaleSelfClaimedIssues?(activeStates, ttlMs)` optional method. Linear runs `assignee=self AND state in active AND updatedAt < cutoff`; mock returns all self-claimed active. Orchestrator gains `staleClaimTtlMs` option (default 0 = disabled); each tick after dispatch loop, sweeps stale-self issues NOT in `running`/`claimed` and fires `releaseHook` (best-effort). `WORKFLOW.md tracker.stale_claim_ttl_ms` threaded + hot-reloadable. Solves the multi-instance case where two daemons share a Linear API key — daemon A crashes mid-claim, daemon B's sweeper releases the ticket after TTL.
+
+### v1.4.11 — `Tracker.createIssue` + `file_ticket` MCP tool (`c1cfc3c`)
+
+`Tracker.createIssue?(input): Promise<{id, identifier, url}>` interface method (optional). `LinearTracker` runs `issueCreate` mutation against the project's primary team (resolved + cached on first call), with label-name → id resolution (cached). Mock returns synthetic `MOCK-N` identifier and exposes `createdIssues()` for test inspection. New `POST /trackers/issues` HTTP endpoint (404 / 501 / 400 / 502 / 201). New MCP tool `dispatch__file_ticket(title, description?, labels?, priority?)` POSTs to the daemon over `DISPATCH_PORT` and mirrors a `decision` event with `choice='file_ticket'` so the Radar surfaces the action. Tracker late-bound into `buildHttpServer` via the same closure-getter pattern as orchestrator.
+
+### v1.4.12 — Linear → Radar mirror (`1309cb5`)
+
+New `daemon/src/tracker-mirror.ts` ticker — fetches `mirror_states` issues every `mirror_interval_ms` and creates a `status='backlog'` workstream + `workstream_link` for each unlinked issue. Idempotent via new `WorkstreamLinksStore.findByIssueId` (uses existing `idx_links_issue` index). Never demotes existing `active`/`paused` workstreams. `WORKFLOW.md tracker.mirror_to_radar` (default off), `mirror_states` (defaults to `active_states ∪ ['Backlog', 'Triage']`), `mirror_interval_ms` (default 60s), `mirror_max_age_days` (default null/no cutoff). Hot-reloadable; flipping enabled in/out start/stops the ticker. macOS app sees mirrored issues as new backlog cards in the existing Kanban — zero client changes.
+
+351/351 daemon tests green across the four follow-on commits.
+
+---
+
+## When to revisit v1.4.13 (`TrackerWriter` abstraction)
+
+**Skipped.** The current `Tracker` interface mixes read + optional write methods (`claimIssue?`, `releaseIssue?`, `resolveStateIdByName?`, `createIssue?`, `fetchStaleSelfClaimedIssues?`). That shape works fine for one tracker.
+
+Lift the writes into a separate `TrackerWriter` interface only when:
+
+1. A second tracker has a real product ask (Jira / GH Issues / something else) — so the Linear-shaped concepts (`stateId`, `assigneeId`) actually need normalization (Jira `transitionId`, etc.).
+2. The cost of refactoring the orchestrator + CLI + workflow loader to switch from `tracker.claimIssue?` to `tracker.writer?.claim` is justified by the second adapter avoiding a copy-paste of the v1.4.10.x logic.
+
+Until both are true, doing this refactor is premature abstraction — the current optional methods are perfectly fine.
+
+---
+
+## Earlier plans (kept for historical context)
+
+These were the pre-shipping plans for v1.4.10.4 / .5 / .11 / .12 — preserved so the design rationale is reviewable next to what actually shipped. Skim these only if you're auditing the design intent.
+
+### v1.4.10.4 (planned) — Per-issue team `resolveStateIdByName` for multi-team projects
 
 **Problem.** Today's `LinearTracker.resolveStateIdByName` only sees one team — the team of the first issue in the project. Linear allows projects to span multiple teams, each with its own workflow-state set. A `claim_state: "In Progress"` that exists on Team A but not Team B will resolve correctly when an issue from A claims, but fail silently when an issue from B claims (state stays put, daemon logs a warning, assignee still flips).
 
@@ -79,7 +116,7 @@ These are settled. Don't relitigate without a reason.
 
 **Risk.** Linear's `team` lookup adds one round-trip per claim (the assignee peek already runs, but it currently doesn't fetch the team). Acceptable cost — claims are O(workstreams started), not O(messages).
 
-### v1.4.10.5 — Stale-claim TTL sweeper for multi-instance recovery
+### v1.4.10.5 (planned) — Stale-claim TTL sweeper for multi-instance recovery
 
 **Problem.** Two daemons running with the same Linear API key + `unassigned_or_self` filter both pass each other's claims as "self" and race. The clean fix is per-instance bot users in Linear, but the org may not want to provision them.
 
@@ -98,7 +135,7 @@ Releases unblock the *other* instance to re-claim normally. If both instances ru
 
 **Risk.** Race window: instance A is mid-spawn, instance B's sweeper sees A's claim is older than TTL (because A hasn't updated the ticket yet) and releases it. Mitigation: the orchestrator should `addIssueComment` (lightweight heartbeat — already wired) every N minutes to keep `updatedAt` fresh. Defer heartbeat to v1.4.10.6 if needed.
 
-### v1.4.11 — `Tracker.createIssue` + triage agent (option #2)
+### v1.4.11 (planned) — `Tracker.createIssue` + triage agent (option #2)
 
 **Goal.** Daemon files new tickets, not just operates on existing ones. Two driving use cases:
 1. **Triage agent** — a long-running autonomous workstream whose job IS Linear. Grooms backlog, dedupes, labels, estimates. Files new tickets when it finds work that should be tracked.
@@ -115,7 +152,7 @@ Releases unblock the *other* instance to re-claim normally. If both instances ru
 
 **Risk.** Triage agents loop. Backstop: `tracker.create_on_dispatch_max_per_hour` rate-limit knob in `WORKFLOW.md`, enforced in the MCP tool handler. Default 10/hour.
 
-### v1.4.12 — Linear → Radar full mirror as draft workstreams (option #3)
+### v1.4.12 (planned) — Linear → Radar full mirror as draft workstreams (option #3)
 
 **Goal.** Today the Radar shows only workstreams the human (or orchestrator) has explicitly created. Linear-tracked work that hasn't started yet is invisible. v1.4.12 surfaces every Linear issue in the project as a `status='draft'` workstream; human promotes draft → active to spawn an agent.
 
@@ -129,7 +166,7 @@ Releases unblock the *other* instance to re-claim normally. If both instances ru
 
 **Risk.** Burst on first run — a project with 5000 historical issues materializes 5000 draft workstreams. Mitigation: `tracker.mirror_max_age_days` cutoff (default 90). Issues older than the cutoff stay invisible until manually linked.
 
-### v1.4.13 — `TrackerWriter` abstraction for Jira / GH Issues swap
+### v1.4.13 (planned, deferred) — `TrackerWriter` abstraction for Jira / GH Issues swap
 
 **Problem.** Today the Linear write paths (`claimIssue`, `releaseIssue`, `resolveStateIdByName`, future `createIssue`) live as optional methods directly on the `Tracker` interface. Adding Jira would mean a Jira impl of every method, but those methods are Linear-shaped (e.g., `stateId` is a Linear concept; Jira has `transitionId`). The abstraction is leaking.
 
@@ -159,10 +196,18 @@ Releases unblock the *other* instance to re-claim normally. If both instances ru
 
 ## How to continue this work in a fresh session
 
+The original three-tier "Dispatch manages Linear" thread is **done**. v1.4.10 → v1.4.10.5 → v1.4.11 → v1.4.12 are all shipped and pushed. There is no obvious next substep — what comes next depends on a product signal. The candidates worth picking up if/when one arrives:
+
+1. **Triage-agent prompt template** (extends v1.4.11). Curated `WORKFLOW.md` that biases the agent toward grooming + filing tickets. Pair with a `tracker.create_max_per_hour` rate-limit knob inside `dispatch__file_ticket` so a runaway agent can't spam Linear. Small (~half-day).
+2. **Macos Drafts column** (extends v1.4.12). Visual separation of mirrored vs human-created backlog cards. Requires SwiftUI changes (`KanbanColumn` enum, `KanbanBoardView` switch, `WorkstreamDragPayload`). Cosmetic — defer until a user asks.
+3. **`TrackerWriter` abstraction** (v1.4.13). Only when a second tracker (Jira / GH Issues) has a real product ask. See "When to revisit v1.4.13" above.
+4. **Heartbeat for stale-claim TTL** (v1.4.10.6). Currently a long-running healthy daemon's claim could be falsely released by another instance's sweeper if the ticket hasn't received a touch in TTL minutes. Fix is a lightweight `addIssueComment` (or `noOp issueUpdate`) every TTL/2 from the orchestrator. Small.
+
+Process for any of these:
+
 1. Read this doc.
-2. `cat TODO.md` (the v1.4.10 section is the source of truth for what's shipped vs deferred — this doc may drift).
-3. Pick the next pending substep (top of the deferred list — v1.4.10.4 unless a more pressing user ask intervenes).
-4. Run `cd daemon && npx vitest run --reporter=basic` to confirm green baseline.
-5. Implement against the substep plan above. If the plan is wrong, update this doc in the same commit.
-6. Commit per substep with the conventional format used in `git log` (e.g., `feat: ... (vX.Y.Z)`).
-7. Push when a milestone lands (a tier completion or a tag-worthy version bump).
+2. `cat TODO.md` (per-version sections are the source of truth for what's shipped).
+3. Run `cd daemon && npx vitest run --reporter=basic` to confirm green baseline (currently 351 tests).
+4. Implement against the matching substep plan above. If the plan is wrong, update this doc in the same commit.
+5. Commit per substep with the conventional format used in `git log` (e.g., `feat: ... (vX.Y.Z)`).
+6. Push when a milestone lands.

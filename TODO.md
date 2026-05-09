@@ -189,7 +189,12 @@ Triage-agent **workflow** (a `WORKFLOW.md` template that biases the agent toward
 - [x] `buildClaimHook` passes `stateId` to `tracker.claimIssue` only when `claimStateId !== null`.
 - [x] +4 Linear tests (cache hit on call #2, empty-project null, unknown-name null, claim with stateId writes assignee + state in one mutation). 324/324 daemon tests green.
 
-Deferred to v1.4.11+:
+Deferred (no concrete product driver):
+- **v1.4.13 TrackerWriter abstraction** — splitting `Tracker` into read+write halves and adding stub Jira / GH Issues adapters. Would touch orchestrator + CLI + workflow loader. Per `docs/LINEAR_INTEGRATION.md`: don't ship until a second tracker has a real product ask. The current Linear-shaped optional methods (`claimIssue?`, `releaseIssue?`, `resolveStateIdByName?`, `createIssue?`, `fetchStaleSelfClaimedIssues?`) are good enough for one-tracker land.
+- **v1.4.11.x triage-agent workflow template** — a `WORKFLOW.md` opinionated for grooming + filing tickets, plus rate-limiting on `file_ticket` (e.g. `tracker.create_max_per_hour`). The plumbing in v1.4.11 already supports this; the missing piece is a curated prompt template + a small RPS guard inside `dispatch__file_ticket`.
+- **macOS Drafts column** — today mirrored Linear issues land in `Backlog`. A dedicated `Drafts` column visually separates "tracker-mirrored, not yet promoted" from "human-created, not yet active." Cosmetic; defer until a user asks.
+
+Other v1.4.11+ items (no longer relevant after the v1.4.10.x / .11 / .12 thread closed):
 - Ticket creation (`tracker.createIssue`) for triage-agent + Mascot-emitted bug reports — the next escalation tier (option #2 of the original three "Dispatch manages Linear" choices).
 - Full Linear → Radar draft-workstream mirror — option #3 of the original three.
 - Multi-tracker write abstraction (Jira / GH Issues swap-in).
