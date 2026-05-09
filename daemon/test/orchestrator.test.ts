@@ -266,6 +266,52 @@ describe('Orchestrator', () => {
     orch.stop();
   });
 
+  it('applyConfig hot-swaps claimHook + releaseHook (v1.4.10.3)', async () => {
+    const issues = [issue({ id: '1', identifier: 'A', priority: 1 })];
+    const tracker = new StaticTracker(issues);
+    const dispatch: DispatchHook = vi
+      .fn()
+      .mockImplementation(() => new Promise<DispatchOutcome>(() => {}));
+    const orch = new Orchestrator({
+      tracker,
+      activeStates: ['Todo'],
+      terminalStates: ['Done'],
+      dispatchOne: dispatch,
+      // Boot with no claim hook (observation parity).
+    });
+    // Tick 1 — no claim hook, dispatch fires immediately.
+    await orch.tick();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(orch.snapshot().counts.running).toBe(1);
+    orch.stop();
+
+    // Now hot-swap a collision-only claim hook in. Use a fresh tracker/orch
+    // pair to avoid the running-map deduping the second tick.
+    const tracker2 = new StaticTracker([issue({ id: '2', identifier: 'B' })]);
+    const dispatch2: DispatchHook = vi
+      .fn()
+      .mockImplementation(() => new Promise<DispatchOutcome>(() => {}));
+    const orch2 = new Orchestrator({
+      tracker: tracker2,
+      activeStates: ['Todo'],
+      terminalStates: ['Done'],
+      dispatchOne: dispatch2,
+    });
+    const claim = vi.fn().mockResolvedValue({ ok: false, collided: true } as const);
+    orch2.applyConfig({ claimHook: claim });
+    await orch2.tick();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(claim).toHaveBeenCalledTimes(1);
+    expect(dispatch2).not.toHaveBeenCalled();
+    // Now clear the hook again — dispatch should proceed.
+    orch2.applyConfig({ claimHook: null });
+    await orch2.tick();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(dispatch2).toHaveBeenCalledTimes(1);
+    orch2.stop();
+  });
+
   it('reconciliation drops running entries whose tracker state went terminal', async () => {
     const live = issue({ id: '1', identifier: 'A', state: 'In Progress' });
     const tracker = new StaticTracker([live]);

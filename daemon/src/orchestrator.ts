@@ -87,13 +87,13 @@ export interface OrchestratorOptions {
    * `error` triggers skip-this-tick — the orchestrator stops dispatching
    * this tick and tries again on the next poll.
    */
-  claimHook?: ClaimHook;
+  claimHook?: ClaimHook | null;
   /**
    * v1.4.7 — Optional: run AFTER reconcileRunning detects a terminal-state
    * transition. Idempotent — if the tracker has already cleared the
    * assignee (e.g., human marked Done in Linear), this is a no-op.
    */
-  releaseHook?: ReleaseHook;
+  releaseHook?: ReleaseHook | null;
   /** Optional clock injector for tests. Defaults to `Date.now`. */
   now?: () => number;
   /** Optional logger. Defaults to no-op (test-friendly). */
@@ -133,8 +133,11 @@ const CONTINUATION_DELAY_MS = 1_000;
 export class Orchestrator {
   private readonly tracker: Tracker;
   private readonly dispatchOne: DispatchHook;
-  private readonly claimHook: ClaimHook | null;
-  private readonly releaseHook: ReleaseHook | null;
+  // v1.4.10.3 — mutable so the workflow-loader hot-reload can swap them when
+  // WORKFLOW.md flips claim_on_dispatch / claim_state. The orchestrator never
+  // mutates them itself — only `applyConfig` does.
+  private claimHook: ClaimHook | null;
+  private releaseHook: ReleaseHook | null;
   private readonly now: () => number;
   private readonly log: (msg: string, ctx?: Record<string, unknown>) => void;
 
@@ -279,6 +282,11 @@ export class Orchestrator {
     if (opts.maxRetryBackoffMs) this.maxRetryBackoffMs = opts.maxRetryBackoffMs;
     if (opts.stallTimeoutMs !== undefined) this.stallTimeoutMs = opts.stallTimeoutMs;
     if (opts.assigneeFilter !== undefined) this.assigneeFilter = opts.assigneeFilter;
+    // v1.4.10.3 — Hot-swap claim/release hooks. We test for own property
+    // presence (not !== undefined) so a watcher reload that explicitly sets
+    // either field to null can clear it. Pass undefined to leave it alone.
+    if ('claimHook' in opts) this.claimHook = opts.claimHook ?? null;
+    if ('releaseHook' in opts) this.releaseHook = opts.releaseHook ?? null;
   }
 
   // ---- Internal: dispatch + worker outcome ---------------------------------

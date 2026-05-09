@@ -121,11 +121,17 @@ Smallest escalation toward "Dispatch manages Linear" (option 1 of 3 — daemon w
 - [x] **Tracker interface gains write ops** — `claimIssue(issueId, { stateId?, assigneeId? })` + `releaseIssue(issueId, { stateId? })` added to `Tracker` (`daemon/src/trackers/index.ts`) as optional methods (orchestrator probes for presence). Mock impl is an in-memory assignee map keyed by issue.id (test inspection via `claimedAssignees()`). Linear impl maps to a generalized `issueUpdate` mutation. New `TrackerError` codes: `linear_assignee_taken` (claim collided — different user already assigned) + `linear_self_user_failed` (viewer query returned no id).
 - [x] **Linear viewer cache** — `LinearTracker.selfUserId()` resolves `query { viewer { id } }` lazily on first call, caches in-memory. Used for assigning + the `assignee=self` GraphQL filter.
 - [x] **Assignee filter on `fetchCandidateIssues`** — optional second arg `{ assigneeFilter?: 'any' | 'unassigned' | 'self' }`. Default `'any'` (current behavior). Mock filters in-memory; Linear inlines the clause as a string fragment (`assignee: { null: { eq: true } }` or `assignee: { id: { eq: "<selfId>" } }`) since GraphQL typed variables can't carry "is null". Multi-daemon races bounded — strict `unassigned` filter means a second daemon won't even see a ticket the first one has claimed.
-- [x] **WORKFLOW.md `tracker.claim_*` block** — `claim_on_dispatch: bool` (default false), `assign_to_self: bool` (defaults true when claim is on), `claim_state: string | null` (optional Linear state name; resolved at boot via `tracker.resolveStateIdByName` in v1.4.10.1), `unassigned_only: bool` (defaults true when claim is on). `coerceTracker` in `workflow-loader.ts` resolves them; hot-reload threads `assigneeFilter` through `applyConfig`. Toggling `claim_on_dispatch` live still requires daemon restart (claim/release hook closures aren't hot-swappable yet).
+- [x] **WORKFLOW.md `tracker.claim_*` block** — `claim_on_dispatch: bool` (default false), `assign_to_self: bool` (defaults true when claim is on), `claim_state: string | null` (optional Linear state name; resolved at boot via `tracker.resolveStateIdByName` in v1.4.10.1), `unassigned_only: bool` (defaults true when claim is on). `coerceTracker` in `workflow-loader.ts` resolves them; v1.4.10.3 makes the watcher rebuild claim/release hooks + re-resolve `claim_state` (only when changed) so toggling `claim_on_dispatch` live no longer requires a daemon restart.
 - [x] **Orchestrator claim-before-spawn** — pre-dispatch `claimHook` runs inside `dispatchInternal`'s async IIFE BEFORE `dispatchOne`. On `{ ok:false, collided:true }` (TrackerError code `linear_assignee_taken`) the orchestrator drops local `running`/`claimed` state and logs `orchestrator.claim_collided` — next tick re-evaluates from scratch. On `{ ok:false, error }` it logs `orchestrator.claim_failed` and skips. The retry-fire path bypasses the assignee filter (uses `'any'`) so a known issue id we already hold can still be re-fetched after the assignee was set.
 - [x] **Orchestrator release-on-terminal** — `reconcileRunning` fires `releaseHook({ issueId, identifier })` as best-effort fire-and-forget when an issue moves to a terminal state. Failures log `orchestrator.release_failed` but never block reconciliation. (Initial design considered release-on-worker-failure; rejected because the next retry re-claims cleanly and the failed-then-retried sequence is more common than a permanent abort.)
 - [x] **Tests** — `daemon/test/trackers/linear.test.ts` +7 cases (viewer cache, viewer-null error, claim success, claim collision, release clears assignee, unassigned filter clause, self filter clause). `daemon/test/orchestrator.test.ts` +3 cases (claim collision skips dispatch, claim ok → release on terminal, claim throw → `claim_failed` log). `workflow-loader.test.ts` +1 case (default-off, opt-in flips assign_to_self + unassigned_only). 320 / 320 daemon tests green.
 - [x] **Docs** — `docs/ARCHITECTURE.md` Orchestrator section gains "Tracker write-back (v1.4.10)" subsection. `RELEASE_NOTES.md` v1.4.10 entry. `CLAUDE.md` status block bumped.
+
+### v1.4.10.3 — hot-swap claim/release hooks on WORKFLOW.md reload ✅
+
+- [x] `Orchestrator.applyConfig` swaps `claimHook` / `releaseHook` via `'claimHook' in opts` presence check (passing `null` clears; omitting leaves alone). `OrchestratorOptions.claimHook` / `.releaseHook` widened to `ClaimHook | null` so the same shape propagates through `Partial<>`. Fields made mutable on the class.
+- [x] CLI workflow watcher rebuilds `claimConfig` from reloaded `WORKFLOW.md`, re-resolves `claim_state` only when name changed (preserves cached `claimStateId` otherwise — no round-trip on every save), pipes new hooks + assignee filter through `applyConfig`.
+- [x] +1 orchestrator test (hot-swap collision hook in, then clear it back to null). 327/327 daemon tests green.
 
 ### v1.4.10.2 — stale-claim re-discovery ✅
 
@@ -146,9 +152,8 @@ Smallest escalation toward "Dispatch manages Linear" (option 1 of 3 — daemon w
 Deferred to v1.4.11+:
 - Multi-team project support: `resolveStateIdByName` only sees the primary team. A state name that exists in a *different* team in the same project will not resolve. Fix is to query the issue's `team.id` at claim time and look up states per-team.
 - Multi-instance with shared creds: two daemons running with the same Linear API key will both pass the `unassigned_or_self` filter on each other's claims (since "self" is identical) and race. Either give each instance its own bot user or add a stale-claim TTL keyed on `live_session` events.
-- Hot-swap of claim/release hooks on `WORKFLOW.md` reload.
-- Ticket creation (`tracker.createIssue`) for triage-agent + Mascot-emitted bug reports.
-- Full Linear → Radar draft-workstream mirror.
+- Ticket creation (`tracker.createIssue`) for triage-agent + Mascot-emitted bug reports — the next escalation tier (option #2 of the original three "Dispatch manages Linear" choices).
+- Full Linear → Radar draft-workstream mirror — option #3 of the original three.
 - Multi-tracker write abstraction (Jira / GH Issues swap-in).
 
 ---

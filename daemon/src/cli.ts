@@ -471,22 +471,47 @@ async function runStart(opts: {
           return;
         }
         const cfg = next.config;
-        // v1.4.7 — claim hooks themselves are not hot-swappable today (no
-        // applyConfig path for them), but the assigneeFilter is — so a
-        // workflow edit that flips unassigned_only takes effect immediately.
-        // Toggling claim_on_dispatch live requires daemon restart for now.
-        orchestrator?.applyConfig({
-          activeStates: cfg.tracker.active_states,
-          terminalStates: cfg.tracker.terminal_states,
-          pollIntervalMs: cfg.polling.interval_ms,
-          maxConcurrentAgents: cfg.agent.max_concurrent_agents,
-          assigneeFilter: assigneeFilterFor({ unassignedOnly: cfg.tracker.unassigned_only }),
-        });
-        workspaceMgr.applyConfig({
-          ...(cfg.workspace.root ? { root: cfg.workspace.root } : {}),
-          hooks: cfg.hooks,
-        });
-        process.stderr.write('[dispatch] workflow reloaded\n');
+        // v1.4.10.3 — rebuild claimConfig + claim/release hooks from the
+        // reloaded WORKFLOW.md so flipping `claim_on_dispatch` or changing
+        // `claim_state` takes effect without a daemon restart. The async
+        // resolveClaimStateId is the reason this callback fires-and-forgets
+        // an inner async — watchWorkflow expects sync callbacks.
+        void (async () => {
+          const priorStateName = claimConfig.claimState;
+          const newConfig: ClaimConfig = {
+            enabled: cfg.tracker.claim_on_dispatch,
+            assignToSelf: cfg.tracker.assign_to_self,
+            claimState: cfg.tracker.claim_state,
+            // Preserve the previously-resolved id when the name didn't change,
+            // so we don't pay a Linear round-trip on every save of WORKFLOW.md.
+            claimStateId:
+              cfg.tracker.claim_state === priorStateName ? claimConfig.claimStateId : null,
+            unassignedOnly: cfg.tracker.unassigned_only,
+          };
+          if (newConfig.enabled && newConfig.claimState && newConfig.claimStateId === null) {
+            newConfig.claimStateId = await resolveClaimStateId(tracker, newConfig.claimState);
+            if (!newConfig.claimStateId) {
+              process.stderr.write(
+                `[dispatch] claim_state="${newConfig.claimState}" did not resolve to a tracker stateId after reload — claims will flip assignee only\n`,
+              );
+            }
+          }
+          claimConfig = newConfig;
+          orchestrator?.applyConfig({
+            activeStates: cfg.tracker.active_states,
+            terminalStates: cfg.tracker.terminal_states,
+            pollIntervalMs: cfg.polling.interval_ms,
+            maxConcurrentAgents: cfg.agent.max_concurrent_agents,
+            assigneeFilter: assigneeFilterFor(claimConfig),
+            claimHook: buildClaimHook(tracker, claimConfig),
+            releaseHook: buildReleaseHook(tracker, claimConfig),
+          });
+          workspaceMgr.applyConfig({
+            ...(cfg.workspace.root ? { root: cfg.workspace.root } : {}),
+            hooks: cfg.hooks,
+          });
+          process.stderr.write('[dispatch] workflow reloaded\n');
+        })();
       });
     }
   }
