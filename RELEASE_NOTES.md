@@ -22,6 +22,15 @@ Not yet tagged. Daemon-only change; macOS app + wire schema unchanged. Behind a 
 - 320/320 daemon tests pass (+11 across `trackers/linear` / `orchestrator` / `workflow-loader`).
 - macOS app unchanged; no UI work.
 
+### v1.4.10.5 — stale-claim TTL sweeper for multi-instance crash recovery (2026-05-09, same day)
+
+When two daemons share a Linear API key, the v1.4.10.2 `unassigned_or_self` filter saw each other's claims as "self" and raced. v1.4.10.5 lets you opt into a periodic sweep that releases tickets owned by an apparently-dead instance.
+
+- `Tracker.fetchStaleSelfClaimedIssues?(activeStates, ttlMs)` interface method (optional). Linear runs a GraphQL query filtering by `assignee.id = self AND state in active AND updatedAt < cutoff`. Mock returns all self-claimed active issues regardless of age (no `updatedAt` notion).
+- Orchestrator gains `staleClaimTtlMs` option (default 0/disabled). Every tick, after the dispatch loop, sweeps stale-self issues that are NOT in `running` or `claimed` and fires `releaseHook` for each. Failures log `orchestrator.stale_sweep_failed` / `orchestrator.release_failed` but never abort the tick.
+- `WORKFLOW.md` `tracker.stale_claim_ttl_ms` (number, default 0). Threaded through `coerceTracker` + `applyConfig`; hot-reloadable.
+- +5 tests (Linear stale query shape, ttl=0 short-circuits, orchestrator releases stale not-in-running, orchestrator skips stale that ARE in running, workflow loader default + opt-in). 335/335 daemon tests green.
+
 ### v1.4.10.4 — multi-team `claim_state` resolution (2026-05-09, same day)
 
 - `Tracker.resolveStateIdByName?(name, opts?: { teamId? })` interface extended; `ClaimOptions` gains `stateName` so callers can ask the adapter to resolve at claim time rather than committing to a pre-resolved id.

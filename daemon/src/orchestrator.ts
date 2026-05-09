@@ -70,6 +70,14 @@ export interface OrchestratorOptions {
    */
   assigneeFilter?: AssigneeFilter;
   /**
+   * v1.4.10.5 — When > 0 AND `tracker.fetchStaleSelfClaimedIssues` is
+   * implemented, every tick sweeps for tickets assigned to `selfUserId`
+   * whose `updatedAt` is older than this threshold AND aren't in the
+   * local `running` map. Each is released via `releaseHook`. Default 0
+   * (sweeper disabled).
+   */
+  staleClaimTtlMs?: number;
+  /**
    * Hook the orchestrator calls when it has decided to dispatch one issue.
    * Returns a promise that resolves when the worker exits. Resolution value
    * tells the orchestrator which retry path to take.
@@ -150,6 +158,7 @@ export class Orchestrator {
   private maxRetryBackoffMs: number;
   private stallTimeoutMs: number;
   private assigneeFilter: AssigneeFilter;
+  private staleClaimTtlMs: number;
 
   // Symphony §4.1.8 runtime state.
   private readonly running = new Map<string, RunningEntry>();
@@ -174,6 +183,7 @@ export class Orchestrator {
     this.maxRetryBackoffMs = opts.maxRetryBackoffMs ?? DEFAULT_MAX_RETRY_BACKOFF_MS;
     this.stallTimeoutMs = opts.stallTimeoutMs ?? 0;
     this.assigneeFilter = opts.assigneeFilter ?? 'any';
+    this.staleClaimTtlMs = opts.staleClaimTtlMs ?? 0;
     this.now = opts.now ?? (() => Date.now());
     this.log = opts.log ?? (() => undefined);
   }
@@ -257,8 +267,44 @@ export class Orchestrator {
         if (!this.hasSlot(issue.state)) break;
         this.dispatchInternal(issue, /* attempt */ null);
       }
+      // (6) v1.4.10.5 — sweep stale self-claims left by a previous-instance
+      // daemon that crashed mid-claim. Best-effort: failures are logged but
+      // never abort the tick. Only runs when both the TTL knob is on AND the
+      // tracker actually implements the lookup.
+      await this.sweepStaleSelfClaims();
     } finally {
       this.ticking = false;
+    }
+  }
+
+  /** v1.4.10.5 — see `staleClaimTtlMs`. */
+  private async sweepStaleSelfClaims(): Promise<void> {
+    if (this.staleClaimTtlMs <= 0) return;
+    if (!this.releaseHook) return;
+    if (typeof this.tracker.fetchStaleSelfClaimedIssues !== 'function') return;
+    let stale: Issue[];
+    try {
+      stale = await this.tracker.fetchStaleSelfClaimedIssues(
+        this.activeStates,
+        this.staleClaimTtlMs,
+      );
+    } catch (err) {
+      this.log('orchestrator.stale_sweep_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    for (const issue of stale) {
+      if (this.running.has(issue.id)) continue; // We genuinely own it — leave alone.
+      if (this.claimed.has(issue.id)) continue; // Mid-claim — wait for outcome.
+      const ref = { issueId: issue.id, identifier: issue.identifier };
+      this.log('orchestrator.stale_release', ref);
+      void this.releaseHook(ref).catch((err: unknown) => {
+        this.log('orchestrator.release_failed', {
+          issue: issue.identifier,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
   }
 
@@ -282,6 +328,7 @@ export class Orchestrator {
     if (opts.maxRetryBackoffMs) this.maxRetryBackoffMs = opts.maxRetryBackoffMs;
     if (opts.stallTimeoutMs !== undefined) this.stallTimeoutMs = opts.stallTimeoutMs;
     if (opts.assigneeFilter !== undefined) this.assigneeFilter = opts.assigneeFilter;
+    if (opts.staleClaimTtlMs !== undefined) this.staleClaimTtlMs = opts.staleClaimTtlMs;
     // v1.4.10.3 — Hot-swap claim/release hooks. We test for own property
     // presence (not !== undefined) so a watcher reload that explicitly sets
     // either field to null can clear it. Pass undefined to leave it alone.

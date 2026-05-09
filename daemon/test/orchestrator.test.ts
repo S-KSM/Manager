@@ -312,6 +312,86 @@ describe('Orchestrator', () => {
     orch2.stop();
   });
 
+  it('staleClaimTtlMs sweeper releases self-claimed issues not in the running map (v1.4.10.5)', async () => {
+    const issues = [issue({ id: '1', identifier: 'A', state: 'In Progress' })];
+    // Static tracker that ALSO advertises stale-self via the optional method.
+    const tracker: Tracker & {
+      fetchStaleSelfClaimedIssues: (s: string[], ttl: number) => Promise<Issue[]>;
+    } = {
+      kind: 'sweep-mock',
+      async fetchCandidateIssues() {
+        return [];
+      },
+      async fetchIssuesByStates() {
+        return [];
+      },
+      async fetchIssueStatesByIds() {
+        return new Map();
+      },
+      async fetchStaleSelfClaimedIssues() {
+        return issues;
+      },
+    };
+    const releases: Array<{ issueId: string; identifier: string }> = [];
+    const release = vi
+      .fn()
+      .mockImplementation(async (ref: { issueId: string; identifier: string }) => {
+        releases.push(ref);
+      });
+    const orch = new Orchestrator({
+      tracker,
+      activeStates: ['In Progress'],
+      terminalStates: ['Done'],
+      dispatchOne: vi.fn(),
+      releaseHook: release,
+      staleClaimTtlMs: 60_000,
+    });
+    await orch.tick();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(releases).toEqual([{ issueId: '1', identifier: 'A' }]);
+    orch.stop();
+  });
+
+  it('staleClaimTtlMs sweeper does NOT release issues currently in the running map', async () => {
+    const live = issue({ id: '1', identifier: 'A', state: 'In Progress' });
+    const tracker: Tracker & {
+      fetchStaleSelfClaimedIssues: (s: string[], ttl: number) => Promise<Issue[]>;
+    } = {
+      kind: 'sweep-mock-2',
+      async fetchCandidateIssues() {
+        return [live];
+      },
+      async fetchIssuesByStates() {
+        return [];
+      },
+      async fetchIssueStatesByIds() {
+        return new Map();
+      },
+      async fetchStaleSelfClaimedIssues() {
+        return [live];
+      },
+    };
+    const dispatch: DispatchHook = vi
+      .fn()
+      .mockImplementation(() => new Promise<DispatchOutcome>(() => {}));
+    const release = vi.fn().mockResolvedValue(undefined);
+    const orch = new Orchestrator({
+      tracker,
+      activeStates: ['Todo', 'In Progress'],
+      terminalStates: ['Done'],
+      dispatchOne: dispatch,
+      releaseHook: release,
+      staleClaimTtlMs: 60_000,
+    });
+    await orch.tick();
+    await new Promise((r) => setTimeout(r, 10));
+    // Dispatch fired (issue is in active state) → running map has it →
+    // sweeper sees it but skips because already in `running`.
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(release).not.toHaveBeenCalled();
+    orch.stop();
+  });
+
   it('reconciliation drops running entries whose tracker state went terminal', async () => {
     const live = issue({ id: '1', identifier: 'A', state: 'In Progress' });
     const tracker = new StaticTracker([live]);

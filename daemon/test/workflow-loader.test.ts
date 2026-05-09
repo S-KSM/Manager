@@ -118,4 +118,27 @@ describe('loadWorkflow', () => {
     expect(wfb.config.tracker.unassigned_only).toBe(true);
     expect(wfb.config.tracker.claim_state).toBe('In Progress');
   });
+
+  it('stale_claim_ttl_ms parses from front matter, defaults 0 (v1.4.10.5)', async () => {
+    const a = join(tmp, 'A2.md');
+    await writeFile(a, ['---', 'tracker: { kind: linear }', '---', ''].join('\n'));
+    const wfa = await loadWorkflow(a);
+    expect(wfa.config.tracker.stale_claim_ttl_ms).toBe(0);
+
+    const b = join(tmp, 'B2.md');
+    await writeFile(
+      b,
+      [
+        '---',
+        'tracker:',
+        '  kind: linear',
+        '  claim_on_dispatch: true',
+        '  stale_claim_ttl_ms: 600000',
+        '---',
+        '',
+      ].join('\n'),
+    );
+    const wfb = await loadWorkflow(b);
+    expect(wfb.config.tracker.stale_claim_ttl_ms).toBe(600000);
+  });
 });

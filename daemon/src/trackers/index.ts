@@ -95,6 +95,18 @@ export interface Tracker {
    * ignore the arg (mock) keep their single-cache behavior.
    */
   resolveStateIdByName?(name: string, opts?: { teamId?: string }): Promise<string | null>;
+  /**
+   * v1.4.10.5 — Find issues currently assigned to `selfUserId()` whose
+   * `updatedAt` is older than `ttlMs` ago AND whose state is in the
+   * `activeStates` list. The orchestrator's stale-claim sweeper releases
+   * any returned issues that are NOT in its local `running` map, on the
+   * theory that the previous owner crashed mid-claim and the ticket should
+   * go back to the queue.
+   *
+   * Adapters without a notion of `updatedAt` (mock) MAY return all
+   * self-claimed active issues regardless of age.
+   */
+  fetchStaleSelfClaimedIssues?(activeStates: string[], ttlMs: number): Promise<Issue[]>;
 }
 
 /**

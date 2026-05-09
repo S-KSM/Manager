@@ -345,6 +345,7 @@ async function runStart(opts: {
       claimState: null,
       claimStateId: null,
       unassignedOnly: false,
+      staleClaimTtlMs: 0,
     };
 
     if (opts.workflow) {
@@ -369,6 +370,7 @@ async function runStart(opts: {
         claimState: cfg.tracker.claim_state,
         claimStateId: null,
         unassignedOnly: cfg.tracker.unassigned_only,
+        staleClaimTtlMs: cfg.tracker.stale_claim_ttl_ms,
       };
       workspaceMgr = new WorkspaceManager({
         ...(cfg.workspace.root ? { root: cfg.workspace.root } : {}),
@@ -425,6 +427,7 @@ async function runStart(opts: {
       pollIntervalMs,
       maxConcurrentAgents: maxConcurrent,
       assigneeFilter: assigneeFilterFor(claimConfig),
+      staleClaimTtlMs: claimConfig.staleClaimTtlMs,
       ...(claimHook ? { claimHook } : {}),
       ...(releaseHook ? { releaseHook } : {}),
       dispatchOne: async (issue, attempt) => {
@@ -487,6 +490,7 @@ async function runStart(opts: {
             claimStateId:
               cfg.tracker.claim_state === priorStateName ? claimConfig.claimStateId : null,
             unassignedOnly: cfg.tracker.unassigned_only,
+            staleClaimTtlMs: cfg.tracker.stale_claim_ttl_ms,
           };
           if (newConfig.enabled && newConfig.claimState && newConfig.claimStateId === null) {
             newConfig.claimStateId = await resolveClaimStateId(tracker, newConfig.claimState);
@@ -503,6 +507,7 @@ async function runStart(opts: {
             pollIntervalMs: cfg.polling.interval_ms,
             maxConcurrentAgents: cfg.agent.max_concurrent_agents,
             assigneeFilter: assigneeFilterFor(claimConfig),
+            staleClaimTtlMs: claimConfig.staleClaimTtlMs,
             claimHook: buildClaimHook(tracker, claimConfig),
             releaseHook: buildReleaseHook(tracker, claimConfig),
           });
@@ -665,6 +670,8 @@ interface ClaimConfig {
    */
   claimStateId: string | null;
   unassignedOnly: boolean;
+  /** v1.4.10.5 — see `WorkflowConfig.tracker.stale_claim_ttl_ms`. */
+  staleClaimTtlMs: number;
 }
 
 /**

@@ -639,6 +639,62 @@ describe('LinearTracker', () => {
     expect(updateInput).toMatchObject({ stateId: 's_fallback' });
   });
 
+  // ---- v1.4.10.5 stale-claim sweep query ----------------------------------
+
+  it('fetchStaleSelfClaimedIssues sends self id + iso cutoff + active states', async () => {
+    let captured: { query: string; variables: Record<string, unknown> } | undefined;
+    const fetchImpl = vi.fn().mockImplementation(async (_url, init: RequestInit) => {
+      const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}');
+      if (body.query.includes('Viewer')) {
+        return jsonResp({ data: { viewer: { id: 'u_self' } } });
+      }
+      captured = body;
+      return jsonResp({
+        data: {
+          issues: {
+            nodes: [
+              {
+                id: 'i1',
+                identifier: 'ENG-1',
+                title: 'stale',
+                state: { name: 'In Progress' },
+                labels: { nodes: [] },
+                inverseRelations: { nodes: [] },
+              },
+            ],
+          },
+        },
+      });
+    });
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const out = await tracker.fetchStaleSelfClaimedIssues(['Todo', 'In Progress'], 60_000);
+    expect(out).toHaveLength(1);
+    expect(out[0]?.identifier).toBe('ENG-1');
+    expect(captured?.variables.selfId).toBe('u_self');
+    expect(captured?.variables.states).toEqual(['Todo', 'In Progress']);
+    // Cutoff is an ISO string roughly now-ttl.
+    const cutoff = captured?.variables.updatedBefore as string;
+    expect(typeof cutoff).toBe('string');
+    expect(new Date(cutoff).getTime()).toBeLessThanOrEqual(Date.now() - 60_000 + 100);
+  });
+
+  it('fetchStaleSelfClaimedIssues returns empty array when ttlMs <= 0 (no round-trip)', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => {
+      throw new Error('should not be called');
+    });
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(await tracker.fetchStaleSelfClaimedIssues(['Todo'], 0)).toEqual([]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('fetchCandidateIssues with assigneeFilter=unassigned_or_self builds the OR clause', async () => {
     let capturedQuery = '';
     const fetchImpl = vi.fn().mockImplementation(async (_url, init: RequestInit) => {

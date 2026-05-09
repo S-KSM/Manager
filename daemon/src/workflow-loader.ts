@@ -27,6 +27,7 @@ import yaml from 'js-yaml';
  *     assign_to_self: true           # default true when claim is on
  *     claim_state: "In Progress"     # null/omitted = leave state alone
  *     unassigned_only: true          # default true when claim is on
+ *     stale_claim_ttl_ms: 600000     # v1.4.10.5: release self-claims older than 10min not in our running map
  *   polling:
  *     interval_ms: 30000
  *   workspace:
@@ -82,6 +83,13 @@ export interface TrackerConfig {
   claim_state: string | null;
   /** When true, fetchCandidateIssues uses assigneeFilter='unassigned'. */
   unassigned_only: boolean;
+  /**
+   * v1.4.10.5 — Stale-claim sweep TTL in milliseconds. Default 0 (disabled).
+   * When > 0 the orchestrator releases self-claimed active issues whose
+   * `updatedAt` is older than this AND aren't currently in the running map
+   * (i.e. left behind by a previous-instance daemon crash).
+   */
+  stale_claim_ttl_ms: number;
 }
 
 export interface PollingConfig {
@@ -227,6 +235,7 @@ function coerceTracker(raw: unknown, workflowDir: string): TrackerConfig {
     assign_to_self: boolOr(r['assign_to_self'], claimOnDispatch),
     claim_state: strOrNull(r['claim_state']),
     unassigned_only: boolOr(r['unassigned_only'], claimOnDispatch),
+    stale_claim_ttl_ms: numOr(r['stale_claim_ttl_ms'], 0),
   };
 }
 

@@ -185,6 +185,38 @@ const TEAM_STATES_QUERY = `
   }
 `;
 
+/**
+ * v1.4.10.5 — Find self-claimed active issues last touched before a cutoff.
+ * Used by the orchestrator's stale-claim sweeper to release tickets owned by
+ * a previous-instance daemon that crashed mid-claim. `$updatedBefore` is an
+ * ISO-8601 string; `$selfId` resolved from `viewer.id`.
+ */
+const STALE_SELF_CLAIMED_QUERY = `
+  query StaleSelfClaimedIssues(
+    $projectSlug: String!
+    $states: [String!]!
+    $selfId: String!
+    $updatedBefore: DateTimeOrDuration!
+    $first: Int!
+  ) {
+    issues(
+      first: $first
+      filter: {
+        project: { slugId: { eq: $projectSlug } }
+        state: { name: { in: $states } }
+        assignee: { id: { eq: $selfId } }
+        updatedAt: { lt: $updatedBefore }
+      }
+    ) {
+      nodes {
+        id identifier title description priority url branchName createdAt updatedAt
+        labels { nodes { name } }
+        state { name }
+      }
+    }
+  }
+`;
+
 export interface LinearTrackerOptions {
   apiKey: string;
   projectSlug: string;
@@ -395,6 +427,28 @@ export class LinearTracker implements Tracker {
   async releaseIssue(issueId: string, opts?: ClaimOptions): Promise<void> {
     const assigneeId = opts?.assigneeId === undefined ? null : opts.assigneeId;
     await this.applyIssueUpdate(issueId, { assigneeId, stateId: opts?.stateId ?? undefined });
+  }
+
+  /**
+   * v1.4.10.5 — Find self-claimed active issues older than the TTL. Page-cap
+   * 100 since stale-claim sweeps shouldn't be the dominant traffic; if a
+   * project has more than 100 stale self-claims we'd rather log + revisit
+   * the TTL than pretend we cleaned them all up.
+   */
+  async fetchStaleSelfClaimedIssues(activeStates: string[], ttlMs: number): Promise<Issue[]> {
+    if (ttlMs <= 0) return [];
+    const selfId = await this.selfUserId();
+    const cutoff = new Date(Date.now() - ttlMs).toISOString();
+    const data = await this.gql<{
+      issues: { nodes: LinearIssueNode[] };
+    }>(STALE_SELF_CLAIMED_QUERY, {
+      projectSlug: this.projectSlug,
+      states: activeStates,
+      selfId,
+      updatedBefore: cutoff,
+      first: 100,
+    });
+    return (data.issues?.nodes ?? []).map(normalizeNode);
   }
 
   private async applyIssueUpdate(

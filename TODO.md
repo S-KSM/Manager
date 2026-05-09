@@ -127,6 +127,14 @@ Smallest escalation toward "Dispatch manages Linear" (option 1 of 3 — daemon w
 - [x] **Tests** — `daemon/test/trackers/linear.test.ts` +7 cases (viewer cache, viewer-null error, claim success, claim collision, release clears assignee, unassigned filter clause, self filter clause). `daemon/test/orchestrator.test.ts` +3 cases (claim collision skips dispatch, claim ok → release on terminal, claim throw → `claim_failed` log). `workflow-loader.test.ts` +1 case (default-off, opt-in flips assign_to_self + unassigned_only). 320 / 320 daemon tests green.
 - [x] **Docs** — `docs/ARCHITECTURE.md` Orchestrator section gains "Tracker write-back (v1.4.10)" subsection. `RELEASE_NOTES.md` v1.4.10 entry. `CLAUDE.md` status block bumped.
 
+### v1.4.10.5 — stale-claim TTL sweeper ✅
+
+- [x] `Tracker.fetchStaleSelfClaimedIssues?(activeStates, ttlMs)` added as optional interface method.
+- [x] `LinearTracker` impl runs a GraphQL filter on `assignee.id = self AND state in active AND updatedAt < cutoff` (page cap 100). Mock returns all self-claimed active issues regardless of age (mock has no `updatedAt`).
+- [x] Orchestrator `staleClaimTtlMs` option (default 0/disabled). After every tick's dispatch loop, sweeps stale-self issues not in `running`/`claimed` and fires `releaseHook` (best-effort fire-and-forget). Failures log `orchestrator.stale_sweep_failed` / `orchestrator.release_failed`, never abort.
+- [x] `WORKFLOW.md` `tracker.stale_claim_ttl_ms` parsed in `coerceTracker`, threaded through `applyConfig` (hot-reloadable).
+- [x] +5 tests (Linear stale query shape + ttl=0 short-circuit, orchestrator releases not-in-running stale, orchestrator skips in-running stale, workflow loader default + opt-in). 335/335 daemon tests green.
+
 ### v1.4.10.4 — multi-team claim_state resolution ✅
 
 - [x] `Tracker.resolveStateIdByName?(name, opts?: { teamId? })` extended; `ClaimOptions` gains `stateName`.
@@ -157,7 +165,6 @@ Smallest escalation toward "Dispatch manages Linear" (option 1 of 3 — daemon w
 - [x] +4 Linear tests (cache hit on call #2, empty-project null, unknown-name null, claim with stateId writes assignee + state in one mutation). 324/324 daemon tests green.
 
 Deferred to v1.4.11+:
-- Multi-instance with shared creds: two daemons running with the same Linear API key will both pass the `unassigned_or_self` filter on each other's claims (since "self" is identical) and race. Either give each instance its own bot user or add a stale-claim TTL keyed on `live_session` events. Plan: v1.4.10.5 stale-claim TTL sweeper.
 - Ticket creation (`tracker.createIssue`) for triage-agent + Mascot-emitted bug reports — the next escalation tier (option #2 of the original three "Dispatch manages Linear" choices).
 - Full Linear → Radar draft-workstream mirror — option #3 of the original three.
 - Multi-tracker write abstraction (Jira / GH Issues swap-in).

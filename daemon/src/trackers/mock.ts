@@ -108,6 +108,21 @@ export class MockTracker implements Tracker {
     return name;
   }
 
+  /**
+   * v1.4.10.5 — Mock has no notion of `updatedAt`, so it returns *all*
+   * self-claimed active issues regardless of age. Tests that need stale-
+   * vs-fresh discrimination should drive the orchestrator's running map
+   * directly — the sweeper filters on that anyway.
+   */
+  async fetchStaleSelfClaimedIssues(activeStates: string[], _ttlMs: number): Promise<Issue[]> {
+    const all = await this.readAll();
+    const set = new Set(activeStates.map((s) => s.toLowerCase()));
+    return all.filter((i) => {
+      if (!set.has(i.state.toLowerCase())) return false;
+      return (this.assignees.get(i.id) ?? null) === this.selfId;
+    });
+  }
+
   private async readAll(): Promise<Issue[]> {
     let raw: string;
     try {
