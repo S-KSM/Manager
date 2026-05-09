@@ -22,6 +22,13 @@ Not yet tagged. Daemon-only change; macOS app + wire schema unchanged. Behind a 
 - 320/320 daemon tests pass (+11 across `trackers/linear` / `orchestrator` / `workflow-loader`).
 - macOS app unchanged; no UI work.
 
+### v1.4.10.4 — multi-team `claim_state` resolution (2026-05-09, same day)
+
+- `Tracker.resolveStateIdByName?(name, opts?: { teamId? })` interface extended; `ClaimOptions` gains `stateName` so callers can ask the adapter to resolve at claim time rather than committing to a pre-resolved id.
+- `LinearTracker` adds `cachedStateIdByNameByTeam` (keyed by `team.id`) and a `TeamStates` GraphQL query. `ISSUE_ASSIGNEE_QUERY` peek now also fetches `team.id`, so `claimIssue` can resolve the right state for the issue's actual team in multi-team projects. Resolution miss falls back to caller-supplied `stateId` (the eager v1.4.10.1 path).
+- CLI `buildClaimHook` passes both `stateName` and the eager `stateId`.
+- +3 Linear tests (per-team cache, multi-team prefers stateName, stateName miss falls back to stateId). 330/330 daemon tests green.
+
 ### v1.4.10.3 — hot-swap claim/release hooks on WORKFLOW.md reload (2026-05-09, same day)
 
 - `Orchestrator.applyConfig` extended to swap `claimHook` and `releaseHook` via an `'claimHook' in opts` presence check (passing `null` clears, omitting leaves the current value alone). `OrchestratorOptions.claimHook` / `.releaseHook` widened to `ClaimHook | null` so the same shape propagates through `Partial<>`.

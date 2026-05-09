@@ -127,6 +127,13 @@ Smallest escalation toward "Dispatch manages Linear" (option 1 of 3 — daemon w
 - [x] **Tests** — `daemon/test/trackers/linear.test.ts` +7 cases (viewer cache, viewer-null error, claim success, claim collision, release clears assignee, unassigned filter clause, self filter clause). `daemon/test/orchestrator.test.ts` +3 cases (claim collision skips dispatch, claim ok → release on terminal, claim throw → `claim_failed` log). `workflow-loader.test.ts` +1 case (default-off, opt-in flips assign_to_self + unassigned_only). 320 / 320 daemon tests green.
 - [x] **Docs** — `docs/ARCHITECTURE.md` Orchestrator section gains "Tracker write-back (v1.4.10)" subsection. `RELEASE_NOTES.md` v1.4.10 entry. `CLAUDE.md` status block bumped.
 
+### v1.4.10.4 — multi-team claim_state resolution ✅
+
+- [x] `Tracker.resolveStateIdByName?(name, opts?: { teamId? })` extended; `ClaimOptions` gains `stateName`.
+- [x] `LinearTracker` adds `cachedStateIdByNameByTeam` + `TeamStates` GraphQL query. `ISSUE_ASSIGNEE_QUERY` peek now fetches `team.id`. `claimIssue` resolves `stateName` per issue's team and falls back to caller-supplied `stateId` on miss.
+- [x] CLI's `buildClaimHook` passes both `stateName` and the eager `stateId`.
+- [x] +3 Linear tests (per-team cache, multi-team prefers stateName, stateName miss → stateId fallback). 330/330 daemon tests green.
+
 ### v1.4.10.3 — hot-swap claim/release hooks on WORKFLOW.md reload ✅
 
 - [x] `Orchestrator.applyConfig` swaps `claimHook` / `releaseHook` via `'claimHook' in opts` presence check (passing `null` clears; omitting leaves alone). `OrchestratorOptions.claimHook` / `.releaseHook` widened to `ClaimHook | null` so the same shape propagates through `Partial<>`. Fields made mutable on the class.
@@ -150,8 +157,7 @@ Smallest escalation toward "Dispatch manages Linear" (option 1 of 3 — daemon w
 - [x] +4 Linear tests (cache hit on call #2, empty-project null, unknown-name null, claim with stateId writes assignee + state in one mutation). 324/324 daemon tests green.
 
 Deferred to v1.4.11+:
-- Multi-team project support: `resolveStateIdByName` only sees the primary team. A state name that exists in a *different* team in the same project will not resolve. Fix is to query the issue's `team.id` at claim time and look up states per-team.
-- Multi-instance with shared creds: two daemons running with the same Linear API key will both pass the `unassigned_or_self` filter on each other's claims (since "self" is identical) and race. Either give each instance its own bot user or add a stale-claim TTL keyed on `live_session` events.
+- Multi-instance with shared creds: two daemons running with the same Linear API key will both pass the `unassigned_or_self` filter on each other's claims (since "self" is identical) and race. Either give each instance its own bot user or add a stale-claim TTL keyed on `live_session` events. Plan: v1.4.10.5 stale-claim TTL sweeper.
 - Ticket creation (`tracker.createIssue`) for triage-agent + Mascot-emitted bug reports — the next escalation tier (option #2 of the original three "Dispatch manages Linear" choices).
 - Full Linear → Radar draft-workstream mirror — option #3 of the original three.
 - Multi-tracker write abstraction (Jira / GH Issues swap-in).

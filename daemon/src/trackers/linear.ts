@@ -111,6 +111,10 @@ const VIEWER_QUERY = `query Viewer { viewer { id } }`;
  * v1.4.7 — Read assignee + state right before claim mutate so we can detect
  * "someone else got there first". `linear_assignee_taken` is thrown when the
  * fetched `assignee.id` is non-null and != the user we'd assign to.
+ *
+ * v1.4.10.4 — Also fetch `team.id` so multi-team projects can resolve a
+ * state name against the issue's actual team (not just the project's
+ * primary team).
  */
 const ISSUE_ASSIGNEE_QUERY = `
   query IssueAssignee($id: String!) {
@@ -118,6 +122,7 @@ const ISSUE_ASSIGNEE_QUERY = `
       id
       assignee { id }
       state { id name }
+      team { id }
     }
   }
 `;
@@ -165,6 +170,21 @@ const PROJECT_TEAM_STATES_QUERY = `
   }
 `;
 
+/**
+ * v1.4.10.4 — Resolve workflow states for a known team id. Used during a
+ * claim when the issue's team has already been read out of the assignee
+ * peek. Cached separately from the project-primary cache so multi-team
+ * projects don't share a single map.
+ */
+const TEAM_STATES_QUERY = `
+  query TeamStates($teamId: String!) {
+    team(id: $teamId) {
+      id
+      states { nodes { id name } }
+    }
+  }
+`;
+
 export interface LinearTrackerOptions {
   apiKey: string;
   projectSlug: string;
@@ -188,6 +208,11 @@ export class LinearTracker implements Tracker {
    * project has no issues yet (we re-query on the next call).
    */
   private cachedStateIdByName: Map<string, string> | null = null;
+  /**
+   * v1.4.10.4 — Per-team state caches for multi-team projects. Outer key is
+   * Linear `team.id`; inner is lowercased state name → id.
+   */
+  private cachedStateIdByNameByTeam: Map<string, Map<string, string>> = new Map();
 
   constructor(opts: LinearTrackerOptions) {
     if (!opts.apiKey) {
@@ -275,8 +300,26 @@ export class LinearTracker implements Tracker {
    * here — handle that by querying the issue's team explicitly when claim
    * fires (deferred; today's Dispatch users are all single-team).
    */
-  async resolveStateIdByName(name: string): Promise<string | null> {
+  async resolveStateIdByName(name: string, opts?: { teamId?: string }): Promise<string | null> {
     const key = name.trim().toLowerCase();
+    // v1.4.10.4 — per-team path. Caller (claimIssue) supplies the issue's
+    // team.id from the assignee peek, so multi-team projects resolve the
+    // same name to different ids per team.
+    if (opts?.teamId) {
+      const cached = this.cachedStateIdByNameByTeam.get(opts.teamId);
+      if (cached) return cached.get(key) ?? null;
+      const data = await this.gql<{
+        team: { id: string; states: { nodes: Array<{ id: string; name: string }> } } | null;
+      }>(TEAM_STATES_QUERY, { teamId: opts.teamId });
+      if (!data.team) return null;
+      const map = new Map<string, string>();
+      for (const s of data.team.states.nodes ?? []) {
+        if (s?.name && s.id) map.set(s.name.toLowerCase(), s.id);
+      }
+      this.cachedStateIdByNameByTeam.set(opts.teamId, map);
+      return map.get(key) ?? null;
+    }
+    // v1.4.10.1 — project-primary path (single-team default).
     if (this.cachedStateIdByName) {
       return this.cachedStateIdByName.get(key) ?? null;
     }
@@ -297,31 +340,51 @@ export class LinearTracker implements Tracker {
       if (s?.name && s.id) map.set(s.name.toLowerCase(), s.id);
     }
     this.cachedStateIdByName = map;
+    // Also seed the per-team cache so the next claim from this team hits.
+    this.cachedStateIdByNameByTeam.set(team.id, map);
     return map.get(key) ?? null;
   }
 
   /**
    * v1.4.7 — Claim an issue: read current assignee, abort with
    * `linear_assignee_taken` if a different user already holds it, otherwise
-   * write assignee + (optional) state in one mutation. Caller resolves the
-   * tracker-native stateId; this method does NOT do name→id mapping.
+   * write assignee + (optional) state in one mutation.
+   *
+   * v1.4.10.4 — When `opts.stateName` is set, we resolve it against the
+   * issue's *team* (read out of the assignee peek) rather than the project's
+   * primary team. This is what lets a multi-team project apply the same
+   * `claim_state` config to issues from any team. `opts.stateId` is used as
+   * a fallback when the name doesn't resolve (or wasn't supplied).
    */
   async claimIssue(issueId: string, opts: ClaimOptions): Promise<void> {
     const assigneeId = opts.assigneeId === undefined ? await this.selfUserId() : opts.assigneeId;
-    if (assigneeId) {
-      const peek = await this.gql<{ issue: { assignee: { id: string } | null } | null }>(
-        ISSUE_ASSIGNEE_QUERY,
-        { id: issueId },
-      );
+    let teamId: string | null = null;
+    if (assigneeId || opts.stateName) {
+      const peek = await this.gql<{
+        issue: {
+          assignee: { id: string } | null;
+          team: { id: string } | null;
+        } | null;
+      }>(ISSUE_ASSIGNEE_QUERY, { id: issueId });
       const current = peek.issue?.assignee?.id ?? null;
-      if (current && current !== assigneeId) {
+      if (assigneeId && current && current !== assigneeId) {
         throw new TrackerError(
           'linear_assignee_taken',
           `Linear issue ${issueId} already assigned to ${current}`,
         );
       }
+      teamId = peek.issue?.team?.id ?? null;
     }
-    await this.applyIssueUpdate(issueId, { assigneeId, stateId: opts.stateId ?? undefined });
+    let stateId = opts.stateId ?? undefined;
+    if (opts.stateName) {
+      const resolved = await this.resolveStateIdByName(
+        opts.stateName,
+        teamId ? { teamId } : undefined,
+      );
+      if (resolved) stateId = resolved;
+      // No throw on miss — fall back to caller's pre-resolved stateId (or skip).
+    }
+    await this.applyIssueUpdate(issueId, { assigneeId, stateId });
   }
 
   /**

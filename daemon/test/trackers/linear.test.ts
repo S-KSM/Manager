@@ -519,6 +519,126 @@ describe('LinearTracker', () => {
     expect(capturedQuery).toContain('assignee: { id: { eq: "u_self" } }');
   });
 
+  // ---- v1.4.10.4 multi-team resolveStateIdByName --------------------------
+
+  it('resolveStateIdByName({teamId}) queries the team scope + caches per-team', async () => {
+    const calls: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    const fetchImpl = vi.fn().mockImplementation(async (_url, init: RequestInit) => {
+      const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}');
+      calls.push(body);
+      // TeamStates query — different state ids depending on team.
+      if (body.query.includes('TeamStates')) {
+        const teamId = body.variables.teamId as string;
+        return jsonResp({
+          data: {
+            team: {
+              id: teamId,
+              states: {
+                nodes:
+                  teamId === 'team-a'
+                    ? [{ id: 's_a_inp', name: 'In Progress' }]
+                    : [{ id: 's_b_inp', name: 'In Progress' }],
+              },
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected query: ${body.query.slice(0, 60)}`);
+    });
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(await tracker.resolveStateIdByName('In Progress', { teamId: 'team-a' })).toBe('s_a_inp');
+    expect(await tracker.resolveStateIdByName('In Progress', { teamId: 'team-b' })).toBe('s_b_inp');
+    // Cache hit on second per-team call — no new fetch.
+    expect(await tracker.resolveStateIdByName('in progress', { teamId: 'team-a' })).toBe('s_a_inp');
+    expect(calls).toHaveLength(2);
+  });
+
+  it('claimIssue prefers stateName resolved against the issue team over pre-resolved stateId', async () => {
+    let updateInput: Record<string, unknown> | undefined;
+    const fetchImpl = vi.fn().mockImplementation(async (_url, init: RequestInit) => {
+      const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}');
+      if (body.query.includes('Viewer')) {
+        return jsonResp({ data: { viewer: { id: 'u_self' } } });
+      }
+      if (body.query.includes('IssueAssignee')) {
+        return jsonResp({
+          data: {
+            issue: { id: 'iss_b', assignee: null, state: null, team: { id: 'team-b' } },
+          },
+        });
+      }
+      if (body.query.includes('TeamStates')) {
+        return jsonResp({
+          data: {
+            team: { id: 'team-b', states: { nodes: [{ id: 's_b_inp', name: 'In Progress' }] } },
+          },
+        });
+      }
+      // UpdateIssue
+      updateInput = body.variables.input;
+      return jsonResp({
+        data: {
+          issueUpdate: {
+            success: true,
+            issue: { id: 'iss_b', assignee: { id: 'u_self' }, state: null },
+          },
+        },
+      });
+    });
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    // Caller passes BOTH a fallback id (resolved against project-primary team A
+    // at boot) AND the raw name. The team-aware path should win for team B.
+    await tracker.claimIssue('iss_b', { stateId: 's_a_inp', stateName: 'In Progress' });
+    expect(updateInput).toMatchObject({ assigneeId: 'u_self', stateId: 's_b_inp' });
+  });
+
+  it('claimIssue stateName miss falls back to caller-supplied stateId', async () => {
+    let updateInput: Record<string, unknown> | undefined;
+    const fetchImpl = vi.fn().mockImplementation(async (_url, init: RequestInit) => {
+      const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}');
+      if (body.query.includes('Viewer')) {
+        return jsonResp({ data: { viewer: { id: 'u_self' } } });
+      }
+      if (body.query.includes('IssueAssignee')) {
+        return jsonResp({
+          data: {
+            issue: { id: 'iss_c', assignee: null, state: null, team: { id: 'team-c' } },
+          },
+        });
+      }
+      if (body.query.includes('TeamStates')) {
+        // Team C does NOT have a state by that name.
+        return jsonResp({
+          data: { team: { id: 'team-c', states: { nodes: [{ id: 's_c_todo', name: 'Todo' }] } } },
+        });
+      }
+      updateInput = body.variables.input;
+      return jsonResp({
+        data: {
+          issueUpdate: {
+            success: true,
+            issue: { id: 'iss_c', assignee: { id: 'u_self' }, state: null },
+          },
+        },
+      });
+    });
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await tracker.claimIssue('iss_c', { stateId: 's_fallback', stateName: 'In Progress' });
+    expect(updateInput).toMatchObject({ stateId: 's_fallback' });
+  });
+
   it('fetchCandidateIssues with assigneeFilter=unassigned_or_self builds the OR clause', async () => {
     let capturedQuery = '';
     const fetchImpl = vi.fn().mockImplementation(async (_url, init: RequestInit) => {

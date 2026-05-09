@@ -685,12 +685,19 @@ function buildClaimHook(tracker: Tracker, cfg: ClaimConfig): ClaimHook | null {
       // assigneeId: undefined = let tracker pick self (Linear's default in
       // claimIssue); explicit null when assign_to_self is false would
       // *clear* the assignee — never useful for a claim, so don't pass.
-      const opts: { assigneeId?: string | null; stateId?: string | null } = {};
+      const opts: {
+        assigneeId?: string | null;
+        stateId?: string | null;
+        stateName?: string | null;
+      } = {};
       if (cfg.assignToSelf) {
         // Leave undefined so LinearTracker.claimIssue resolves selfUserId.
       }
-      // v1.4.10.1 — only pass stateId if eager resolution succeeded at boot.
+      // v1.4.10.1 — eager-resolved id is the fallback path.
       if (cfg.claimStateId) opts.stateId = cfg.claimStateId;
+      // v1.4.10.4 — also pass the raw name; multi-team Linear projects need
+      // per-issue/team resolution which the adapter does internally.
+      if (cfg.claimState) opts.stateName = cfg.claimState;
       await tracker.claimIssue!(issue.id, opts);
       return { ok: true };
     } catch (err) {

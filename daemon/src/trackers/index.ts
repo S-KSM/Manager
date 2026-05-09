@@ -52,6 +52,14 @@ export type AssigneeFilter = 'any' | 'unassigned' | 'self' | 'unassigned_or_self
 export interface ClaimOptions {
   /** Tracker-native state id (already resolved from a name). Null/undef = leave state alone. */
   stateId?: string | null;
+  /**
+   * v1.4.10.4 — Raw state name. When the adapter supports per-issue/team
+   * resolution (Linear), this is preferred over `stateId` because it lets the
+   * adapter pick the right state for the *issue's* team in a multi-team
+   * project. Adapters that don't support per-team resolution (mock) ignore
+   * this and use `stateId`. Both can be passed; adapter chooses.
+   */
+  stateName?: string | null;
   /** Tracker-native user id. Null = clear assignee. Undef = leave assignee alone. */
   assigneeId?: string | null;
 }
@@ -81,8 +89,12 @@ export interface Tracker {
    * Returns null when the name isn't recognized. Called once at boot per
    * `WORKFLOW.md` `tracker.claim_state` value; the result is closed over by
    * the claim hook so the per-claim path stays one round-trip.
+   *
+   * v1.4.10.4 — Optional `teamId` arg lets multi-team Linear projects
+   * resolve the same state name to different ids per team. Adapters that
+   * ignore the arg (mock) keep their single-cache behavior.
    */
-  resolveStateIdByName?(name: string): Promise<string | null>;
+  resolveStateIdByName?(name: string, opts?: { teamId?: string }): Promise<string | null>;
 }
 
 /**
