@@ -325,4 +325,24 @@ describe('MockTracker', () => {
     const tracker = new MockTracker(path);
     await expect(tracker.fetchCandidateIssues(['Todo'])).rejects.toBeInstanceOf(TrackerError);
   });
+
+  it('assigneeFilter=unassigned_or_self matches unassigned + self-claimed but excludes other-user claims', async () => {
+    await writeFile(
+      path,
+      JSON.stringify({
+        issues: [
+          { id: '1', identifier: 'A', title: 'A', state: 'Todo' },
+          { id: '2', identifier: 'B', title: 'B', state: 'Todo' },
+          { id: '3', identifier: 'C', title: 'C', state: 'Todo' },
+        ],
+      }),
+    );
+    const tracker = new MockTracker(path, { selfUserId: 'me' });
+    await tracker.claimIssue('2', { assigneeId: 'me' });
+    await tracker.claimIssue('3', { assigneeId: 'someone-else' });
+    const out = await tracker.fetchCandidateIssues(['Todo'], {
+      assigneeFilter: 'unassigned_or_self',
+    });
+    expect(out.map((i) => i.identifier).sort()).toEqual(['A', 'B']);
+  });
 });

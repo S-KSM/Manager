@@ -37,8 +37,16 @@ export interface BlockerRef {
   state: string | null;
 }
 
-/** v1.4.7 — Filter applied at fetch time so two daemons don't race the same issue. */
-export type AssigneeFilter = 'any' | 'unassigned' | 'self';
+/**
+ * v1.4.7 — Filter applied at fetch time so two daemons don't race the same
+ * issue.
+ *
+ * v1.4.10.2 — `'unassigned_or_self'` added so a daemon that crashed mid-claim
+ * still re-discovers its own zombie tickets on restart. This is the default
+ * the orchestrator uses when `tracker.unassigned_only` is on; strict
+ * `'unassigned'` is kept on the union for callers that explicitly want it.
+ */
+export type AssigneeFilter = 'any' | 'unassigned' | 'self' | 'unassigned_or_self';
 
 /** v1.4.7 — Optional knobs on a claim/release write. */
 export interface ClaimOptions {

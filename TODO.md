@@ -127,6 +127,13 @@ Smallest escalation toward "Dispatch manages Linear" (option 1 of 3 — daemon w
 - [x] **Tests** — `daemon/test/trackers/linear.test.ts` +7 cases (viewer cache, viewer-null error, claim success, claim collision, release clears assignee, unassigned filter clause, self filter clause). `daemon/test/orchestrator.test.ts` +3 cases (claim collision skips dispatch, claim ok → release on terminal, claim throw → `claim_failed` log). `workflow-loader.test.ts` +1 case (default-off, opt-in flips assign_to_self + unassigned_only). 320 / 320 daemon tests green.
 - [x] **Docs** — `docs/ARCHITECTURE.md` Orchestrator section gains "Tracker write-back (v1.4.10)" subsection. `RELEASE_NOTES.md` v1.4.10 entry. `CLAUDE.md` status block bumped.
 
+### v1.4.10.2 — stale-claim re-discovery ✅
+
+- [x] New `AssigneeFilter` value `'unassigned_or_self'`. Linear inlines `or: [{...null...}, {...id eq selfId...}]`; mock matches `null OR == selfId`.
+- [x] CLI's `assigneeFilterFor` defaults to the new variant when `unassigned_only` is on. Strict `'unassigned'` retained on the union for callers that want hard "leave already-claimed alone" semantics.
+- [x] +2 tests (Linear `or:` clause assertion, mock cross-user filter). 326/326 daemon tests green.
+- Solves the common single-user-restart case. Multi-instance with shared Linear creds would still race — but that scenario was always going to need stale-claim TTL or per-instance user accounts; deferred to v1.4.11+.
+
 ### v1.4.10.1 — claim_state resolver ✅
 
 - [x] `Tracker.resolveStateIdByName?(name): Promise<string | null>` added as optional interface method.
@@ -136,9 +143,9 @@ Smallest escalation toward "Dispatch manages Linear" (option 1 of 3 — daemon w
 - [x] `buildClaimHook` passes `stateId` to `tracker.claimIssue` only when `claimStateId !== null`.
 - [x] +4 Linear tests (cache hit on call #2, empty-project null, unknown-name null, claim with stateId writes assignee + state in one mutation). 324/324 daemon tests green.
 
-Deferred to v1.4.10.x / v1.4.11+:
+Deferred to v1.4.11+:
 - Multi-team project support: `resolveStateIdByName` only sees the primary team. A state name that exists in a *different* team in the same project will not resolve. Fix is to query the issue's `team.id` at claim time and look up states per-team.
-- Multi-instance crash recovery: if Daemon A claims and dies, Daemon B's strict `unassigned` filter never re-discovers the ticket. Need either a stale-claim TTL (released after N minutes of no `live_session` from the assignee user) or an `unassigned_or_self` filter variant.
+- Multi-instance with shared creds: two daemons running with the same Linear API key will both pass the `unassigned_or_self` filter on each other's claims (since "self" is identical) and race. Either give each instance its own bot user or add a stale-claim TTL keyed on `live_session` events.
 - Hot-swap of claim/release hooks on `WORKFLOW.md` reload.
 - Ticket creation (`tracker.createIssue`) for triage-agent + Mascot-emitted bug reports.
 - Full Linear → Radar draft-workstream mirror.

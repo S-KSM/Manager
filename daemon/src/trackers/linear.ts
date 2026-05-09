@@ -217,6 +217,9 @@ export class LinearTracker implements Tracker {
       const selfId = await this.selfUserId();
       // GraphQL string interpolation is safe here: selfId comes from Linear, never user input.
       assigneeClause = `assignee: { id: { eq: "${selfId}" } }`;
+    } else if (filter === 'unassigned_or_self') {
+      const selfId = await this.selfUserId();
+      assigneeClause = `or: [{ assignee: { null: { eq: true } } }, { assignee: { id: { eq: "${selfId}" } } }]`;
     }
     const query = buildCandidateQuery(assigneeClause);
     const out: Issue[] = [];

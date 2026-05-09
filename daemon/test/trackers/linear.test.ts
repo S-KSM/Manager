@@ -518,4 +518,27 @@ describe('LinearTracker', () => {
     await tracker.fetchCandidateIssues(['Todo'], { assigneeFilter: 'self' });
     expect(capturedQuery).toContain('assignee: { id: { eq: "u_self" } }');
   });
+
+  it('fetchCandidateIssues with assigneeFilter=unassigned_or_self builds the OR clause', async () => {
+    let capturedQuery = '';
+    const fetchImpl = vi.fn().mockImplementation(async (_url, init: RequestInit) => {
+      const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}');
+      if (body.query.includes('Viewer')) {
+        return jsonResp({ data: { viewer: { id: 'u_self' } } });
+      }
+      capturedQuery = body.query;
+      return jsonResp({
+        data: { issues: { pageInfo: { hasNextPage: false, endCursor: 'c0' }, nodes: [] } },
+      });
+    });
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await tracker.fetchCandidateIssues(['Todo'], { assigneeFilter: 'unassigned_or_self' });
+    expect(capturedQuery).toContain('assignee: { null: { eq: true } }');
+    expect(capturedQuery).toContain('assignee: { id: { eq: "u_self" } }');
+    expect(capturedQuery).toContain('or:');
+  });
 });

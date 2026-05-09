@@ -22,6 +22,13 @@ Not yet tagged. Daemon-only change; macOS app + wire schema unchanged. Behind a 
 - 320/320 daemon tests pass (+11 across `trackers/linear` / `orchestrator` / `workflow-loader`).
 - macOS app unchanged; no UI work.
 
+### v1.4.10.2 — stale-claim re-discovery via `unassigned_or_self` filter (2026-05-09, same day)
+
+- New `AssigneeFilter` value `'unassigned_or_self'`. Linear inlines an `or:` clause combining `assignee.null=true` and `assignee.id=<self>`; mock matches `null` OR `== selfUserId`.
+- CLI's `assigneeFilterFor` defaults to the new variant when `unassigned_only` is on. A daemon that crashed mid-claim now re-discovers its own zombie tickets on the next boot (selfUserId is stable across boots).
+- Strict `'unassigned'` stays on the union for callers that explicitly want "leave already-claimed alone" semantics.
+- +2 tests (Linear `or:` clause, mock cross-user filtering). 326/326 daemon tests green.
+
 ### v1.4.10.1 — claim_state resolver (2026-05-09, same day)
 
 - `LinearTracker.resolveStateIdByName(name)` queries `issues(filter: project, first: 1) { team { states } }` once and caches the lowercased name→id map for the project's primary team.

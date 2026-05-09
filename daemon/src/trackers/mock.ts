@@ -60,7 +60,9 @@ export class MockTracker implements Tracker {
       if (filter === 'any') return true;
       const a = this.assignees.get(i.id) ?? null;
       if (filter === 'unassigned') return a === null;
-      return a === this.selfId; // 'self'
+      if (filter === 'self') return a === this.selfId;
+      // 'unassigned_or_self'
+      return a === null || a === this.selfId;
     });
   }
 

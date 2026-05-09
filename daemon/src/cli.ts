@@ -706,7 +706,14 @@ function buildReleaseHook(tracker: Tracker, cfg: ClaimConfig): ReleaseHook | nul
   };
 }
 
-/** v1.4.7 — Translate cfg.unassignedOnly into the assignee filter param. */
+/**
+ * v1.4.7 — Translate cfg.unassignedOnly into the assignee filter param.
+ *
+ * v1.4.10.2 — Default to `'unassigned_or_self'` (not strict `'unassigned'`)
+ * so a daemon that crashed mid-claim re-discovers its own zombie tickets on
+ * the next boot. The strict variant on the union stays available for callers
+ * that explicitly want a hard "leave already-claimed alone" semantic.
+ */
 export function assigneeFilterFor(cfg: { unassignedOnly: boolean }): AssigneeFilter {
-  return cfg.unassignedOnly ? 'unassigned' : 'any';
+  return cfg.unassignedOnly ? 'unassigned_or_self' : 'any';
 }
