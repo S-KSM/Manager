@@ -54,6 +54,16 @@ struct LLMErrorView: View {
                             .textSelection(.enabled)
                     }
                 }
+            } else if LLMErrorView.detectsMissingOllamaCLI(in: message) {
+                // v1.4.16 — second failure mode: the daemon's pullOllamaModel
+                // helper surfaces ENOENT as "ollama CLI not found on PATH".
+                // Means the user is on Ollama-as-provider but never installed
+                // the CLI. Surface a one-click link to the download page.
+                Link(destination: URL(string: "https://ollama.com/download")!) {
+                    Label("Get Ollama", systemImage: "arrow.up.right.square")
+                }
+                .controlSize(.small)
+                .help("Opens ollama.com/download in your browser. Install Ollama, then come back and try again.")
             }
         }
     }
@@ -101,5 +111,16 @@ struct LLMErrorView: View {
             .split(whereSeparator: { $0.isNewline })
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .last(where: { !$0.isEmpty })
+    }
+
+    /// v1.4.16 — Detect the daemon's "ollama CLI not found on PATH" hint
+    /// (mapped from a child_process ENOENT inside `pullOllamaModel`). When
+    /// matched the view offers a Link to ollama.com/download instead of the
+    /// Pull button — Pull would fail the same way.
+    static func detectsMissingOllamaCLI(in text: String) -> Bool {
+        let lower = text.lowercased()
+        return lower.contains("ollama cli not found")
+            || lower.contains("ollama: command not found")
+            || (lower.contains("enoent") && lower.contains("ollama"))
     }
 }

@@ -4,6 +4,26 @@ Versions are anchored on the macOS app's `CFBundleShortVersionString` (the Info.
 
 ---
 
+## v1.4.16 — 2026-05-09 — feat: triage workflow template + file_ticket rate limit + ollama-not-installed hint
+
+Two threads bundled. Both tie loose ends — closes the v1.4.11 (`file_ticket` plumbing) and v1.4.13/.14 (Pull-button UX) loops with the small follow-ups they each needed.
+
+### Triage workflow template + `file_ticket` rate limit (was planned as v1.4.15)
+
+- **`examples/WORKFLOW.triage.md`** — first opinionated workflow template. All v1.4.10.x / v1.4.11 / v1.4.12 knobs in one annotated YAML block + a 4-step prompt biasing the agent toward grooming + dedupe + filing rather than implementation. Drop-in: `dispatch start --workflow ./WORKFLOW.triage.md`.
+- **`POST /trackers/issues` rate limit** — new `BuildOptions.fileTicketMaxPerHour` (default 30/hour, 0 disables). In-memory ring of timestamps with injectable clock. 429 carries `{code: 'file_ticket_rate_limited', retry_after_ms, limit}`. **Failed tracker writes do NOT consume a slot** so a misconfigured Linear key won't lock the user out of retrying. CLI threads `DISPATCH_FILE_TICKET_MAX_PER_HOUR` env override.
+- +3 http-server tests (rate-limited, failed-don't-count, =0 disables). 361/361 daemon tests green.
+
+### `LLMErrorView` handles ollama-not-installed (was planned as v1.4.16)
+
+- **`LLMErrorView.detectsMissingOllamaCLI(in:)`** — recognizes the daemon's "ollama CLI not found on PATH" hint (mapped from `child_process` ENOENT inside `pullOllamaModel`), the bare shell `ollama: command not found`, and `spawn ollama ENOENT`. When matched (and the message isn't *also* a model-not-found), the view shows a `Get Ollama` `Link` to ollama.com/download instead of the Pull button — Pull would fail the same way.
+- Priority: model-not-found wins when both patterns are present, because the user can act on it without leaving the app.
+- +5 macOS unit tests in `LLMErrorViewTests.swift` covering the new detector + priority order. 13/13 macOS LLMErrorView tests green.
+
+### Version bump
+
+- CFBundleShortVersionString + daemon/package.json + lockfile + pbxproj MARKETING_VERSION 1.4.14 → 1.4.16. (Skipping 1.4.15 to bundle both substeps under a single tag.)
+
 ## v1.4.14 — 2026-05-09 — feat: actionable model-not-found error toasts
 
 Closes the dogfood loop that started v1.4.13. The error toast that prompted "make it easy to download the model" now embeds a one-click Pull button when it recognises a model-not-found error — no need to navigate to Settings → Providers and manually re-type the model name.

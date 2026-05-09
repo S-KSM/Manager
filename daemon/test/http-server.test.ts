@@ -1258,6 +1258,151 @@ describe('HTTP server', () => {
     }
   });
 
+  // ---- v1.4.15 file_ticket rate limit -----------------------------------
+
+  it('POST /trackers/issues 429 when fileTicketMaxPerHour is exceeded', async () => {
+    let now = 1_000_000;
+    const tracker = {
+      kind: 'mock-rl',
+      async fetchCandidateIssues() {
+        return [];
+      },
+      async fetchIssuesByStates() {
+        return [];
+      },
+      async fetchIssueStatesByIds() {
+        return new Map<string, string>();
+      },
+      async createIssue() {
+        return { id: 'i', identifier: 'M-1', url: null };
+      },
+    };
+    const h2 = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory_rl')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      tracker,
+      fileTicketMaxPerHour: 2,
+      fileTicketClock: () => now,
+    } as Parameters<typeof buildHttpServer>[0]);
+    try {
+      // First two land.
+      expect((await request(h2.app).post('/trackers/issues').send({ title: 'a' })).status).toBe(
+        201,
+      );
+      expect((await request(h2.app).post('/trackers/issues').send({ title: 'b' })).status).toBe(
+        201,
+      );
+      // Third trips the limit.
+      const r3 = await request(h2.app).post('/trackers/issues').send({ title: 'c' });
+      expect(r3.status).toBe(429);
+      expect(r3.body.code).toBe('file_ticket_rate_limited');
+      expect(r3.body.limit).toBe(2);
+      expect(r3.body.retry_after_ms).toBeGreaterThan(0);
+      // Wind clock past the window — the first two evict, third now lands.
+      now += 60 * 60 * 1000 + 1;
+      const r4 = await request(h2.app).post('/trackers/issues').send({ title: 'd' });
+      expect(r4.status).toBe(201);
+    } finally {
+      await h2.close();
+    }
+  });
+
+  it('POST /trackers/issues failed tracker writes do NOT count against the rate limit', async () => {
+    const tracker = {
+      kind: 'mock-fail',
+      async fetchCandidateIssues() {
+        return [];
+      },
+      async fetchIssuesByStates() {
+        return [];
+      },
+      async fetchIssueStatesByIds() {
+        return new Map<string, string>();
+      },
+      async createIssue() {
+        throw new Error('linear down');
+      },
+    };
+    const h2 = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory_rl_fail')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      tracker,
+      fileTicketMaxPerHour: 1,
+    } as Parameters<typeof buildHttpServer>[0]);
+    try {
+      // 5 failed createIssue calls — each comes back 500 but none consume
+      // a slot, so a subsequent (still-failing) call still gets through to
+      // tracker rather than hitting 429.
+      for (let i = 0; i < 5; i++) {
+        const r = await request(h2.app)
+          .post('/trackers/issues')
+          .send({ title: `t${i}` });
+        expect(r.status).toBe(500);
+      }
+    } finally {
+      await h2.close();
+    }
+  });
+
+  it('POST /trackers/issues with fileTicketMaxPerHour=0 disables the limit', async () => {
+    const tracker = {
+      kind: 'mock-no-rl',
+      async fetchCandidateIssues() {
+        return [];
+      },
+      async fetchIssuesByStates() {
+        return [];
+      },
+      async fetchIssueStatesByIds() {
+        return new Map<string, string>();
+      },
+      async createIssue() {
+        return { id: 'i', identifier: 'M-1', url: null };
+      },
+    };
+    const h2 = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory_no_rl')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      tracker,
+      fileTicketMaxPerHour: 0,
+    } as Parameters<typeof buildHttpServer>[0]);
+    try {
+      // 50 calls, all 201.
+      for (let i = 0; i < 50; i++) {
+        const r = await request(h2.app)
+          .post('/trackers/issues')
+          .send({ title: `t${i}` });
+        expect(r.status).toBe(201);
+      }
+    } finally {
+      await h2.close();
+    }
+  });
+
   it('PATCH /settings with empty anthropicApiKey clears the stored value', async () => {
     await request(handle.app).patch('/settings').send({ anthropicApiKey: 'sk-ant-test' });
     expect(settings.getResolvedAnthropicApiKey()).toBe('sk-ant-test');

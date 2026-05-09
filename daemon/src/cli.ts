@@ -263,6 +263,13 @@ async function runStart(opts: {
   // so the routes find them after construction.
   const orchestratorHolder: { current: Orchestrator | null } = { current: null };
   const trackerHolder: { current: Tracker | null } = { current: null };
+  // v1.4.15 — DISPATCH_FILE_TICKET_MAX_PER_HOUR env override. Empty / unset
+  // falls through to the http-server default (30/hour). 0 disables.
+  const fileTicketEnv = process.env['DISPATCH_FILE_TICKET_MAX_PER_HOUR'];
+  const fileTicketMaxPerHour =
+    fileTicketEnv !== undefined && /^\d+$/.test(fileTicketEnv)
+      ? Number.parseInt(fileTicketEnv, 10)
+      : undefined;
   const http = buildHttpServer({
     eventStore,
     memoryStore,
@@ -276,6 +283,7 @@ async function runStart(opts: {
     settings,
     workstreamLinks,
     tickerRestarter: restartTickers,
+    ...(fileTicketMaxPerHour !== undefined ? { fileTicketMaxPerHour } : {}),
     get orchestrator() {
       return orchestratorHolder.current ?? undefined;
     },

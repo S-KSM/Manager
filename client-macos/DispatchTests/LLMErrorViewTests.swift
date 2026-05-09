@@ -53,4 +53,42 @@ final class LLMErrorViewTests: XCTestCase {
         XCTAssertEqual(LLMErrorView.lastNonEmptyLine(""), nil)
         XCTAssertEqual(LLMErrorView.lastNonEmptyLine("   \n  \n"), nil)
     }
+
+    // ---- v1.4.16 ollama-CLI-missing detection ----
+
+    func testDetectsMissingOllamaCLIFromDaemonHint() {
+        XCTAssertTrue(LLMErrorView.detectsMissingOllamaCLI(
+            in: "Pull failed: ollama CLI not found on PATH: spawn ollama ENOENT"
+        ))
+    }
+
+    func testDetectsMissingOllamaCLIFromShellMessage() {
+        XCTAssertTrue(LLMErrorView.detectsMissingOllamaCLI(
+            in: "bash: ollama: command not found"
+        ))
+    }
+
+    func testDetectsMissingOllamaCLIFromBareEnoent() {
+        XCTAssertTrue(LLMErrorView.detectsMissingOllamaCLI(
+            in: "spawn ollama ENOENT"
+        ))
+    }
+
+    func testReturnsFalseForUnrelatedErrors() {
+        XCTAssertFalse(LLMErrorView.detectsMissingOllamaCLI(in: "model 'qwen3:8b' not found"))
+        XCTAssertFalse(LLMErrorView.detectsMissingOllamaCLI(in: "Linear API key missing"))
+        XCTAssertFalse(LLMErrorView.detectsMissingOllamaCLI(in: ""))
+    }
+
+    func testModelNotFoundTakesPriorityOverCLIDetection() {
+        // If both patterns happen to appear, model-not-found wins because
+        // the user can act on it (pull) without leaving the app, while the
+        // CLI-missing branch sends them to a browser. The LLMErrorView body
+        // already gates on `if let modelName ... else if detects ...`,
+        // so this test just locks the detector inputs in their expected
+        // state.
+        let combined = "model 'qwen3:8b' not found AND ollama CLI not found on PATH"
+        XCTAssertEqual(LLMErrorView.extractMissingModelName(from: combined), "qwen3:8b")
+        XCTAssertTrue(LLMErrorView.detectsMissingOllamaCLI(in: combined))
+    }
 }

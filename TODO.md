@@ -127,6 +127,17 @@ Smallest escalation toward "Dispatch manages Linear" (option 1 of 3 — daemon w
 - [x] **Tests** — `daemon/test/trackers/linear.test.ts` +7 cases (viewer cache, viewer-null error, claim success, claim collision, release clears assignee, unassigned filter clause, self filter clause). `daemon/test/orchestrator.test.ts` +3 cases (claim collision skips dispatch, claim ok → release on terminal, claim throw → `claim_failed` log). `workflow-loader.test.ts` +1 case (default-off, opt-in flips assign_to_self + unassigned_only). 320 / 320 daemon tests green.
 - [x] **Docs** — `docs/ARCHITECTURE.md` Orchestrator section gains "Tracker write-back (v1.4.10)" subsection. `RELEASE_NOTES.md` v1.4.10 entry. `CLAUDE.md` status block bumped.
 
+### v1.4.16 — Triage workflow template + file_ticket rate limit + ollama-not-installed hint ✅
+
+Bundles two small follow-ups that close the v1.4.11 and v1.4.13/.14 loops. Single tag.
+
+- [x] `examples/WORKFLOW.triage.md` — first opinionated triage-agent template. All v1.4.10.x / v1.4.11 / v1.4.12 knobs in one annotated config + 4-step grooming/file/handoff prompt.
+- [x] `POST /trackers/issues` rate limit — `BuildOptions.fileTicketMaxPerHour` (default 30/hour). 429 with `{code: 'file_ticket_rate_limited', retry_after_ms, limit}`. Failed writes don't consume a slot. CLI threads `DISPATCH_FILE_TICKET_MAX_PER_HOUR` env override. +3 http-server tests.
+- [x] `LLMErrorView.detectsMissingOllamaCLI(in:)` — second failure-mode detection. Shows a `Get Ollama` Link to ollama.com/download when the error is "ollama CLI not found on PATH" / "ollama: command not found" / "spawn ollama ENOENT". Model-not-found takes priority when both patterns are present. +5 macOS unit tests.
+- [x] 361/361 daemon + 13/13 macOS LLMErrorView tests green.
+
+Realistic finding while shipping this: there's only ONE LLM-error surface in the macOS app today (GenerateReportSheet, already wired in v1.4.14). UpdatesView/HomeView/InterventionPanel error paths carry daemon-API errors, not LLM. Future LLM-error surfaces should use `LLMErrorView` instead of bare `Label` so the Pull and Get-Ollama actions come for free.
+
 ### v1.4.14 — Actionable model-not-found error toasts ✅
 
 Closes the dogfood loop from v1.4.13. The error toast itself now offers the Pull action — no navigation required.

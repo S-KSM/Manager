@@ -68,6 +68,15 @@ interface BuildOptions {
    */
   tracker?: Tracker;
   /**
+   * v1.4.15 — Per-process rate limit on `POST /trackers/issues` (and
+   * therefore on the `dispatch__file_ticket` MCP tool that wraps it). 0
+   * disables. Default 30/hour. Tuned for the triage-agent path: a runaway
+   * agent looping `file_ticket` should hit the wall before it spams Linear.
+   */
+  fileTicketMaxPerHour?: number;
+  /** Test seam — clock injector for the rate limiter. */
+  fileTicketClock?: () => number;
+  /**
    * Persisted user-editable LLM settings. When present:
    *   - `GET /settings` and `PATCH /settings` are served (404 otherwise),
    *   - `/reports/generate` reads the stored API key + Ollama URL when the
@@ -203,6 +212,15 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     opts.adminImpls?.spawnDetached ?? ((cmd: string) => defaultSpawnDetached(cmd));
   const adminPullOllamaModel =
     opts.adminImpls?.pullOllamaModel ?? ((model: string) => defaultPullOllamaModel(model));
+  // v1.4.15 — file_ticket rate limiter. Hard-cap 0 disables the check;
+  // negative falls through to the default 30/hour.
+  const fileTicketMaxPerHour =
+    opts.fileTicketMaxPerHour !== undefined && opts.fileTicketMaxPerHour >= 0
+      ? opts.fileTicketMaxPerHour
+      : 30;
+  const fileTicketClock = opts.fileTicketClock ?? Date.now;
+  const fileTicketTimestamps: number[] = [];
+  const FILE_TICKET_WINDOW_MS = 60 * 60 * 1000;
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
@@ -462,6 +480,27 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
       res.status(501).json({ error: 'tracker does not implement createIssue', kind: tracker.kind });
       return;
     }
+    // v1.4.15 — rate limit. Evict timestamps older than the window, then
+    // check + (on success) record. 429 carries `retry_after_ms` so the
+    // MCP tool can surface a "wait N seconds" message instead of looping.
+    if (fileTicketMaxPerHour > 0) {
+      const now = fileTicketClock();
+      const cutoff = now - FILE_TICKET_WINDOW_MS;
+      while (fileTicketTimestamps.length > 0 && (fileTicketTimestamps[0] ?? 0) < cutoff) {
+        fileTicketTimestamps.shift();
+      }
+      if (fileTicketTimestamps.length >= fileTicketMaxPerHour) {
+        const oldest = fileTicketTimestamps[0] ?? now;
+        const retryAfterMs = Math.max(0, oldest + FILE_TICKET_WINDOW_MS - now);
+        res.status(429).json({
+          error: `file_ticket rate limit exceeded (${fileTicketMaxPerHour}/hour)`,
+          code: 'file_ticket_rate_limited',
+          retry_after_ms: retryAfterMs,
+          limit: fileTicketMaxPerHour,
+        });
+        return;
+      }
+    }
     const body = (req.body ?? {}) as Record<string, unknown>;
     const title = typeof body.title === 'string' ? body.title.trim() : '';
     if (!title) {
@@ -481,6 +520,10 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
         ...(labels && labels.length > 0 ? { labels } : {}),
         priority,
       });
+      // Record only on actual success; failed tracker writes don't count
+      // against the rate limit so a misconfigured Linear key won't lock
+      // the user out of retrying.
+      if (fileTicketMaxPerHour > 0) fileTicketTimestamps.push(fileTicketClock());
       res.status(201).json(created);
     } catch (err) {
       if (err instanceof TrackerError) {
