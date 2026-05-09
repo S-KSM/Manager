@@ -4,6 +4,16 @@ Versions are anchored on the macOS app's `CFBundleShortVersionString` (the Info.
 
 ---
 
+## v1.4.14 — 2026-05-09 — feat: actionable model-not-found error toasts
+
+Closes the dogfood loop that started v1.4.13. The error toast that prompted "make it easy to download the model" now embeds a one-click Pull button when it recognises a model-not-found error — no need to navigate to Settings → Providers and manually re-type the model name.
+
+- **`client-macos/Dispatch/Views/LLMErrorView.swift`** — new reusable view. Wraps any error string with the existing red triangle Label, then regex-detects `model '<name>' not found` (single quote, double quote, or backtick variants; case-insensitive on the literal "not found"). When matched, renders a "Pull <name>" button that calls `client.pullModel(name)` inline. Reports inline pull status (spinner / green check / red exclaim) without dismissing the dialog.
+- **`GenerateReportSheet`** error spot rewritten to use `LLMErrorView` — the actual surface that produced the screenshot in v1.4.13's dogfood.
+- Defense-in-depth: the model-name regex is tightly scoped to `[A-Za-z0-9._:/-]{1,128}`, the same character class the daemon's `pullOllamaModel` validates against. Quoted shell-metacharacter injection attempts (`model 'foo; rm -rf /' not found`) don't match the regex and the Pull button isn't offered.
+- +8 macOS unit tests in `LLMErrorViewTests.swift` covering all three quote styles, case-insensitive matching, HuggingFace path-style names (`hf.co/bartowski/qwen3-8b-gguf`), unrelated errors returning nil, shell-injection rejected, and the `lastNonEmptyLine` helper used to surface ollama's final progress line.
+- Version bump CFBundleShortVersionString + daemon/package.json + lockfile + pbxproj MARKETING_VERSION 1.4.13 → 1.4.14.
+
 ## v1.4.13 — 2026-05-09 — feat: pull-model button on Providers tab
 
 One-click path to download missing local-LLM models. Surfaced after a `model 'qwen3:8b' not found` 404 in dogfood — the user shouldn't have to drop to a terminal + remember `ollama pull` syntax to fix that.

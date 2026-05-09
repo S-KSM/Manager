@@ -90,9 +90,11 @@ struct GenerateReportSheet: View {
                     previewContent(report: r)
                 }
                 if let errorText {
-                    Label(errorText, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.red)
+                    // v1.4.14 — when the error is a "model not found" the
+                    // user can fix it inline by clicking Pull next to the
+                    // message; non-LLM errors fall through to the plain
+                    // red Label rendering inside LLMErrorView.
+                    LLMErrorView(message: errorText, client: client)
                 }
             }
             .padding(20)

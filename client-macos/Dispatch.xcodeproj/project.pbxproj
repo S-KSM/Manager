@@ -25,6 +25,7 @@
 		A100000000000000000001A1 /* Intervention.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000001B1 /* Intervention.swift */; };
 		A100000000000000000001A2 /* InterventionPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000001B2 /* InterventionPanel.swift */; };
 		A100000000000000000001A3 /* InterventionCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000001B3 /* InterventionCodableTests.swift */; };
+		A1000000000000000000ABA2 /* LLMErrorViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000ABB2 /* LLMErrorViewTests.swift */; };
 		A100000000000000000002A1 /* Skill.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000002B1 /* Skill.swift */; };
 		A100000000000000000002A2 /* Digest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000002B2 /* Digest.swift */; };
 		A100000000000000000002A3 /* NewWorkstreamSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000002B3 /* NewWorkstreamSheet.swift */; };
@@ -40,6 +41,7 @@
 		A100000000000000000004A1 /* RobotMascot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000004B1 /* RobotMascot.swift */; };
 		A100000000000000000005A1 /* LaunchdInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005B1 /* LaunchdInstaller.swift */; };
 		A100000000000000000005A2 /* PreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005B2 /* PreferencesView.swift */; };
+		A1000000000000000000ABA1 /* LLMErrorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000ABB1 /* LLMErrorView.swift */; };
 		A100000000000000000005A3 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005B3 /* WelcomeView.swift */; };
 		A100000000000000000005A4 /* AppRelocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000005B4 /* AppRelocator.swift */; };
 		A100000000000000000006A1 /* WorkstreamCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006B1 /* WorkstreamCodableTests.swift */; };
@@ -85,6 +87,7 @@
 		A100000000000000000001B1 /* Intervention.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Intervention.swift; sourceTree = "<group>"; };
 		A100000000000000000001B2 /* InterventionPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterventionPanel.swift; sourceTree = "<group>"; };
 		A100000000000000000001B3 /* InterventionCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterventionCodableTests.swift; sourceTree = "<group>"; };
+		A1000000000000000000ABB2 /* LLMErrorViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMErrorViewTests.swift; sourceTree = "<group>"; };
 		A100000000000000000002B1 /* Skill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Skill.swift; sourceTree = "<group>"; };
 		A100000000000000000002B2 /* Digest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Digest.swift; sourceTree = "<group>"; };
 		A100000000000000000002B3 /* NewWorkstreamSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewWorkstreamSheet.swift; sourceTree = "<group>"; };
@@ -100,6 +103,7 @@
 		A100000000000000000004B1 /* RobotMascot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RobotMascot.swift; sourceTree = "<group>"; };
 		A100000000000000000005B1 /* LaunchdInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchdInstaller.swift; sourceTree = "<group>"; };
 		A100000000000000000005B2 /* PreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesView.swift; sourceTree = "<group>"; };
+		A1000000000000000000ABB1 /* LLMErrorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMErrorView.swift; sourceTree = "<group>"; };
 		A100000000000000000005B3 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		A100000000000000000005B4 /* AppRelocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRelocator.swift; sourceTree = "<group>"; };
 		A100000000000000000006B1 /* WorkstreamCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkstreamCodableTests.swift; sourceTree = "<group>"; };
@@ -176,6 +180,7 @@
 				A100000000000000000006B6 /* WorkstreamLinkCodableTests.swift */,
 				A100000000000000000006BA /* DispatchURLParserTests.swift */,
 				A100000000000000000006BB /* DaemonResolverTests.swift */,
+				A1000000000000000000ABB2 /* LLMErrorViewTests.swift */,
 			);
 			path = DispatchTests;
 			sourceTree = "<group>";
@@ -237,6 +242,7 @@
 				A100000000000000000005B3 /* WelcomeView.swift */,
 				A100000000000000000006B3 /* KanbanBoardView.swift */,
 				A100000000000000000006B7 /* LinkLinearSheet.swift */,
+				A1000000000000000000ABB1 /* LLMErrorView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -426,6 +432,7 @@
 				A100000000000000000004A1 /* RobotMascot.swift in Sources */,
 				A100000000000000000005A1 /* LaunchdInstaller.swift in Sources */,
 				A100000000000000000005A2 /* PreferencesView.swift in Sources */,
+				A1000000000000000000ABA1 /* LLMErrorView.swift in Sources */,
 				A100000000000000000005A3 /* WelcomeView.swift in Sources */,
 				A100000000000000000005A4 /* AppRelocator.swift in Sources */,
 				A100000000000000000006A8 /* DispatchURLParser.swift in Sources */,
@@ -454,6 +461,7 @@
 				A100000000000000000006A6 /* WorkstreamLinkCodableTests.swift in Sources */,
 				A100000000000000000006AA /* DispatchURLParserTests.swift in Sources */,
 				A100000000000000000006AB /* DaemonResolverTests.swift in Sources */,
+				A1000000000000000000ABA2 /* LLMErrorViewTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -607,7 +615,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.4.13;
+				MARKETING_VERSION = 1.4.14;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dispatch.app;
 				PRODUCT_MODULE_NAME = DispatchApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -637,7 +645,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.4.13;
+				MARKETING_VERSION = 1.4.14;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dispatch.app;
 				PRODUCT_MODULE_NAME = DispatchApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -655,7 +663,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.4.13;
+				MARKETING_VERSION = 1.4.14;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dispatch.app.DispatchTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -673,7 +681,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.4.13;
+				MARKETING_VERSION = 1.4.14;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dispatch.app.DispatchTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;

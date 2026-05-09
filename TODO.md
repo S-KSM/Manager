@@ -127,6 +127,17 @@ Smallest escalation toward "Dispatch manages Linear" (option 1 of 3 — daemon w
 - [x] **Tests** — `daemon/test/trackers/linear.test.ts` +7 cases (viewer cache, viewer-null error, claim success, claim collision, release clears assignee, unassigned filter clause, self filter clause). `daemon/test/orchestrator.test.ts` +3 cases (claim collision skips dispatch, claim ok → release on terminal, claim throw → `claim_failed` log). `workflow-loader.test.ts` +1 case (default-off, opt-in flips assign_to_self + unassigned_only). 320 / 320 daemon tests green.
 - [x] **Docs** — `docs/ARCHITECTURE.md` Orchestrator section gains "Tracker write-back (v1.4.10)" subsection. `RELEASE_NOTES.md` v1.4.10 entry. `CLAUDE.md` status block bumped.
 
+### v1.4.14 — Actionable model-not-found error toasts ✅
+
+Closes the dogfood loop from v1.4.13. The error toast itself now offers the Pull action — no navigation required.
+
+- [x] New `LLMErrorView` wraps any error string, regex-detects `model '<name>' not found` across single/double/backtick quote variants, inlines a "Pull <name>" button that calls `client.pullModel(name)` directly. Status (spinner / check / exclaim) renders alongside without dismissing the dialog.
+- [x] `GenerateReportSheet` rewritten to use `LLMErrorView` (the actual surface that prompted the v1.4.13 screenshot).
+- [x] Defense-in-depth: model-name regex pattern matches the same `[A-Za-z0-9._:/-]` character class daemon-side `pullOllamaModel` validates. Shell-metacharacter injection rejected.
+- [x] +8 macOS unit tests (3 quote styles, case-insensitive, HuggingFace path-style, unrelated errors → nil, shell-injection rejected, lastNonEmptyLine helper).
+
+Future: same enrichment for `Headliner` debug toasts + a HuggingFace-style "Fetch from HF" button for mlx_lm.server / llama.cpp users (their runtimes don't have a CLI pull command — model lands on first inference).
+
 ### v1.4.13 — Pull-model button (one-click `ollama pull` from Settings) ✅
 
 Surfaced after a `model 'qwen3:8b' not found` 404 in dogfood — users shouldn't have to drop to a terminal to download a missing model.
