@@ -440,13 +440,45 @@ step "Load launchd agent"
 LABEL="com.dispatch.daemon"
 
 # If already loaded, bootout first (idempotent reinstall).
+#
+# Race: after `bootout` returns, the service can linger in launchd's bookkeeping
+# for a moment; if we bootstrap before it's fully gone we hit
+# `Bootstrap failed: 5: Input/output error`. Poll `launchctl print` for up to
+# 5 s until the service disappears, then bootstrap with one retry on the same
+# transient failure mode.
 if launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
   info "agent already loaded; booting out before reload"
   launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+  i=0
+  while [ "$i" -lt 10 ] && launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; do
+    sleep 0.5
+    i=$((i + 1))
+  done
 fi
 
 if confirm "Bootstrap $LABEL into $DOMAIN now?"; then
-  if launchctl bootstrap "$DOMAIN" "$PLIST_DEST"; then
+  BOOTSTRAP_OUT=""
+  BOOTSTRAP_OK=0
+  attempt=1
+  while [ "$attempt" -le 3 ]; do
+    if BOOTSTRAP_OUT=$(launchctl bootstrap "$DOMAIN" "$PLIST_DEST" 2>&1); then
+      BOOTSTRAP_OK=1
+      break
+    fi
+    # Only retry on the transient I/O-error case; other failures (bad plist,
+    # permission denied) won't get better with a sleep.
+    case "$BOOTSTRAP_OUT" in
+      *"Input/output error"*|*"5:"*)
+        info "bootstrap attempt $attempt hit a transient launchd race; retrying after 2s"
+        sleep 2
+        attempt=$((attempt + 1))
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+  if [ "$BOOTSTRAP_OK" = "1" ]; then
     ok "agent loaded"
     # Health probe.
     sleep 2
@@ -457,6 +489,7 @@ if confirm "Bootstrap $LABEL into $DOMAIN now?"; then
       warn "could not reach daemon /health on port $PORT (may still be starting; check ~/Library/Logs/dispatch.daemon.err.log)"
     fi
   else
+    [ -n "$BOOTSTRAP_OUT" ] && printf '%s\n' "$BOOTSTRAP_OUT" >&2
     warn "launchctl bootstrap failed (run 'launchctl print $DOMAIN/$LABEL' to inspect)"
   fi
 else
