@@ -68,6 +68,13 @@ export interface Tracker {
    */
   claimIssue?(issueId: string, opts: ClaimOptions): Promise<void>;
   releaseIssue?(issueId: string, opts?: ClaimOptions): Promise<void>;
+  /**
+   * v1.4.10.1 — Resolve a tracker-specific state name to its native id.
+   * Returns null when the name isn't recognized. Called once at boot per
+   * `WORKFLOW.md` `tracker.claim_state` value; the result is closed over by
+   * the claim hook so the per-claim path stays one round-trip.
+   */
+  resolveStateIdByName?(name: string): Promise<string | null>;
 }
 
 /**

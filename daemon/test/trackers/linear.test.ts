@@ -397,6 +397,107 @@ describe('LinearTracker', () => {
     expect(capturedQuery).toContain('assignee: { null: { eq: true } }');
   });
 
+  // ---- v1.4.10.1 state-name resolver --------------------------------------
+
+  it('resolveStateIdByName caches the project-team state map across calls', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResp({
+        data: {
+          issues: {
+            nodes: [
+              {
+                team: {
+                  id: 't1',
+                  states: {
+                    nodes: [
+                      { id: 's_todo', name: 'Todo' },
+                      { id: 's_inp', name: 'In Progress' },
+                      { id: 's_done', name: 'Done' },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        },
+      }),
+    );
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(await tracker.resolveStateIdByName('In Progress')).toBe('s_inp');
+    // Case-insensitive on the second call; cache hits — no second fetch.
+    expect(await tracker.resolveStateIdByName('done')).toBe('s_done');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolveStateIdByName returns null when the project has no issues yet (empty nodes)', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResp({ data: { issues: { nodes: [] } } }));
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(await tracker.resolveStateIdByName('In Progress')).toBeNull();
+  });
+
+  it('resolveStateIdByName returns null for a name that does not exist', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResp({
+        data: {
+          issues: {
+            nodes: [{ team: { id: 't1', states: { nodes: [{ id: 's_todo', name: 'Todo' }] } } }],
+          },
+        },
+      }),
+    );
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(await tracker.resolveStateIdByName('Nonsense')).toBeNull();
+  });
+
+  it('claimIssue with stateId writes both assigneeId and stateId in one mutation', async () => {
+    const calls: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    const fetchImpl = vi.fn().mockImplementation(async (_url, init: RequestInit) => {
+      const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}');
+      calls.push(body);
+      if (body.query.includes('Viewer')) {
+        return jsonResp({ data: { viewer: { id: 'u_self' } } });
+      }
+      if (body.query.includes('IssueAssignee')) {
+        return jsonResp({ data: { issue: { id: 'iss_1', assignee: null, state: null } } });
+      }
+      return jsonResp({
+        data: {
+          issueUpdate: {
+            success: true,
+            issue: {
+              id: 'iss_1',
+              assignee: { id: 'u_self' },
+              state: { id: 's_inp', name: 'In Progress' },
+            },
+          },
+        },
+      });
+    });
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await tracker.claimIssue('iss_1', { stateId: 's_inp' });
+    const updateCall = calls.find((c) => c.query.includes('UpdateIssue'));
+    expect(updateCall?.variables).toMatchObject({
+      issueId: 'iss_1',
+      input: { assigneeId: 'u_self', stateId: 's_inp' },
+    });
+  });
+
   it('fetchCandidateIssues with assigneeFilter=self resolves viewer + inlines id', async () => {
     let capturedQuery = '';
     const fetchImpl = vi.fn().mockImplementation(async (_url, init: RequestInit) => {

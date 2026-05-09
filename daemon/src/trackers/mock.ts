@@ -97,6 +97,15 @@ export class MockTracker implements Tracker {
     this.assignees.set(issueId, desired);
   }
 
+  /**
+   * v1.4.10.1 — Mock returns the name back as the id (the JSON fixture's
+   * `state` field is already the human-readable name, so identity is the
+   * cheapest plausible mapping for tests).
+   */
+  async resolveStateIdByName(name: string): Promise<string | null> {
+    return name;
+  }
+
   private async readAll(): Promise<Issue[]> {
     let raw: string;
     try {

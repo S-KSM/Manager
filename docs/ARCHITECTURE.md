@@ -203,7 +203,7 @@ Five components, all in `daemon/src/`:
 | Component | File | Responsibility |
 |---|---|---|
 | **State machine** | `orchestrator.ts` | Symphony §7 — per-issue lifecycle (`Unclaimed → Claimed → Running → RetryQueued / Released`). Symphony §8 candidate selection + sort. §8.4 retry/backoff. §8.5 reconciliation tick. |
-| **Tracker adapter** | `trackers/{linear,mock}.ts` | Pluggable. Symphony §11 GraphQL for Linear; the mock reads a JSON file for tests. Required reads: `fetchCandidateIssues` (now with optional `assigneeFilter`), `fetchIssuesByStates`, `fetchIssueStatesByIds`. Optional v1.4.10 writes: `claimIssue`, `releaseIssue` — orchestrator probes for presence. |
+| **Tracker adapter** | `trackers/{linear,mock}.ts` | Pluggable. Symphony §11 GraphQL for Linear; the mock reads a JSON file for tests. Required reads: `fetchCandidateIssues` (now with optional `assigneeFilter`), `fetchIssuesByStates`, `fetchIssueStatesByIds`. Optional v1.4.10 writes: `claimIssue`, `releaseIssue`, `resolveStateIdByName` — orchestrator + CLI probe for presence. |
 | **Workflow loader** | `workflow-loader.ts` | Reads `WORKFLOW.md` — YAML front matter + Markdown prompt template. Env var indirection (`api_key: $LINEAR_TOKEN`). Dynamic reload via `fs.watch` + 60-second backstop poll. |
 | **Workspace manager** | `workspaces.ts` | Symphony §9 — one directory per claimed issue under `workspace.root`. Sanitized key `[A-Za-z0-9._-]`, safety invariants (path containment, refusal to delete outside root). Pre/post hooks via `bash -lc` with timeout. Reuses the dir across runs of the same issue. |
 | **Agent runner** | `agent-runner.ts` | Spawns `claude` per turn inside the workspace (option A of Symphony §10). Sets `DISPATCH_WORKSTREAM` + `DISPATCH_SESSION_ID` so the existing hooks + MCP route events to the right workstream — no parallel telemetry path. Captures stderr tail, maps exit codes to Symphony §10.6 error categories (`turn_timeout`, `turn_failed`, `codex_not_found`, `spawn_error`). |
@@ -223,7 +223,7 @@ Five components, all in `daemon/src/`:
 5. On success, `dispatchOne` runs as in v1.4.6.
 6. When `reconcileRunning` later sees the issue in `terminal_states`, it fires `releaseHook({ issueId, identifier })` as best-effort fire-and-forget — failures log `orchestrator.release_failed` but never block reconciliation.
 
-The `tracker.claim_state` workflow knob (move the issue into a named Linear state on claim) is parsed but not yet acted on — the state-name → state-id resolver is a v1.4.10.x follow-up and currently logs a one-line warning at startup if set. Worker-failure-then-retry does NOT release: the next retry just re-claims (assignee mutation is idempotent for self).
+The `tracker.claim_state` workflow knob (move the issue into a named Linear state on claim) is now wired (v1.4.10.1): the daemon eagerly calls `tracker.resolveStateIdByName(name)` once at boot, closes the resolved id over the claim hook, and writes assigneeId + stateId in a single Linear `issueUpdate` mutation per claim. Resolution failure (typo, multi-team project where the name lives on a different team, network blip) degrades gracefully — assignee still flips, state stays put, and the daemon logs a one-line warning at startup. Worker-failure-then-retry does NOT release: the next retry just re-claims (assignee mutation is idempotent for self).
 
 **WORKFLOW.md schema (minimum viable):**
 
@@ -239,7 +239,7 @@ tracker:
   claim_on_dispatch: true   # daemon claims the ticket before spawning
   assign_to_self: true      # default true when claim_on_dispatch is on
   unassigned_only: true     # default true when claim_on_dispatch is on
-  claim_state: In Progress  # optional Linear state to move into; null/omitted = leave state alone (parsed-only in v1.4.10)
+  claim_state: In Progress  # optional Linear state to move into; null/omitted = leave state alone (resolved at boot in v1.4.10.1+)
 polling:
   interval_ms: 30000
 workspace:

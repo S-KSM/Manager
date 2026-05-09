@@ -145,6 +145,26 @@ const ADD_ISSUE_COMMENT_MUTATION = `
   }
 `;
 
+/**
+ * v1.4.10.1 — Resolve workflow states by walking through one issue in the
+ * configured project. Linear projects can span multiple teams, but in the
+ * dominant single-team case this query returns the full state list with one
+ * round-trip. Used by `resolveStateIdByName` so `WORKFLOW.md`'s
+ * `tracker.claim_state: "In Progress"` can be turned into a stateId.
+ */
+const PROJECT_TEAM_STATES_QUERY = `
+  query ProjectTeamStates($projectSlug: String!) {
+    issues(filter: { project: { slugId: { eq: $projectSlug } } }, first: 1) {
+      nodes {
+        team {
+          id
+          states { nodes { id name } }
+        }
+      }
+    }
+  }
+`;
+
 export interface LinearTrackerOptions {
   apiKey: string;
   projectSlug: string;
@@ -161,6 +181,13 @@ export class LinearTracker implements Tracker {
   private readonly fetchImpl: typeof fetch;
   /** v1.4.7 — cached `viewer.id` resolved on first claim/filter-by-self. */
   private cachedSelfUserId: string | null = null;
+  /**
+   * v1.4.10.1 — cached workflow-states map for this project's primary team,
+   * keyed by lowercased state name. Filled lazily by `resolveStateIdByName`.
+   * `null` after a successful resolve that returned an empty map means the
+   * project has no issues yet (we re-query on the next call).
+   */
+  private cachedStateIdByName: Map<string, string> | null = null;
 
   constructor(opts: LinearTrackerOptions) {
     if (!opts.apiKey) {
@@ -231,6 +258,43 @@ export class LinearTracker implements Tracker {
     }
     this.cachedSelfUserId = id;
     return id;
+  }
+
+  /**
+   * v1.4.10.1 — Map a Linear workflow-state name (case-insensitive) to its
+   * tracker-native id. Returns null if the name doesn't exist in the project's
+   * primary team. The CLI calls this once at boot when `tracker.claim_state`
+   * is configured, so the per-claim path stays one round-trip.
+   *
+   * Single-team projects: cache hit on call #2. Multi-team projects: this
+   * resolver only sees the team of the first issue we found, so a state name
+   * that exists in a *different* team in the same project will not resolve
+   * here — handle that by querying the issue's team explicitly when claim
+   * fires (deferred; today's Dispatch users are all single-team).
+   */
+  async resolveStateIdByName(name: string): Promise<string | null> {
+    const key = name.trim().toLowerCase();
+    if (this.cachedStateIdByName) {
+      return this.cachedStateIdByName.get(key) ?? null;
+    }
+    const data = await this.gql<{
+      issues: {
+        nodes: Array<{
+          team: { id: string; states: { nodes: Array<{ id: string; name: string }> } } | null;
+        }>;
+      };
+    }>(PROJECT_TEAM_STATES_QUERY, { projectSlug: this.projectSlug });
+    const team = data.issues?.nodes?.[0]?.team;
+    if (!team) {
+      // Empty project — no team known yet. Don't cache; next call retries.
+      return null;
+    }
+    const map = new Map<string, string>();
+    for (const s of team.states.nodes ?? []) {
+      if (s?.name && s.id) map.set(s.name.toLowerCase(), s.id);
+    }
+    this.cachedStateIdByName = map;
+    return map.get(key) ?? null;
   }
 
   /**

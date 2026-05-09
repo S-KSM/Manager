@@ -22,9 +22,17 @@ Not yet tagged. Daemon-only change; macOS app + wire schema unchanged. Behind a 
 - 320/320 daemon tests pass (+11 across `trackers/linear` / `orchestrator` / `workflow-loader`).
 - macOS app unchanged; no UI work.
 
+### v1.4.10.1 — claim_state resolver (2026-05-09, same day)
+
+- `LinearTracker.resolveStateIdByName(name)` queries `issues(filter: project, first: 1) { team { states } }` once and caches the lowercased name→id map for the project's primary team.
+- `MockTracker.resolveStateIdByName` returns name back as id (identity) for tests.
+- CLI eager-resolves `cfg.tracker.claim_state` once at boot; populates `claimConfig.claimStateId`. Resolution miss / resolver-not-implemented / thrown error all degrade to assignee-only claim with a one-line stderr warning.
+- `buildClaimHook` passes `stateId` to `tracker.claimIssue` only when `claimStateId !== null`. Single Linear `issueUpdate` mutation per claim writes assignee + state together.
+- +4 Linear tests; 324/324 daemon tests green.
+
 ### Known limits (deferred to v1.4.10.x / v1.4.11)
 
-- `claim_state` Linear state-name → state-id resolver. Until shipped, a workflow that sets `claim_state` logs a one-line warning at startup.
+- Multi-team project support: `resolveStateIdByName` only sees the primary team.
 - Multi-instance crash recovery: if Daemon A claims and dies, Daemon B's strict `unassigned` filter never re-discovers the ticket. Need either a stale-claim TTL or an `unassigned_or_self` filter variant.
 - Hot-swap of claim/release hooks on `WORKFLOW.md` reload.
 

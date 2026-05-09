@@ -343,6 +343,7 @@ async function runStart(opts: {
       enabled: false,
       assignToSelf: false,
       claimState: null,
+      claimStateId: null,
       unassignedOnly: false,
     };
 
@@ -366,13 +367,9 @@ async function runStart(opts: {
         enabled: cfg.tracker.claim_on_dispatch,
         assignToSelf: cfg.tracker.assign_to_self,
         claimState: cfg.tracker.claim_state,
+        claimStateId: null,
         unassignedOnly: cfg.tracker.unassigned_only,
       };
-      if (claimConfig.enabled && claimConfig.claimState) {
-        process.stderr.write(
-          `[dispatch] claim_state="${claimConfig.claimState}" parsed but not yet applied (v1.4.7 ships assignee-only claims; state move is a follow-up)\n`,
-        );
-      }
       workspaceMgr = new WorkspaceManager({
         ...(cfg.workspace.root ? { root: cfg.workspace.root } : {}),
         hooks: cfg.hooks,
@@ -404,10 +401,20 @@ async function runStart(opts: {
       agentRunner = new AgentRunner(workspaceMgr);
     }
 
-    // v1.4.7 — claim/release hooks built from workflow config. Without
+    // v1.4.10.1 — eager-resolve claim_state name → tracker-native stateId.
+    // Done once at boot so the per-claim path stays one round-trip; resolution
+    // failure degrades gracefully (assignee still flips, state stays put).
+    if (claimConfig.enabled && claimConfig.claimState) {
+      claimConfig.claimStateId = await resolveClaimStateId(tracker, claimConfig.claimState);
+      if (!claimConfig.claimStateId) {
+        process.stderr.write(
+          `[dispatch] claim_state="${claimConfig.claimState}" did not resolve to a tracker stateId — claims will flip assignee only\n`,
+        );
+      }
+    }
+    // v1.4.10 — claim/release hooks built from workflow config. Without
     // claim_on_dispatch the hooks are null and behavior is identical to
-    // v1.4.6. claim_state (state-name move) is parsed but not yet acted on
-    // — it requires a Linear workflowStates resolver (TODO follow-up).
+    // v1.4.9.
     const claimHook = buildClaimHook(tracker, claimConfig);
     const releaseHook = buildReleaseHook(tracker, claimConfig);
 
@@ -623,8 +630,15 @@ function shellQuote(s: string): string {
 interface ClaimConfig {
   enabled: boolean;
   assignToSelf: boolean;
-  /** Linear state name; not yet acted on in v1.4.7 (state-id resolver TODO). */
+  /** Tracker-native state name from `WORKFLOW.md`. Null = leave state alone. */
   claimState: string | null;
+  /**
+   * v1.4.10.1 — Eagerly-resolved tracker-native state id. Populated at boot
+   * via `resolveStateIdByName(claimState)`. Null when resolution failed or
+   * the tracker doesn't support resolution; in that case the claim hook
+   * flips assignee only.
+   */
+  claimStateId: string | null;
   unassignedOnly: boolean;
 }
 
@@ -646,10 +660,12 @@ function buildClaimHook(tracker: Tracker, cfg: ClaimConfig): ClaimHook | null {
       // assigneeId: undefined = let tracker pick self (Linear's default in
       // claimIssue); explicit null when assign_to_self is false would
       // *clear* the assignee — never useful for a claim, so don't pass.
-      const opts: { assigneeId?: string | null } = {};
+      const opts: { assigneeId?: string | null; stateId?: string | null } = {};
       if (cfg.assignToSelf) {
         // Leave undefined so LinearTracker.claimIssue resolves selfUserId.
       }
+      // v1.4.10.1 — only pass stateId if eager resolution succeeded at boot.
+      if (cfg.claimStateId) opts.stateId = cfg.claimStateId;
       await tracker.claimIssue!(issue.id, opts);
       return { ok: true };
     } catch (err) {
@@ -663,6 +679,23 @@ function buildClaimHook(tracker: Tracker, cfg: ClaimConfig): ClaimHook | null {
       };
     }
   };
+}
+
+/**
+ * v1.4.10.1 — Resolve a state name through the tracker, swallowing errors so
+ * a flaky resolver call at boot doesn't kill the whole daemon. Returns null
+ * on miss, on resolver-not-implemented, or on thrown error (logged).
+ */
+async function resolveClaimStateId(tracker: Tracker, name: string): Promise<string | null> {
+  if (typeof tracker.resolveStateIdByName !== 'function') return null;
+  try {
+    return await tracker.resolveStateIdByName(name);
+  } catch (err) {
+    process.stderr.write(
+      `[dispatch] claim_state resolve failed for "${name}": ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return null;
+  }
 }
 
 function buildReleaseHook(tracker: Tracker, cfg: ClaimConfig): ReleaseHook | null {
