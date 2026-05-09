@@ -682,6 +682,105 @@ describe('LinearTracker', () => {
     expect(new Date(cutoff).getTime()).toBeLessThanOrEqual(Date.now() - 60_000 + 100);
   });
 
+  // ---- v1.4.11 createIssue ----------------------------------------------
+
+  it('createIssue resolves primary team + label ids on first call, posts issueCreate', async () => {
+    const calls: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    const fetchImpl = vi.fn().mockImplementation(async (_url, init: RequestInit) => {
+      const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}');
+      calls.push(body);
+      if (body.query.includes('ProjectTeamLabels')) {
+        return jsonResp({
+          data: {
+            issues: {
+              nodes: [
+                {
+                  team: {
+                    id: 'team-1',
+                    labels: {
+                      nodes: [
+                        { id: 'l_bug', name: 'bug' },
+                        { id: 'l_p1', name: 'p1' },
+                      ],
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        });
+      }
+      // CreateIssue mutation
+      return jsonResp({
+        data: {
+          issueCreate: {
+            success: true,
+            issue: { id: 'iss_new', identifier: 'ENG-99', url: 'https://x/99' },
+          },
+        },
+      });
+    });
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const out = await tracker.createIssue({
+      title: 'New thing',
+      description: 'body',
+      labels: ['bug', 'unknown-label'],
+      priority: 2,
+    });
+    expect(out).toEqual({ id: 'iss_new', identifier: 'ENG-99', url: 'https://x/99' });
+    const create = calls.find((c) => c.query.includes('CreateIssue'));
+    expect(create?.variables.input).toMatchObject({
+      teamId: 'team-1',
+      title: 'New thing',
+      description: 'body',
+      priority: 2,
+      labelIds: ['l_bug'], // unknown-label was silently dropped
+    });
+  });
+
+  it('createIssue rejects empty title before any network call', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => {
+      throw new Error('should not fetch');
+    });
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await expect(tracker.createIssue({ title: '   ' })).rejects.toMatchObject({
+      code: 'linear_api_request',
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('createIssue throws linear_api_request when issueCreate.success is false', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async (_url, init: RequestInit) => {
+      const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}');
+      if (body.query.includes('ProjectTeamLabels')) {
+        return jsonResp({
+          data: {
+            issues: {
+              nodes: [{ team: { id: 'team-1', labels: { nodes: [] } } }],
+            },
+          },
+        });
+      }
+      return jsonResp({ data: { issueCreate: { success: false, issue: null } } });
+    });
+    const tracker = new LinearTracker({
+      apiKey: 'k',
+      projectSlug: 'proj',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await expect(tracker.createIssue({ title: 'No' })).rejects.toMatchObject({
+      code: 'linear_api_request',
+    });
+  });
+
   it('fetchStaleSelfClaimedIssues returns empty array when ttlMs <= 0 (no round-trip)', async () => {
     const fetchImpl = vi.fn().mockImplementation(async () => {
       throw new Error('should not be called');

@@ -107,6 +107,34 @@ export interface Tracker {
    * self-claimed active issues regardless of age.
    */
   fetchStaleSelfClaimedIssues?(activeStates: string[], ttlMs: number): Promise<Issue[]>;
+  /**
+   * v1.4.11 — File a brand-new ticket. Returned `id` is the tracker-native
+   * id (Linear UUID); `identifier` is the human-readable key (`ENG-123`);
+   * `url` points at the ticket in the tracker's web UI when available.
+   *
+   * Adapters that don't support ticket creation (mock can fake it; real
+   * read-only trackers should omit the method) leave the orchestrator to
+   * 501 the corresponding HTTP/MCP path.
+   */
+  createIssue?(input: CreateIssueInput): Promise<CreateIssueResult>;
+}
+
+/** v1.4.11 — Inputs for `createIssue`. Mirrors Linear's IssueCreateInput. */
+export interface CreateIssueInput {
+  title: string;
+  description?: string | null;
+  /** Lowercased label names. Adapter resolves to native ids. Unknown names ignored. */
+  labels?: string[];
+  /** Linear priority: 0 None, 1 Urgent, 2 High, 3 Medium, 4 Low. */
+  priority?: number | null;
+  /** Optional explicit team id; adapter falls back to the project's primary team. */
+  teamId?: string | null;
+}
+
+export interface CreateIssueResult {
+  id: string;
+  identifier: string;
+  url: string | null;
 }
 
 /**

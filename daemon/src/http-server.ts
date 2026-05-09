@@ -44,7 +44,7 @@ import type {
 } from './workstream.js';
 import type { WorkstreamLinksStore } from './workstream-links-store.js';
 import { LinearTracker } from './trackers/linear.js';
-import { TrackerError } from './trackers/index.js';
+import { type Tracker, TrackerError } from './trackers/index.js';
 
 interface BuildOptions {
   eventStore: EventStore;
@@ -59,6 +59,13 @@ interface BuildOptions {
   headlineStore?: HeadlineStore;
   /** Optional orchestrator (v1.4+). When absent, /orchestrator/state returns 404. */
   orchestrator?: Orchestrator;
+  /**
+   * v1.4.11 — Long-lived `Tracker` instance the daemon already constructed
+   * for the orchestrator. When present, `POST /trackers/issues` is served
+   * (route 501s if `tracker.createIssue` isn't implemented). Absent =
+   * endpoint 404s with `{error: "tracker not enabled"}`.
+   */
+  tracker?: Tracker;
   /**
    * Persisted user-editable LLM settings. When present:
    *   - `GET /settings` and `PATCH /settings` are served (404 otherwise),
@@ -80,8 +87,9 @@ interface BuildOptions {
    * production wiring uses `new LinearTracker({apiKey, projectSlug})`.
    */
   linearTrackerFactory?: (apiKey: string) => {
-    fetchIssueByIdentifier: (identifier: string) =>
-      Promise<{ id: string; identifier: string; url: string | null; state: string } | null>;
+    fetchIssueByIdentifier: (
+      identifier: string,
+    ) => Promise<{ id: string; identifier: string; url: string | null; state: string } | null>;
   };
   /**
    * v1.4.6 — callback that the `POST /admin/restart` endpoint invokes to
@@ -103,9 +111,7 @@ interface BuildOptions {
    */
   adminImpls?: {
     findPidOnPort?: (port: number) => Promise<number[]>;
-    killWithEscalation?: (
-      pid: number,
-    ) => Promise<{ escalated: boolean; dead: boolean }>;
+    killWithEscalation?: (pid: number) => Promise<{ escalated: boolean; dead: boolean }>;
     spawnDetached?: (cmd: string) => Promise<{ ok: boolean; pid?: number; error?: string }>;
   };
 }
@@ -175,16 +181,15 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     settings,
     workstreamLinks,
     tickerRestarter,
+    tracker,
   } = opts;
   const getProvider = opts.getProvider ?? defaultGetProvider;
   const linearTrackerFactory =
     opts.linearTrackerFactory ??
-    ((apiKey: string) =>
-      new LinearTracker({ apiKey, projectSlug: 'unused-for-link-flow' }));
+    ((apiKey: string) => new LinearTracker({ apiKey, projectSlug: 'unused-for-link-flow' }));
   const adminFindPidOnPort = opts.adminImpls?.findPidOnPort ?? defaultFindPidOnPort;
   const adminKillWithEscalation =
-    opts.adminImpls?.killWithEscalation ??
-    ((pid: number) => defaultKillWithEscalation(pid));
+    opts.adminImpls?.killWithEscalation ?? ((pid: number) => defaultKillWithEscalation(pid));
   const adminSpawnDetached =
     opts.adminImpls?.spawnDetached ?? ((cmd: string) => defaultSpawnDetached(cmd));
   const app = express();
@@ -413,6 +418,48 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     res.json(orchestrator.snapshot());
   });
 
+  // v1.4.11 — file a new tracker ticket. POST body: { title, description?,
+  // labels?, priority? }. 404 when no tracker is wired (observation-only
+  // setup); 501 when the wired tracker doesn't implement createIssue (e.g.
+  // a future read-only adapter); 400 on bad input; 502 on tracker failure.
+  app.post('/trackers/issues', async (req: Request, res: Response) => {
+    if (!tracker) {
+      res.status(404).json({ error: 'tracker not enabled' });
+      return;
+    }
+    if (typeof tracker.createIssue !== 'function') {
+      res.status(501).json({ error: 'tracker does not implement createIssue', kind: tracker.kind });
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const title = typeof body.title === 'string' ? body.title.trim() : '';
+    if (!title) {
+      res.status(400).json({ error: 'title is required' });
+      return;
+    }
+    const description = typeof body.description === 'string' ? body.description : null;
+    const labels = Array.isArray(body.labels)
+      ? body.labels.filter((x): x is string => typeof x === 'string' && x.length > 0)
+      : undefined;
+    const priority =
+      typeof body.priority === 'number' && Number.isInteger(body.priority) ? body.priority : null;
+    try {
+      const created = await tracker.createIssue({
+        title,
+        description,
+        ...(labels && labels.length > 0 ? { labels } : {}),
+        priority,
+      });
+      res.status(201).json(created);
+    } catch (err) {
+      if (err instanceof TrackerError) {
+        res.status(502).json({ error: err.message, code: err.code });
+        return;
+      }
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // ---- Workstreams ---------------------------------------------------------
 
   app.get('/workstreams', async (_req: Request, res: Response) => {
@@ -468,9 +515,7 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
         typeof body.status !== 'string' ||
         !WORKSTREAM_STATUSES.has(body.status as WorkstreamStatus)
       ) {
-        res
-          .status(400)
-          .json({ error: 'status must be one of backlog, active, paused, retired' });
+        res.status(400).json({ error: 'status must be one of backlog, active, paused, retired' });
         return;
       }
       const nextStatus = body.status as WorkstreamStatus;
@@ -807,42 +852,39 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
    * intervention. Body: `{ approved: bool }`. Returns the updated wire row.
    * Marks delivered in the same transaction (no separate ack needed).
    */
-  app.post(
-    '/workstreams/:id/interventions/:intId/decide',
-    async (req: Request, res: Response) => {
-      const id = String(req.params['id']);
-      const intId = String(req.params['intId']);
-      if (!registry.get(id)) {
-        res.status(404).json({ error: 'workstream not found' });
-        return;
-      }
-      const body = (req.body ?? {}) as { approved?: unknown };
-      if (typeof body.approved !== 'boolean') {
-        res.status(400).json({ error: 'approved must be a boolean' });
-        return;
-      }
-      const updated = interventionQueue.decideApproval(intId, body.approved);
-      if (!updated) {
-        res.status(404).json({
-          error: 'intervention not found, already delivered, or not approval_required',
-        });
-        return;
-      }
-      const event: ManagerEvent = {
-        ts: updated.delivered_at ?? new Date().toISOString(),
-        workstream_id: updated.workstream_id,
-        type: 'intervention_delivered',
-        id: `intd_${randomUUID().slice(0, 8)}`,
-        payload: {
-          intervention_id: updated.id,
-          kind: updated.kind,
-          approved: body.approved,
-        },
-      };
-      await eventStore.appendEvent(updated.workstream_id, event);
-      res.json(updated);
-    },
-  );
+  app.post('/workstreams/:id/interventions/:intId/decide', async (req: Request, res: Response) => {
+    const id = String(req.params['id']);
+    const intId = String(req.params['intId']);
+    if (!registry.get(id)) {
+      res.status(404).json({ error: 'workstream not found' });
+      return;
+    }
+    const body = (req.body ?? {}) as { approved?: unknown };
+    if (typeof body.approved !== 'boolean') {
+      res.status(400).json({ error: 'approved must be a boolean' });
+      return;
+    }
+    const updated = interventionQueue.decideApproval(intId, body.approved);
+    if (!updated) {
+      res.status(404).json({
+        error: 'intervention not found, already delivered, or not approval_required',
+      });
+      return;
+    }
+    const event: ManagerEvent = {
+      ts: updated.delivered_at ?? new Date().toISOString(),
+      workstream_id: updated.workstream_id,
+      type: 'intervention_delivered',
+      id: `intd_${randomUUID().slice(0, 8)}`,
+      payload: {
+        intervention_id: updated.id,
+        kind: updated.kind,
+        approved: body.approved,
+      },
+    };
+    await eventStore.appendEvent(updated.workstream_id, event);
+    res.json(updated);
+  });
 
   /**
    * v1.4.7 — record manager's answer to a `question_required` intervention.
@@ -854,72 +896,69 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
    * `intervention_delivered` event with the answer attached so WS streams
    * notify the macOS UI.
    */
-  app.post(
-    '/workstreams/:id/interventions/:intId/answer',
-    async (req: Request, res: Response) => {
-      const id = String(req.params['id']);
-      const intId = String(req.params['intId']);
-      if (!registry.get(id)) {
-        res.status(404).json({ error: 'workstream not found' });
+  app.post('/workstreams/:id/interventions/:intId/answer', async (req: Request, res: Response) => {
+    const id = String(req.params['id']);
+    const intId = String(req.params['intId']);
+    if (!registry.get(id)) {
+      res.status(404).json({ error: 'workstream not found' });
+      return;
+    }
+    const body = (req.body ?? {}) as { choice?: unknown; freetext?: unknown };
+    const choice =
+      typeof body.choice === 'string' && body.choice.length > 0 ? body.choice : undefined;
+    const freetext =
+      typeof body.freetext === 'string' && body.freetext.length > 0 ? body.freetext : undefined;
+    if (!choice && !freetext) {
+      res.status(400).json({ error: 'choice or freetext required' });
+      return;
+    }
+    const existing = interventionQueue.get(intId);
+    if (!existing || existing.workstream_id !== id) {
+      res.status(404).json({ error: 'intervention not found' });
+      return;
+    }
+    if (existing.kind !== 'question_required') {
+      res.status(400).json({ error: 'intervention is not a question_required' });
+      return;
+    }
+    if (existing.delivered_at !== null) {
+      res.status(409).json({ error: 'intervention already answered' });
+      return;
+    }
+    const request = existing.payload.question_request;
+    if (choice && Array.isArray(request?.options) && request.options.length > 0) {
+      if (!request.options.includes(choice)) {
+        res.status(400).json({ error: 'choice does not match a known option' });
         return;
       }
-      const body = (req.body ?? {}) as { choice?: unknown; freetext?: unknown };
-      const choice =
-        typeof body.choice === 'string' && body.choice.length > 0 ? body.choice : undefined;
-      const freetext =
-        typeof body.freetext === 'string' && body.freetext.length > 0 ? body.freetext : undefined;
-      if (!choice && !freetext) {
-        res.status(400).json({ error: 'choice or freetext required' });
-        return;
-      }
-      const existing = interventionQueue.get(intId);
-      if (!existing || existing.workstream_id !== id) {
-        res.status(404).json({ error: 'intervention not found' });
-        return;
-      }
-      if (existing.kind !== 'question_required') {
-        res.status(400).json({ error: 'intervention is not a question_required' });
-        return;
-      }
-      if (existing.delivered_at !== null) {
-        res.status(409).json({ error: 'intervention already answered' });
-        return;
-      }
-      const request = existing.payload.question_request;
-      if (choice && Array.isArray(request?.options) && request.options.length > 0) {
-        if (!request.options.includes(choice)) {
-          res.status(400).json({ error: 'choice does not match a known option' });
-          return;
-        }
-      }
-      if (freetext && request?.allow_freetext !== true) {
-        res.status(400).json({ error: 'freetext not allowed for this question' });
-        return;
-      }
-      const updated = interventionQueue.answerQuestion(intId, {
+    }
+    if (freetext && request?.allow_freetext !== true) {
+      res.status(400).json({ error: 'freetext not allowed for this question' });
+      return;
+    }
+    const updated = interventionQueue.answerQuestion(intId, {
+      ...(choice ? { choice } : {}),
+      ...(freetext ? { freetext } : {}),
+    });
+    if (!updated) {
+      res.status(404).json({ error: 'intervention not found or already answered' });
+      return;
+    }
+    const event: ManagerEvent = {
+      ts: updated.delivered_at ?? new Date().toISOString(),
+      workstream_id: updated.workstream_id,
+      type: 'intervention_delivered',
+      id: `intd_${randomUUID().slice(0, 8)}`,
+      payload: {
+        intervention_id: updated.id,
+        kind: updated.kind,
         ...(choice ? { choice } : {}),
         ...(freetext ? { freetext } : {}),
-      });
-      if (!updated) {
-        res.status(404).json({ error: 'intervention not found or already answered' });
-        return;
-      }
-      const event: ManagerEvent = {
-        ts: updated.delivered_at ?? new Date().toISOString(),
-        workstream_id: updated.workstream_id,
-        type: 'intervention_delivered',
-        id: `intd_${randomUUID().slice(0, 8)}`,
-        payload: {
-          intervention_id: updated.id,
-          kind: updated.kind,
-          ...(choice ? { choice } : {}),
-          ...(freetext ? { freetext } : {}),
-        },
-      };
-      await eventStore.appendEvent(updated.workstream_id, event);
-      res.json(updated);
-    },
-  );
+      },
+    };
+    await eventStore.appendEvent(updated.workstream_id, event);
+    res.json(updated);
+  });
 
   app.post('/workstreams/:id/interventions/ack', async (req: Request, res: Response) => {
     const id = String(req.params['id']);
@@ -1200,8 +1239,7 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
         // the requested model isn't pulled). Surface as 422 with the upstream
         // detail so the client can render a helpful message instead of an
         // opaque 500. Upstream 5xx / parse failures are bad-gateway-ish.
-        const upstreamIs4xx =
-          err.status !== null && err.status >= 400 && err.status < 500;
+        const upstreamIs4xx = err.status !== null && err.status >= 400 && err.status < 500;
         res
           .status(upstreamIs4xx ? 422 : 502)
           .json({ error: err.message, code: err.code, upstream_status: err.status });

@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises';
 import {
   type AssigneeFilter,
   type ClaimOptions,
+  type CreateIssueInput,
+  type CreateIssueResult,
   type Issue,
   type Tracker,
   TrackerError,
@@ -121,6 +123,29 @@ export class MockTracker implements Tracker {
       if (!set.has(i.state.toLowerCase())) return false;
       return (this.assignees.get(i.id) ?? null) === this.selfId;
     });
+  }
+
+  /**
+   * v1.4.11 — Mock create returns a synthetic identifier and (intentionally)
+   * does NOT mutate the source JSON file. Tests inspect `createdIssues()` to
+   * verify what was filed.
+   */
+  private readonly createdIssuesLog: CreateIssueInput[] = [];
+  async createIssue(input: CreateIssueInput): Promise<CreateIssueResult> {
+    if (!input.title || input.title.trim().length === 0) {
+      throw new TrackerError('mock_source_invalid', 'createIssue requires a non-empty title');
+    }
+    this.createdIssuesLog.push(input);
+    const seq = this.createdIssuesLog.length;
+    return {
+      id: `mock-${seq}`,
+      identifier: `MOCK-${seq}`,
+      url: null,
+    };
+  }
+  /** Test-only: inspect what `createIssue` was called with. */
+  createdIssues(): readonly CreateIssueInput[] {
+    return this.createdIssuesLog;
   }
 
   private async readAll(): Promise<Issue[]> {

@@ -96,6 +96,108 @@ describe('MCP server propose_skill tool', () => {
   });
 });
 
+describe('MCP server file_ticket tool (v1.4.11)', () => {
+  let dir: string;
+  let registry: WorkstreamRegistry;
+  let eventStore: EventStore;
+  let memoryStore: MemoryStore;
+  let skillProposalsStore: SkillProposalsStore;
+  let interventionQueue: InterventionQueue;
+  let client: Client;
+  let prevEnvWorkstream: string | undefined;
+  let fetchCalls: Array<{ url: string; body: unknown }>;
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'manager-file-ticket-'));
+    registry = new WorkstreamRegistry(join(dir, 'db.sqlite'));
+    eventStore = new EventStore(join(dir, 'events'));
+    memoryStore = new MemoryStore(join(dir, 'memory'));
+    skillProposalsStore = new SkillProposalsStore(join(dir, 'db.sqlite'));
+    interventionQueue = new InterventionQueue(join(dir, 'db.sqlite'));
+    prevEnvWorkstream = process.env['DISPATCH_WORKSTREAM'];
+    process.env['DISPATCH_WORKSTREAM'] = 'tk_ws';
+    fetchCalls = [];
+    const fakeFetch: typeof fetch = (async (url: string | URL, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(init.body as string) : null;
+      fetchCalls.push({ url: String(url), body });
+      return new Response(JSON.stringify({ id: 'i_1', identifier: 'NEW-1', url: 'https://x/1' }), {
+        status: 201,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    const server = buildMcpServer({
+      eventStore,
+      memoryStore,
+      registry,
+      skillProposalsStore,
+      interventionQueue,
+      daemonUrl: 'http://test-daemon:9999',
+      fetchImpl: fakeFetch,
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    client = new Client({ name: 'test-client', version: '0.0.1' }, { capabilities: {} });
+    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+  });
+
+  afterEach(async () => {
+    await client.close();
+    skillProposalsStore.close();
+    interventionQueue.close();
+    registry.close();
+    if (prevEnvWorkstream === undefined) {
+      delete process.env['DISPATCH_WORKSTREAM'];
+    } else {
+      process.env['DISPATCH_WORKSTREAM'] = prevEnvWorkstream;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('lists file_ticket in tools/list', async () => {
+    const result = await client.listTools();
+    expect(result.tools.map((t) => t.name)).toContain('file_ticket');
+  });
+
+  it('POSTs to /trackers/issues and mirrors a decision event on success', async () => {
+    const result = await client.callTool({
+      name: 'file_ticket',
+      arguments: { title: 'New thing', description: 'body', priority: 2 },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(fetchCalls).toHaveLength(1);
+    expect(fetchCalls[0]!.url).toBe('http://test-daemon:9999/trackers/issues');
+    expect(fetchCalls[0]!.body).toMatchObject({ title: 'New thing', priority: 2 });
+    const { events } = await eventStore.readEvents('tk_ws');
+    const decisions = events.filter((e) => e.type === 'decision');
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]!.payload?.['choice']).toBe('file_ticket');
+    expect(decisions[0]!.payload?.['rationale']).toContain('NEW-1');
+  });
+
+  it('returns an error when daemon is unreachable', async () => {
+    const downFetch: typeof fetch = (async () => {
+      throw new TypeError('connection refused');
+    }) as unknown as typeof fetch;
+    const downServer = buildMcpServer({
+      eventStore,
+      memoryStore,
+      registry,
+      skillProposalsStore,
+      interventionQueue,
+      daemonUrl: 'http://down:9999',
+      fetchImpl: downFetch,
+    });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const c2 = new Client({ name: 'test', version: '0.0.1' }, { capabilities: {} });
+    await Promise.all([c2.connect(ct), downServer.connect(st)]);
+    try {
+      const r = await c2.callTool({ name: 'file_ticket', arguments: { title: 'X' } });
+      expect(r.isError).toBe(true);
+    } finally {
+      await c2.close();
+    }
+  });
+});
+
 describe('MCP server ask_user tool', () => {
   let dir: string;
   let registry: WorkstreamRegistry;

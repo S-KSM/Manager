@@ -127,6 +127,20 @@ Smallest escalation toward "Dispatch manages Linear" (option 1 of 3 — daemon w
 - [x] **Tests** — `daemon/test/trackers/linear.test.ts` +7 cases (viewer cache, viewer-null error, claim success, claim collision, release clears assignee, unassigned filter clause, self filter clause). `daemon/test/orchestrator.test.ts` +3 cases (claim collision skips dispatch, claim ok → release on terminal, claim throw → `claim_failed` log). `workflow-loader.test.ts` +1 case (default-off, opt-in flips assign_to_self + unassigned_only). 320 / 320 daemon tests green.
 - [x] **Docs** — `docs/ARCHITECTURE.md` Orchestrator section gains "Tracker write-back (v1.4.10)" subsection. `RELEASE_NOTES.md` v1.4.10 entry. `CLAUDE.md` status block bumped.
 
+### v1.4.11 — Tracker.createIssue + file_ticket MCP tool ✅
+
+Option #2 of the original three-tier escalation. Daemon now files new tickets, not just claims existing ones.
+
+- [x] `Tracker.createIssue?(input)` interface method added; `CreateIssueInput` + `CreateIssueResult` types.
+- [x] `LinearTracker.createIssue` via `issueCreate` mutation. Caches primary team id + label name→id map on first call. Unknown label names silently dropped. Empty title rejected before network call.
+- [x] `MockTracker.createIssue` returns synthetic `MOCK-N` identifier + exposes `createdIssues()` for test inspection.
+- [x] `POST /trackers/issues` HTTP endpoint with full status-code matrix (404 / 501 / 400 / 502 / 201).
+- [x] `dispatch__file_ticket` MCP tool POSTs to daemon over `DISPATCH_PORT`, mirrors a `decision` event on success so the Radar surfaces the action.
+- [x] Tracker late-bound into `buildHttpServer` via closure-getter (same pattern as orchestrator).
+- [x] +10 tests across `linear` / `http-server` / `mcp-server`. 345/345 daemon tests green.
+
+Triage-agent **workflow** (a `WORKFLOW.md` template that biases the agent toward grooming + filing) and rate-limiting on `file_ticket` are deferred to v1.4.11.x — the plumbing this ships unblocks both.
+
 ### v1.4.10.5 — stale-claim TTL sweeper ✅
 
 - [x] `Tracker.fetchStaleSelfClaimedIssues?(activeStates, ttlMs)` added as optional interface method.

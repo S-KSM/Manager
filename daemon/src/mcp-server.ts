@@ -45,6 +45,14 @@ interface BuildOptions {
   askUserPollMs?: number;
   askUserDefaultTimeoutSec?: number;
   askUserMaxTimeoutSec?: number;
+  /**
+   * v1.4.11 — Base URL the `file_ticket` tool POSTs to. Production resolves
+   * from `DISPATCH_PORT` env var (set by the hooks installer + the `attach`
+   * command). Tests pass a stub origin pointing at a vitest mock server.
+   */
+  daemonUrl?: string;
+  /** Test seam — override fetch for `file_ticket`. */
+  fetchImpl?: typeof fetch;
 }
 
 /**
@@ -190,19 +198,40 @@ const TOOLS: Tool[] = [
       },
     },
   },
+  {
+    name: 'file_ticket',
+    description:
+      "File a brand-new tracker ticket (e.g. Linear) for work the agent surfaced but isn't doing inline. Routes through the long-running daemon's HTTP API so the tracker adapter (and its credentials) stay in one place. Returns the new ticket's identifier + url; surfaces the daemon's 4xx/5xx as an error result. Use sparingly — every call materializes a ticket.",
+    inputSchema: {
+      type: 'object',
+      required: ['title'],
+      properties: {
+        title: { type: 'string', description: 'Ticket title — keep it short and actionable.' },
+        description: {
+          type: 'string',
+          description: 'Markdown body. Include any context the next responder needs.',
+        },
+        labels: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Lowercased label names. Unknown names are silently dropped.',
+        },
+        priority: {
+          type: 'number',
+          description: 'Linear-style priority: 0 None, 1 Urgent, 2 High, 3 Medium, 4 Low.',
+        },
+      },
+    },
+  },
 ];
 
 export function buildMcpServer(opts: BuildOptions): Server {
-  const {
-    eventStore,
-    memoryStore,
-    registry,
-    skillProposalsStore,
-    interventionQueue,
-  } = opts;
+  const { eventStore, memoryStore, registry, skillProposalsStore, interventionQueue } = opts;
   const askUserPollMs = opts.askUserPollMs ?? 1000;
   const askUserDefaultTimeoutSec = opts.askUserDefaultTimeoutSec ?? 300;
   const askUserMaxTimeoutSec = opts.askUserMaxTimeoutSec ?? 3600;
+  const daemonUrl = opts.daemonUrl ?? `http://127.0.0.1:${process.env['DISPATCH_PORT'] ?? '8787'}`;
+  const fetchImpl = opts.fetchImpl ?? fetch;
   const server = new Server(
     {
       name: 'dispatch-daemon',
@@ -293,9 +322,7 @@ export function buildMcpServer(opts: BuildOptions): Server {
         if (!question) return errorResult('question is required');
         const optionsRaw = args['options'];
         const options: string[] = Array.isArray(optionsRaw)
-          ? optionsRaw
-              .filter((x): x is string => typeof x === 'string' && x.length > 0)
-              .slice(0, 8)
+          ? optionsRaw.filter((x): x is string => typeof x === 'string' && x.length > 0).slice(0, 8)
           : [];
         const allowFreetext = args['allow_freetext'] === true;
         if (options.length === 0 && !allowFreetext) {
@@ -309,7 +336,10 @@ export function buildMcpServer(opts: BuildOptions): Server {
             : undefined;
         const requestedTimeout =
           typeof args['timeout_seconds'] === 'number' && Number.isFinite(args['timeout_seconds'])
-            ? Math.max(5, Math.min(askUserMaxTimeoutSec, Math.floor(args['timeout_seconds'] as number)))
+            ? Math.max(
+                5,
+                Math.min(askUserMaxTimeoutSec, Math.floor(args['timeout_seconds'] as number)),
+              )
             : askUserDefaultTimeoutSec;
 
         const intervention = interventionQueue.enqueue(workstreamId, 'question_required', {
@@ -389,6 +419,50 @@ export function buildMcpServer(opts: BuildOptions): Server {
         if (sourceDecisionId) eventPayload['source_decision_id'] = sourceDecisionId;
         await append('skill_proposed', eventPayload);
         return textResult(`skill proposed: ${proposal.id}`);
+      }
+      case 'file_ticket': {
+        const title = String(args['title'] ?? '').trim();
+        if (!title) return errorResult('title is required');
+        const body: Record<string, unknown> = { title };
+        if (typeof args['description'] === 'string') body.description = args['description'];
+        if (Array.isArray(args['labels'])) {
+          body.labels = (args['labels'] as unknown[]).filter(
+            (x): x is string => typeof x === 'string' && x.length > 0,
+          );
+        }
+        if (typeof args['priority'] === 'number') body.priority = args['priority'];
+        let resp: Response;
+        try {
+          resp = await fetchImpl(`${daemonUrl}/trackers/issues`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+        } catch (err) {
+          return errorResult(
+            `daemon unreachable at ${daemonUrl}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        const text = await resp.text();
+        if (!resp.ok) {
+          return errorResult(`daemon HTTP ${resp.status}: ${text.slice(0, 200)}`);
+        }
+        // Mirror to the event log so the Radar shows the agent filed a ticket.
+        let parsed: Record<string, unknown> = {};
+        try {
+          parsed = JSON.parse(text) as Record<string, unknown>;
+        } catch {
+          // body isn't JSON — surface raw text and skip event mirror.
+        }
+        if (typeof parsed['identifier'] === 'string') {
+          await append('decision', {
+            considered: ['inline_fix', 'file_ticket'],
+            choice: 'file_ticket',
+            rationale: `filed ${parsed['identifier']}: ${title.slice(0, 100)}`,
+            confidence: 0.9,
+          });
+        }
+        return textResult(text);
       }
       default:
         return errorResult(`unknown tool: ${name}`);

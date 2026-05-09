@@ -22,6 +22,18 @@ Not yet tagged. Daemon-only change; macOS app + wire schema unchanged. Behind a 
 - 320/320 daemon tests pass (+11 across `trackers/linear` / `orchestrator` / `workflow-loader`).
 - macOS app unchanged; no UI work.
 
+### v1.4.11 — `Tracker.createIssue` + `file_ticket` MCP tool (2026-05-09)
+
+Option #2 of the original three-tier "Dispatch manages Linear" plan: daemon now files **new** tickets, not just operates on existing ones. Same opt-in posture as v1.4.10.x — without a wired tracker, the new HTTP endpoint 404s and the MCP tool errors. Triage-agent workflow remains a v1.4.11.x follow-up; this ships the plumbing the triage agent will use.
+
+- **`Tracker.createIssue?(input): Promise<{id, identifier, url}>`** added as optional interface method. Input: `{title, description?, labels?, priority?, teamId?}`.
+- **`LinearTracker.createIssue`** runs Linear's `issueCreate` mutation. Resolves the project's primary team + label-name → id map on first call (cached); unknown label names silently dropped. Validates non-empty title before any network call.
+- **`MockTracker.createIssue`** returns a synthetic `mock-N` / `MOCK-N` identifier and exposes `createdIssues()` for test inspection.
+- **`POST /trackers/issues`** — body `{title, description?, labels?, priority?}`. 404 when no tracker is wired (observation-only setup); 501 when tracker doesn't implement; 400 missing title; 502 on `TrackerError`; 201 + `{id, identifier, url}` on success.
+- **`dispatch__file_ticket` MCP tool** — POSTs to the daemon over the URL resolved from `DISPATCH_PORT`. On success, mirrors a `decision` event with `choice='file_ticket'` so the Radar shows the agent filed a ticket without a separate event type.
+- Tracker late-bound into `buildHttpServer` via the same closure-getter pattern as orchestrator (so the http-server module stays free of construction details).
+- +10 tests across `linear` (3) / `http-server` (4) / `mcp-server` (3). 345/345 daemon tests green.
+
 ### v1.4.10.5 — stale-claim TTL sweeper for multi-instance crash recovery (2026-05-09, same day)
 
 When two daemons share a Linear API key, the v1.4.10.2 `unassigned_or_self` filter saw each other's claims as "self" and raced. v1.4.10.5 lets you opt into a periodic sweep that releases tickets owned by an apparently-dead instance.

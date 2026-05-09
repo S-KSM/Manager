@@ -257,9 +257,11 @@ async function runStart(opts: {
     }
     return restarted;
   };
-  // Orchestrator is built below if --mock-tracker was passed; we late-bind it
-  // into the HTTP server via a closure-captured holder so the route can find it.
+  // Orchestrator + tracker are built below if --workflow / --mock-tracker was
+  // passed; late-bind both into the HTTP server via closure-captured holders
+  // so the routes find them after construction.
   const orchestratorHolder: { current: Orchestrator | null } = { current: null };
+  const trackerHolder: { current: Tracker | null } = { current: null };
   const http = buildHttpServer({
     eventStore,
     memoryStore,
@@ -275,6 +277,9 @@ async function runStart(opts: {
     tickerRestarter: restartTickers,
     get orchestrator() {
       return orchestratorHolder.current ?? undefined;
+    },
+    get tracker() {
+      return trackerHolder.current ?? undefined;
     },
   } as Parameters<typeof buildHttpServer>[0]);
   const port = await http.listen(cfg.httpPort);
@@ -463,6 +468,9 @@ async function runStart(opts: {
     });
     await orchestrator.start();
     orchestratorHolder.current = orchestrator;
+    // v1.4.11 — also expose the tracker so HTTP /trackers/issues + the
+    // file_ticket MCP tool can call createIssue against it.
+    trackerHolder.current = tracker;
     process.stderr.write(
       `[dispatch] orchestrator started (workflow=${opts.workflow ?? 'mock'}, dry-run=${dryRun})\n`,
     );

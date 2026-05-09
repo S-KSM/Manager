@@ -2,6 +2,8 @@ import {
   type AssigneeFilter,
   type BlockerRef,
   type ClaimOptions,
+  type CreateIssueInput,
+  type CreateIssueResult,
   type Issue,
   type Tracker,
   TrackerError,
@@ -191,6 +193,39 @@ const TEAM_STATES_QUERY = `
  * a previous-instance daemon that crashed mid-claim. `$updatedBefore` is an
  * ISO-8601 string; `$selfId` resolved from `viewer.id`.
  */
+/**
+ * v1.4.11 — File a new ticket. We pass `teamId` because Linear requires it on
+ * issueCreate; the daemon either reads the team from the project (cached) or
+ * the caller supplies it. Returned identifier is the human-readable key.
+ */
+const CREATE_ISSUE_MUTATION = `
+  mutation CreateIssue($input: IssueCreateInput!) {
+    issueCreate(input: $input) {
+      success
+      issue { id identifier url }
+    }
+  }
+`;
+
+/**
+ * v1.4.11 — Lookup the project's team labels by name so callers can pass
+ * `labels: ['bug', 'p1']` without knowing Linear UUIDs. Cached after first
+ * call. Tied to the project's primary team — multi-team label resolution is
+ * a v1.4.11.x follow-up if it's actually needed.
+ */
+const PROJECT_TEAM_LABELS_QUERY = `
+  query ProjectTeamLabels($projectSlug: String!) {
+    issues(filter: { project: { slugId: { eq: $projectSlug } } }, first: 1) {
+      nodes {
+        team {
+          id
+          labels(first: 250) { nodes { id name } }
+        }
+      }
+    }
+  }
+`;
+
 const STALE_SELF_CLAIMED_QUERY = `
   query StaleSelfClaimedIssues(
     $projectSlug: String!
@@ -245,6 +280,13 @@ export class LinearTracker implements Tracker {
    * Linear `team.id`; inner is lowercased state name → id.
    */
   private cachedStateIdByNameByTeam: Map<string, Map<string, string>> = new Map();
+  /**
+   * v1.4.11 — Cached primary team id + label-name → id map for the project,
+   * filled lazily by `createIssue` so the per-call path is one round-trip
+   * after the first warm cache.
+   */
+  private cachedPrimaryTeamId: string | null = null;
+  private cachedLabelIdByName: Map<string, string> | null = null;
 
   constructor(opts: LinearTrackerOptions) {
     if (!opts.apiKey) {
@@ -435,6 +477,77 @@ export class LinearTracker implements Tracker {
    * project has more than 100 stale self-claims we'd rather log + revisit
    * the TTL than pretend we cleaned them all up.
    */
+  /**
+   * v1.4.11 — File a new ticket via Linear's `issueCreate`. Resolves the
+   * project's primary team + label ids on first call (cached). Unknown label
+   * names are silently dropped — callers who need strict resolution should
+   * read `team.labels` themselves first.
+   */
+  async createIssue(input: CreateIssueInput): Promise<CreateIssueResult> {
+    if (!input.title || input.title.trim().length === 0) {
+      throw new TrackerError('linear_api_request', 'createIssue requires a non-empty title');
+    }
+    let teamId = input.teamId ?? this.cachedPrimaryTeamId;
+    let labelMap = this.cachedLabelIdByName;
+    if (!teamId || (input.labels && input.labels.length > 0 && !labelMap)) {
+      const data = await this.gql<{
+        issues: {
+          nodes: Array<{
+            team: {
+              id: string;
+              labels: { nodes: Array<{ id: string; name: string }> };
+            } | null;
+          }>;
+        };
+      }>(PROJECT_TEAM_LABELS_QUERY, { projectSlug: this.projectSlug });
+      const team = data.issues?.nodes?.[0]?.team;
+      if (!team) {
+        throw new TrackerError(
+          'linear_unknown_payload',
+          `cannot resolve primary team for project ${this.projectSlug} — project has no issues yet`,
+        );
+      }
+      teamId = team.id;
+      this.cachedPrimaryTeamId = team.id;
+      const map = new Map<string, string>();
+      for (const l of team.labels.nodes ?? []) {
+        if (l?.name && l.id) map.set(l.name.toLowerCase(), l.id);
+      }
+      this.cachedLabelIdByName = map;
+      labelMap = map;
+    }
+    const inputObj: Record<string, unknown> = {
+      teamId,
+      title: input.title,
+    };
+    if (input.description) inputObj.description = input.description;
+    if (typeof input.priority === 'number' && Number.isInteger(input.priority)) {
+      inputObj.priority = input.priority;
+    }
+    if (input.labels && input.labels.length > 0 && labelMap) {
+      const ids: string[] = [];
+      for (const name of input.labels) {
+        const id = labelMap.get(name.trim().toLowerCase());
+        if (id) ids.push(id);
+      }
+      if (ids.length > 0) inputObj.labelIds = ids;
+    }
+    const data = await this.gql<{
+      issueCreate: {
+        success: boolean;
+        issue: { id: string; identifier: string; url: string | null } | null;
+      };
+    }>(CREATE_ISSUE_MUTATION, { input: inputObj });
+    if (!data.issueCreate?.success || !data.issueCreate.issue) {
+      throw new TrackerError(
+        'linear_api_request',
+        `Linear issueCreate did not succeed for title="${input.title.slice(0, 60)}"`,
+      );
+    }
+    const created = data.issueCreate.issue;
+    return { id: created.id, identifier: created.identifier, url: created.url };
+  }
+
   async fetchStaleSelfClaimedIssues(activeStates: string[], ttlMs: number): Promise<Issue[]> {
     if (ttlMs <= 0) return [];
     const selfId = await this.selfUserId();

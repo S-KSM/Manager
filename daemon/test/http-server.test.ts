@@ -277,13 +277,15 @@ describe('HTTP server', () => {
 
   it('POST /workstreams/:id/interventions/:intId/answer records choice + emits intervention_delivered', async () => {
     await request(handle.app).post('/workstreams').send({ id: 'q', title: 'Q' });
-    const enq = await request(handle.app).post('/interventions').send({
-      workstream_id: 'q',
-      kind: 'question_required',
-      payload: {
-        question_request: { question: 'Use cache?', options: ['yes', 'no'] },
-      },
-    });
+    const enq = await request(handle.app)
+      .post('/interventions')
+      .send({
+        workstream_id: 'q',
+        kind: 'question_required',
+        payload: {
+          question_request: { question: 'Use cache?', options: ['yes', 'no'] },
+        },
+      });
     expect(enq.status).toBe(201);
     const intId = enq.body.id as string;
 
@@ -309,11 +311,13 @@ describe('HTTP server', () => {
 
   it('POST .../answer rejects choice that does not match options', async () => {
     await request(handle.app).post('/workstreams').send({ id: 'q2', title: 'Q2' });
-    const enq = await request(handle.app).post('/interventions').send({
-      workstream_id: 'q2',
-      kind: 'question_required',
-      payload: { question_request: { question: 'Pick', options: ['a', 'b'] } },
-    });
+    const enq = await request(handle.app)
+      .post('/interventions')
+      .send({
+        workstream_id: 'q2',
+        kind: 'question_required',
+        payload: { question_request: { question: 'Pick', options: ['a', 'b'] } },
+      });
     const r = await request(handle.app)
       .post(`/workstreams/q2/interventions/${enq.body.id}/answer`)
       .send({ choice: 'c' });
@@ -322,11 +326,13 @@ describe('HTTP server', () => {
 
   it('POST .../answer rejects freetext when allow_freetext is unset', async () => {
     await request(handle.app).post('/workstreams').send({ id: 'q3', title: 'Q3' });
-    const enq = await request(handle.app).post('/interventions').send({
-      workstream_id: 'q3',
-      kind: 'question_required',
-      payload: { question_request: { question: 'Pick', options: ['a'] } },
-    });
+    const enq = await request(handle.app)
+      .post('/interventions')
+      .send({
+        workstream_id: 'q3',
+        kind: 'question_required',
+        payload: { question_request: { question: 'Pick', options: ['a'] } },
+      });
     const r = await request(handle.app)
       .post(`/workstreams/q3/interventions/${enq.body.id}/answer`)
       .send({ freetext: 'something else' });
@@ -335,13 +341,15 @@ describe('HTTP server', () => {
 
   it('POST .../answer accepts freetext when allow_freetext was set', async () => {
     await request(handle.app).post('/workstreams').send({ id: 'q4', title: 'Q4' });
-    const enq = await request(handle.app).post('/interventions').send({
-      workstream_id: 'q4',
-      kind: 'question_required',
-      payload: {
-        question_request: { question: 'Why?', allow_freetext: true },
-      },
-    });
+    const enq = await request(handle.app)
+      .post('/interventions')
+      .send({
+        workstream_id: 'q4',
+        kind: 'question_required',
+        payload: {
+          question_request: { question: 'Why?', allow_freetext: true },
+        },
+      });
     const r = await request(handle.app)
       .post(`/workstreams/q4/interventions/${enq.body.id}/answer`)
       .send({ freetext: 'because' });
@@ -821,10 +829,7 @@ describe('HTTP server', () => {
       getProvider: (name) => ({
         name,
         generate: async () => {
-          throw new LLMRequestError(
-            "Local LLM HTTP 404: model 'qwen3:8b' not found",
-            404,
-          );
+          throw new LLMRequestError("Local LLM HTTP 404: model 'qwen3:8b' not found", 404);
         },
       }),
     });
@@ -999,9 +1004,7 @@ describe('HTTP server', () => {
     const priorL = process.env['DISPATCH_LINEAR_API_KEY'];
     delete process.env['DISPATCH_LINEAR_API_KEY'];
     try {
-      const r = await request(handle.app)
-        .patch('/settings')
-        .send({ linearApiKey: 'lin_api_xxx' });
+      const r = await request(handle.app).patch('/settings').send({ linearApiKey: 'lin_api_xxx' });
       expect(r.status).toBe(200);
       expect(r.body.linearApiKeyConfigured).toBe(true);
       expect(r.body.linearApiKey).toBeUndefined();
@@ -1043,9 +1046,7 @@ describe('HTTP server', () => {
   });
 
   it('PATCH /settings rejects bad provider with 400', async () => {
-    const r = await request(handle.app)
-      .patch('/settings')
-      .send({ headlineProvider: 'gpt-99' });
+    const r = await request(handle.app).patch('/settings').send({ headlineProvider: 'gpt-99' });
     expect(r.status).toBe(400);
     expect(r.body.error).toMatch(/headlineProvider/);
   });
@@ -1132,6 +1133,129 @@ describe('HTTP server', () => {
       .put('/workstreams/no-such/link')
       .send({ tracker_kind: 'linear', issue_identifier: 'ENG-1' });
     expect(r.status).toBe(404);
+  });
+
+  // ---- v1.4.11 /trackers/issues ------------------------------------------
+
+  it('POST /trackers/issues 404 when no tracker is wired', async () => {
+    const r = await request(handle.app).post('/trackers/issues').send({ title: 'New thing' });
+    expect(r.status).toBe(404);
+    expect(r.body.error).toBe('tracker not enabled');
+  });
+
+  it('POST /trackers/issues forwards to tracker.createIssue and returns 201', async () => {
+    const created: Array<{ title: string }> = [];
+    const tracker = {
+      kind: 'mock-create',
+      async fetchCandidateIssues() {
+        return [];
+      },
+      async fetchIssuesByStates() {
+        return [];
+      },
+      async fetchIssueStatesByIds() {
+        return new Map<string, string>();
+      },
+      async createIssue(input: { title: string; description?: string | null }) {
+        created.push({ title: input.title });
+        return { id: 'i_1', identifier: 'NEW-1', url: 'https://x/1' };
+      },
+    };
+    const h2 = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory2')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      tracker,
+    } as Parameters<typeof buildHttpServer>[0]);
+    try {
+      const r = await request(h2.app)
+        .post('/trackers/issues')
+        .send({ title: 'New thing', description: 'body', priority: 2 });
+      expect(r.status).toBe(201);
+      expect(r.body).toEqual({ id: 'i_1', identifier: 'NEW-1', url: 'https://x/1' });
+      expect(created).toEqual([{ title: 'New thing' }]);
+    } finally {
+      await h2.close();
+    }
+  });
+
+  it('POST /trackers/issues 400 on missing title', async () => {
+    const tracker = {
+      kind: 'mock',
+      async fetchCandidateIssues() {
+        return [];
+      },
+      async fetchIssuesByStates() {
+        return [];
+      },
+      async fetchIssueStatesByIds() {
+        return new Map<string, string>();
+      },
+      async createIssue() {
+        return { id: 'x', identifier: 'X-1', url: null };
+      },
+    };
+    const h2 = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory3')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      tracker,
+    } as Parameters<typeof buildHttpServer>[0]);
+    try {
+      const r = await request(h2.app).post('/trackers/issues').send({});
+      expect(r.status).toBe(400);
+    } finally {
+      await h2.close();
+    }
+  });
+
+  it('POST /trackers/issues 501 when wired tracker does not implement createIssue', async () => {
+    const tracker = {
+      kind: 'read-only',
+      async fetchCandidateIssues() {
+        return [];
+      },
+      async fetchIssuesByStates() {
+        return [];
+      },
+      async fetchIssueStatesByIds() {
+        return new Map<string, string>();
+      },
+    };
+    const h2 = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory4')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      tracker,
+    } as Parameters<typeof buildHttpServer>[0]);
+    try {
+      const r = await request(h2.app).post('/trackers/issues').send({ title: 'Hi' });
+      expect(r.status).toBe(501);
+      expect(r.body.kind).toBe('read-only');
+    } finally {
+      await h2.close();
+    }
   });
 
   it('PATCH /settings with empty anthropicApiKey clears the stored value', async () => {
@@ -1261,9 +1385,7 @@ describe('HTTP server admin endpoints (v1.4.6 Diagnostics)', () => {
   });
 
   it('POST /admin/llm/kill resolves a custom URL from settings', async () => {
-    await request(handle.app)
-      .patch('/settings')
-      .send({ ollamaUrl: 'http://localhost:11434/v1' });
+    await request(handle.app).patch('/settings').send({ ollamaUrl: 'http://localhost:11434/v1' });
     pidsToReturn = [];
     await request(handle.app).post('/admin/llm/kill');
     expect(pidLookups).toEqual([11434]);
@@ -1303,9 +1425,7 @@ describe('HTTP server admin endpoints (v1.4.6 Diagnostics)', () => {
   });
 
   it('POST /admin/llm/restart 500s when spawn fails', async () => {
-    await request(handle.app)
-      .patch('/settings')
-      .send({ localLLMStartCommand: 'bogus-bin' });
+    await request(handle.app).patch('/settings').send({ localLLMStartCommand: 'bogus-bin' });
     spawnNext = { ok: false, error: 'ENOENT' };
 
     const r = await request(handle.app).post('/admin/llm/restart');
