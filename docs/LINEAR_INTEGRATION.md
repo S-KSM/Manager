@@ -11,10 +11,12 @@ Last touched: 2026-05-09. Authoritative on direction; specific line numbers / fi
 Dispatch already does **read-side** Linear integration (orchestrator polls candidates, `LinearCommentSyncer` mirrors decisions out + status back). The "manage Linear" thread layers **write-side** integration on top in three escalation tiers, **all shipped:**
 
 1. **Daemon claims existing tickets on dispatch** — DONE in v1.4.10.x. Daemon picks an unassigned (or self-claimed) Linear issue, optionally moves it into a configured state, spawns the agent, releases on terminal. Multi-team, multi-instance recovery, and hot-swap workflow toggles all wired.
-2. **Daemon files new tickets** — DONE in v1.4.11. `Tracker.createIssue` + `dispatch__file_ticket` MCP tool. Plumbing complete; a triage-agent prompt template is the only remaining piece (small follow-up).
+2. **Daemon files new tickets** — DONE in v1.4.11 (+ rate limit v1.4.16). `Tracker.createIssue` + `dispatch__file_ticket` MCP tool. Triage agent template (`examples/WORKFLOW.triage.md`) is the canonical use-case.
 3. **Linear → Radar full mirror** — DONE in v1.4.12. Every Linear issue surfaces in the Radar as a `status='backlog'` workstream the moment it appears in the tracker; human drags to Active to promote. macOS app needs zero changes.
 
-Tier 1 is the smallest blast radius; each tier opens the next. Future v1.4.13 (`TrackerWriter` abstraction for Jira / GH swap) is **deliberately deferred** — see "When to revisit v1.4.13" below.
+**v1.4.17 closes the autonomous loop.** Build agent template (`examples/WORKFLOW.build.md`) — claims a Todo ticket, implements in a per-ticket workspace, pushes via `dispatch__open_pr`, transitions Linear via `dispatch__transition_ticket`. The full chain runs without a human in the loop until the PR review.
+
+Tier 1 is the smallest blast radius; each tier opens the next. Future `TrackerWriter` abstraction for Jira / GH swap is **deliberately deferred** — see "When to revisit" below.
 
 ---
 
@@ -75,6 +77,10 @@ These are settled. Don't relitigate without a reason.
 ### v1.4.11 — `Tracker.createIssue` + `file_ticket` MCP tool (`c1cfc3c`)
 
 `Tracker.createIssue?(input): Promise<{id, identifier, url}>` interface method (optional). `LinearTracker` runs `issueCreate` mutation against the project's primary team (resolved + cached on first call), with label-name → id resolution (cached). Mock returns synthetic `MOCK-N` identifier and exposes `createdIssues()` for test inspection. New `POST /trackers/issues` HTTP endpoint (404 / 501 / 400 / 502 / 201). New MCP tool `dispatch__file_ticket(title, description?, labels?, priority?)` POSTs to the daemon over `DISPATCH_PORT` and mirrors a `decision` event with `choice='file_ticket'` so the Radar surfaces the action. Tracker late-bound into `buildHttpServer` via the same closure-getter pattern as orchestrator.
+
+### v1.4.17 — Autonomous loop: transition_ticket + open_pr + WORKFLOW.build.md
+
+`Tracker.applyTransition?(issueId, stateName, opts?)` interface method composes `resolveStateIdByName` + `setIssueState`. Linear impl uses per-team resolution from v1.4.10.4. New `POST /trackers/transition` HTTP endpoint takes `{workstream_id, state, comment?}`, looks up the link, posts comment first (best-effort), then transitions; returns 422 `state_not_found` when name doesn't resolve. Two new MCP tools: `dispatch__transition_ticket(state, comment?)` POSTs to daemon over `DISPATCH_PORT` and mirrors a `decision` event; `dispatch__open_pr(title, body, base?)` runs `git push -u origin <branch>` + `gh pr create` in agent's `cwd` with safety refusals (protected branch, dirty tree, missing `gh`). New `examples/WORKFLOW.build.md` template ties it together: clone-per-ticket workspace + branch convention `dispatch/<id>` + 5-step build prompt that ends in `open_pr` → `transition_ticket("In Review")`. With this in place the chain is: triage agent (v1.4.16) feeds Todo → build agent picks up → claims Linear → implements → opens PR → transitions to In Review → human merges + marks Done → reverse-sync (v1.2) retires the workstream.
 
 ### v1.4.12 — Linear → Radar mirror (`1309cb5`)
 

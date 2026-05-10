@@ -127,6 +127,22 @@ Smallest escalation toward "Dispatch manages Linear" (option 1 of 3 — daemon w
 - [x] **Tests** — `daemon/test/trackers/linear.test.ts` +7 cases (viewer cache, viewer-null error, claim success, claim collision, release clears assignee, unassigned filter clause, self filter clause). `daemon/test/orchestrator.test.ts` +3 cases (claim collision skips dispatch, claim ok → release on terminal, claim throw → `claim_failed` log). `workflow-loader.test.ts` +1 case (default-off, opt-in flips assign_to_self + unassigned_only). 320 / 320 daemon tests green.
 - [x] **Docs** — `docs/ARCHITECTURE.md` Orchestrator section gains "Tracker write-back (v1.4.10)" subsection. `RELEASE_NOTES.md` v1.4.10 entry. `CLAUDE.md` status block bumped.
 
+### v1.4.17 — Autonomous Linear loop (transition_ticket + open_pr + WORKFLOW.build.md) ✅
+
+Closes the "agent just builds features and manages Linear" gap. Combined with v1.4.10–v1.4.16 the autonomous flow is now end-to-end: triage feeds Todo → build picks up → claim Linear → implement → push branch → open PR → transition Linear to In Review → human merges + marks Done → reverse-sync retires the workstream.
+
+- [x] `Tracker.applyTransition?(issueId, stateName, opts?)` interface method composing `resolveStateIdByName` + `setIssueState`. Linear impl uses per-team resolution; mock logs to `transitionsApplied()` for tests.
+- [x] `POST /trackers/transition` HTTP endpoint with `{workstream_id, state, comment?}` body. 200 / 404 / 422 / 502 status matrix. Optional comment posted first (best-effort).
+- [x] `dispatch__transition_ticket(state, comment?)` MCP tool — POSTs to daemon over `DISPATCH_PORT`, mirrors a `decision` event.
+- [x] `dispatch__open_pr(title, body, base?)` MCP tool — runs `git push -u origin <branch>` + `gh pr create` in agent's `cwd`. Refuses on protected branches, dirty tree, missing `gh` CLI. New `OpenPrSpawn` test seam.
+- [x] `examples/WORKFLOW.build.md` template — first end-to-end build agent with clone-per-ticket workspace hooks + 5-step build prompt + fail-state branches.
+- [x] +10 daemon tests across mcp-server / http-server. 371/371 green.
+
+What's still missing for an even tighter autonomous loop:
+- Auto-route to `Needs Review` on retry exhaustion. Today the orchestrator retries forever; needs a `max_failure_attempts` knob + automatic transition. Useful for the build template's failure path.
+- `dispatch__push_only` MCP tool (no PR, just push) for branches that aren't ready to review. Probably not worth shipping until requested.
+- Stale-claim heartbeat (still deferred from v1.4.10.5) so a healthy long-running build doesn't get falsely released by another instance's TTL sweep.
+
 ### v1.4.16 — Triage workflow template + file_ticket rate limit + ollama-not-installed hint ✅
 
 Bundles two small follow-ups that close the v1.4.11 and v1.4.13/.14 loops. Single tag.

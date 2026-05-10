@@ -108,6 +108,22 @@ export interface Tracker {
    */
   fetchStaleSelfClaimedIssues?(activeStates: string[], ttlMs: number): Promise<Issue[]>;
   /**
+   * v1.4.17 — Move an issue into a named workflow state. Composes
+   * `resolveStateIdByName` + `setIssueState` so callers (HTTP /
+   * `transition_ticket` MCP tool) don't have to round-trip the name→id
+   * resolution. `teamId` is optional — adapters that support per-team
+   * resolution (Linear) use it; mock ignores it.
+   *
+   * Returns `false` when the state name doesn't exist (caller decides
+   * whether to surface as an error or no-op). Throws on tracker / network
+   * failures so the orchestrator's existing error categories apply.
+   */
+  applyTransition?(
+    issueId: string,
+    stateName: string,
+    opts?: { teamId?: string },
+  ): Promise<boolean>;
+  /**
    * v1.4.11 — File a brand-new ticket. Returned `id` is the tracker-native
    * id (Linear UUID); `identifier` is the human-readable key (`ENG-123`);
    * `url` points at the ticket in the tracker's web UI when available.

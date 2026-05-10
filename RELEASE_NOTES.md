@@ -4,6 +4,33 @@ Versions are anchored on the macOS app's `CFBundleShortVersionString` (the Info.
 
 ---
 
+## v1.4.17 — 2026-05-09 — feat: autonomous Linear loop (transition_ticket + open_pr + WORKFLOW.build.md)
+
+Closes the "agent just builds features and manages Linear" gap. Combined with v1.4.10–v1.4.16 the autonomous flow is now:
+
+1. Triage agent (v1.4.16 template) keeps backlog tidy.
+2. Build agent (this release's template) picks up Todo tickets, claims them via Linear, clones a per-ticket workspace, implements + tests.
+3. **`dispatch__open_pr`** (NEW) pushes the branch + opens a GitHub PR — refuses on `main`/`master`, refuses on a dirty tree, refuses when `gh` is missing.
+4. **`dispatch__transition_ticket`** (NEW) moves the Linear issue to "In Review" and posts the PR url as a comment.
+5. Human reviews + merges + marks Done in Linear → existing v1.2 reverse-sync flips the workstream to retired.
+
+### What's new
+
+- **`Tracker.applyTransition?(issueId, stateName, opts?)`** interface method (optional). Linear impl composes the v1.4.10.4 per-team `resolveStateIdByName` with the existing `setIssueState`. Mock impl logs to `transitionsApplied()` for tests.
+- **`POST /trackers/transition`** HTTP endpoint. Body `{workstream_id, state, comment?}`. 200 on success; 404 no-tracker / no-link; 422 `state_not_found` when the state name doesn't resolve; 502 on `TrackerError`. Optional `comment` is posted first (best-effort — a failed comment doesn't block the state change).
+- **`dispatch__transition_ticket(state, comment?)`** MCP tool. POSTs to the daemon over `DISPATCH_PORT`. Mirrors a `decision` event with `choice='transition_ticket'` so the Radar shows the action.
+- **`dispatch__open_pr(title, body, base?)`** MCP tool. Runs `git push -u origin <branch>` + `gh pr create` in the agent's `cwd`. Returns `{ok, url, branch}` on success. Safety: protected-branch refusal (`main`/`master`/`trunk`), dirty-tree refusal, gh-CLI-missing detection. New `OpenPrSpawn` test seam injects child_process for unit tests.
+- **`examples/WORKFLOW.build.md`** template — first end-to-end build agent. Clone-per-ticket workspace hooks (`after_create` + `before_run rebase`), 5-step build prompt that closes the loop autonomously, fail-state branches that route to `Needs Review` instead of shipping bad code.
+
+### Tests
+
+- +10 daemon tests (4 mcp-server: transition_ticket happy + missing-state errors, 4 mcp-server open_pr: protected-branch refusal, dirty-tree refusal, happy-path PR url extraction; 3 http-server transition: happy + 422 + no-link 404).
+- 371/371 daemon tests green.
+
+### Version bump
+
+- CFBundleShortVersionString + daemon/package.json + lockfile + pbxproj MARKETING_VERSION 1.4.16 → 1.4.17.
+
 ## v1.4.16 — 2026-05-09 — feat: triage workflow template + file_ticket rate limit + ollama-not-installed hint
 
 Two threads bundled. Both tie loose ends — closes the v1.4.11 (`file_ticket` plumbing) and v1.4.13/.14 (Pull-button UX) loops with the small follow-ups they each needed.

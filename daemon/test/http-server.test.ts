@@ -1258,6 +1258,157 @@ describe('HTTP server', () => {
     }
   });
 
+  // ---- v1.4.17 /trackers/transition --------------------------------------
+
+  it('POST /trackers/transition 404 when no tracker is wired', async () => {
+    const r = await request(handle.app)
+      .post('/trackers/transition')
+      .send({ workstream_id: 'ws_1', state: 'Done' });
+    expect(r.status).toBe(404);
+  });
+
+  it('POST /trackers/transition forwards to tracker.applyTransition + posts comment', async () => {
+    const transitions: Array<{ id: string; state: string }> = [];
+    const comments: Array<{ id: string; body: string }> = [];
+    const tracker = {
+      kind: 'mock-tx',
+      async fetchCandidateIssues() {
+        return [];
+      },
+      async fetchIssuesByStates() {
+        return [];
+      },
+      async fetchIssueStatesByIds() {
+        return new Map<string, string>();
+      },
+      async applyTransition(id: string, state: string) {
+        transitions.push({ id, state });
+        return state !== 'Bogus';
+      },
+      async addIssueComment(id: string, body: string) {
+        comments.push({ id, body });
+        return { id: 'c1' };
+      },
+    };
+    await request(handle.app).post('/workstreams').send({ id: 'ws_tx', title: 'X' });
+    workstreamLinks.link({
+      workstreamId: 'ws_tx',
+      trackerKind: 'linear',
+      issueId: 'iss_99',
+      issueIdentifier: 'ENG-99',
+    });
+    const h2 = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory_tx')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      tracker,
+    } as Parameters<typeof buildHttpServer>[0]);
+    try {
+      const r = await request(h2.app)
+        .post('/trackers/transition')
+        .send({ workstream_id: 'ws_tx', state: 'Done', comment: 'Shipped via PR #42' });
+      expect(r.status).toBe(200);
+      expect(r.body).toMatchObject({ ok: true, issue_id: 'iss_99', state: 'Done' });
+      expect(transitions).toEqual([{ id: 'iss_99', state: 'Done' }]);
+      expect(comments).toEqual([{ id: 'iss_99', body: 'Shipped via PR #42' }]);
+    } finally {
+      await h2.close();
+    }
+  });
+
+  it('POST /trackers/transition 422 when state name does not resolve', async () => {
+    const tracker = {
+      kind: 'mock-tx',
+      async fetchCandidateIssues() {
+        return [];
+      },
+      async fetchIssuesByStates() {
+        return [];
+      },
+      async fetchIssueStatesByIds() {
+        return new Map<string, string>();
+      },
+      async applyTransition() {
+        return false;
+      },
+    };
+    await request(handle.app).post('/workstreams').send({ id: 'ws_tx2', title: 'X' });
+    workstreamLinks.link({
+      workstreamId: 'ws_tx2',
+      trackerKind: 'linear',
+      issueId: 'iss_99',
+      issueIdentifier: 'ENG-99',
+    });
+    const h2 = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory_tx2')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      tracker,
+    } as Parameters<typeof buildHttpServer>[0]);
+    try {
+      const r = await request(h2.app)
+        .post('/trackers/transition')
+        .send({ workstream_id: 'ws_tx2', state: 'Bogus' });
+      expect(r.status).toBe(422);
+      expect(r.body.code).toBe('state_not_found');
+    } finally {
+      await h2.close();
+    }
+  });
+
+  it('POST /trackers/transition 404 when workstream has no tracker link', async () => {
+    const tracker = {
+      kind: 'mock-tx',
+      async fetchCandidateIssues() {
+        return [];
+      },
+      async fetchIssuesByStates() {
+        return [];
+      },
+      async fetchIssueStatesByIds() {
+        return new Map<string, string>();
+      },
+      async applyTransition() {
+        return true;
+      },
+    };
+    const h2 = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory_tx3')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      tracker,
+    } as Parameters<typeof buildHttpServer>[0]);
+    try {
+      const r = await request(h2.app)
+        .post('/trackers/transition')
+        .send({ workstream_id: 'never-linked', state: 'Done' });
+      expect(r.status).toBe(404);
+    } finally {
+      await h2.close();
+    }
+  });
+
   // ---- v1.4.15 file_ticket rate limit -----------------------------------
 
   it('POST /trackers/issues 429 when fileTicketMaxPerHour is exceeded', async () => {

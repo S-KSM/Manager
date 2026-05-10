@@ -534,6 +534,81 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     }
   });
 
+  // v1.4.17 — Move a tracker ticket into a named state. Body: {workstream_id,
+  // state, comment?}. Looks up the linked issue id via workstream_links, calls
+  // tracker.applyTransition. Optionally posts a comment first (when supplied)
+  // so the agent's reasoning lands on the issue alongside the state change.
+  // 404 no tracker / no link / no createIssue support; 400 missing fields;
+  // 422 when the state name doesn't resolve; 502 on TrackerError.
+  app.post('/trackers/transition', async (req: Request, res: Response) => {
+    if (!tracker) {
+      res.status(404).json({ error: 'tracker not enabled' });
+      return;
+    }
+    if (typeof tracker.applyTransition !== 'function') {
+      res.status(501).json({
+        error: 'tracker does not implement applyTransition',
+        kind: tracker.kind,
+      });
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const workstreamId = typeof body.workstream_id === 'string' ? body.workstream_id : '';
+    const stateName = typeof body.state === 'string' ? body.state.trim() : '';
+    if (!workstreamId || !stateName) {
+      res.status(400).json({ error: 'workstream_id and state are required' });
+      return;
+    }
+    if (!workstreamLinks) {
+      res.status(404).json({ error: 'links not enabled' });
+      return;
+    }
+    const link = workstreamLinks.get(workstreamId);
+    if (!link) {
+      res.status(404).json({ error: `no tracker link for workstream "${workstreamId}"` });
+      return;
+    }
+    const comment = typeof body.comment === 'string' ? body.comment : null;
+    try {
+      // v1.4.17 — comment first (best-effort: a failed comment shouldn't
+      // block the state transition since the agent has already decided).
+      if (
+        comment &&
+        comment.length > 0 &&
+        // Use the existing addIssueComment surface — Linear has it; mock
+        // doesn't bother. Cast through unknown so TS doesn't complain.
+        typeof (tracker as unknown as { addIssueComment?: unknown }).addIssueComment === 'function'
+      ) {
+        try {
+          await (
+            tracker as unknown as {
+              addIssueComment: (id: string, body: string) => Promise<unknown>;
+            }
+          ).addIssueComment(link.issue_id, comment);
+        } catch {
+          // best-effort
+        }
+      }
+      const ok = await tracker.applyTransition(link.issue_id, stateName);
+      if (!ok) {
+        res.status(422).json({
+          error: `state "${stateName}" did not resolve to a tracker stateId`,
+          code: 'state_not_found',
+        });
+        return;
+      }
+      res
+        .status(200)
+        .json({ ok: true, workstream_id: workstreamId, issue_id: link.issue_id, state: stateName });
+    } catch (err) {
+      if (err instanceof TrackerError) {
+        res.status(502).json({ error: err.message, code: err.code });
+        return;
+      }
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // ---- Workstreams ---------------------------------------------------------
 
   app.get('/workstreams', async (_req: Request, res: Response) => {

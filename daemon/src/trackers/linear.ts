@@ -639,6 +639,27 @@ export class LinearTracker implements Tracker {
   }
 
   /**
+   * v1.4.17 — Move an issue into a named workflow state. Resolves the
+   * stateId via the per-team cache (v1.4.10.4) when `teamId` is supplied,
+   * otherwise via the project's primary team. Returns `false` when the
+   * name doesn't exist on the resolved team — caller decides how to
+   * surface that.
+   */
+  async applyTransition(
+    issueId: string,
+    stateName: string,
+    opts?: { teamId?: string },
+  ): Promise<boolean> {
+    const stateId = await this.resolveStateIdByName(
+      stateName,
+      opts?.teamId ? { teamId: opts.teamId } : undefined,
+    );
+    if (!stateId) return false;
+    await this.setIssueState(issueId, stateId);
+    return true;
+  }
+
+  /**
    * v1.2 forward-sync support. Posts a Markdown comment to the linked issue.
    * Wraps a failed `commentCreate.success` as `linear_comment_failed` so the
    * comment syncer can swallow it and try again on the next tick.

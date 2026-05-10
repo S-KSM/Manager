@@ -148,6 +148,22 @@ export class MockTracker implements Tracker {
     return this.createdIssuesLog;
   }
 
+  /**
+   * v1.4.17 — Mock transition: stores the (issueId → stateName) pair in an
+   * in-memory log. Tests assert via `transitionsApplied()`. Returns false
+   * when stateName is the literal string `"unknown"` so tests can exercise
+   * the resolver-miss path without a per-state config.
+   */
+  private readonly transitionsLog: Array<{ issueId: string; stateName: string }> = [];
+  async applyTransition(issueId: string, stateName: string): Promise<boolean> {
+    if (stateName === 'unknown') return false;
+    this.transitionsLog.push({ issueId, stateName });
+    return true;
+  }
+  transitionsApplied(): readonly { issueId: string; stateName: string }[] {
+    return this.transitionsLog;
+  }
+
   private async readAll(): Promise<Issue[]> {
     let raw: string;
     try {

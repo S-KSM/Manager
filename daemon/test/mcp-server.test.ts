@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -93,6 +94,237 @@ describe('MCP server propose_skill tool', () => {
       arguments: { title: '', body: 'something' },
     });
     expect(result.isError).toBe(true);
+  });
+});
+
+describe('MCP server transition_ticket tool (v1.4.17)', () => {
+  let dir: string;
+  let registry: WorkstreamRegistry;
+  let eventStore: EventStore;
+  let memoryStore: MemoryStore;
+  let skillProposalsStore: SkillProposalsStore;
+  let interventionQueue: InterventionQueue;
+  let client: Client;
+  let prevEnvWorkstream: string | undefined;
+  let fetchCalls: Array<{ url: string; body: unknown }>;
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'manager-transition-'));
+    registry = new WorkstreamRegistry(join(dir, 'db.sqlite'));
+    eventStore = new EventStore(join(dir, 'events'));
+    memoryStore = new MemoryStore(join(dir, 'memory'));
+    skillProposalsStore = new SkillProposalsStore(join(dir, 'db.sqlite'));
+    interventionQueue = new InterventionQueue(join(dir, 'db.sqlite'));
+    prevEnvWorkstream = process.env['DISPATCH_WORKSTREAM'];
+    process.env['DISPATCH_WORKSTREAM'] = 'tx_ws';
+    fetchCalls = [];
+    const fakeFetch: typeof fetch = (async (url: string | URL, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(init.body as string) : null;
+      fetchCalls.push({ url: String(url), body });
+      return new Response(
+        JSON.stringify({ ok: true, workstream_id: 'tx_ws', issue_id: 'i_1', state: 'Done' }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+    const server = buildMcpServer({
+      eventStore,
+      memoryStore,
+      registry,
+      skillProposalsStore,
+      interventionQueue,
+      daemonUrl: 'http://test-daemon:9999',
+      fetchImpl: fakeFetch,
+    });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    client = new Client({ name: 'test', version: '0.0.1' }, { capabilities: {} });
+    await Promise.all([client.connect(ct), server.connect(st)]);
+  });
+  afterEach(async () => {
+    await client.close();
+    skillProposalsStore.close();
+    interventionQueue.close();
+    registry.close();
+    if (prevEnvWorkstream === undefined) {
+      delete process.env['DISPATCH_WORKSTREAM'];
+    } else {
+      process.env['DISPATCH_WORKSTREAM'] = prevEnvWorkstream;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('lists transition_ticket in tools/list', async () => {
+    const result = await client.listTools();
+    expect(result.tools.map((t) => t.name)).toContain('transition_ticket');
+  });
+
+  it('POSTs to /trackers/transition with workstream_id + state + comment, mirrors decision', async () => {
+    const r = await client.callTool({
+      name: 'transition_ticket',
+      arguments: { state: 'Done', comment: 'Shipped via PR #42' },
+    });
+    expect(r.isError).not.toBe(true);
+    expect(fetchCalls).toHaveLength(1);
+    expect(fetchCalls[0]!.url).toBe('http://test-daemon:9999/trackers/transition');
+    expect(fetchCalls[0]!.body).toEqual({
+      workstream_id: 'tx_ws',
+      state: 'Done',
+      comment: 'Shipped via PR #42',
+    });
+    const { events } = await eventStore.readEvents('tx_ws');
+    const decisions = events.filter((e) => e.type === 'decision');
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]!.payload?.['choice']).toBe('transition_ticket');
+    expect(decisions[0]!.payload?.['rationale']).toContain('Done');
+  });
+
+  it('returns an error result when state is missing', async () => {
+    const r = await client.callTool({ name: 'transition_ticket', arguments: {} });
+    expect(r.isError).toBe(true);
+  });
+});
+
+describe('MCP server open_pr tool (v1.4.17)', () => {
+  let dir: string;
+  let registry: WorkstreamRegistry;
+  let eventStore: EventStore;
+  let memoryStore: MemoryStore;
+  let skillProposalsStore: SkillProposalsStore;
+  let interventionQueue: InterventionQueue;
+  let prevEnvWorkstream: string | undefined;
+
+  /**
+   * Build a fake ChildProcess that emits stdout chunks then closes with
+   * `exitCode`. Used to simulate git / gh in the open_pr path.
+   */
+  function fakeChild(opts: {
+    stdoutChunks?: string[];
+    stderrChunks?: string[];
+    exitCode?: number | null;
+    error?: Error;
+  }): unknown {
+    const proc = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+    };
+    proc.stdout = new EventEmitter();
+    proc.stderr = new EventEmitter();
+    queueMicrotask(() => {
+      for (const c of opts.stdoutChunks ?? []) proc.stdout.emit('data', Buffer.from(c));
+      for (const c of opts.stderrChunks ?? []) proc.stderr.emit('data', Buffer.from(c));
+      if (opts.error) proc.emit('error', opts.error);
+      else proc.emit('close', opts.exitCode ?? 0);
+    });
+    return proc;
+  }
+
+  function buildClient(spawnSeq: Array<(cmd: string, args: readonly string[]) => unknown>): {
+    client: Client;
+    server: ReturnType<typeof buildMcpServer>;
+  } {
+    let i = 0;
+    const spawnImpl = ((cmd: string, args: readonly string[]) => {
+      const handler = spawnSeq[i++];
+      if (!handler) throw new Error(`unexpected spawn ${i}: ${cmd} ${args.join(' ')}`);
+      return handler(cmd, args);
+    }) as unknown as Parameters<typeof buildMcpServer>[0]['openPrSpawnImpl'];
+    const server = buildMcpServer({
+      eventStore,
+      memoryStore,
+      registry,
+      skillProposalsStore,
+      interventionQueue,
+      ...(spawnImpl ? { openPrSpawnImpl: spawnImpl } : {}),
+    });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'test', version: '0.0.1' }, { capabilities: {} });
+    void Promise.all([client.connect(ct), server.connect(st)]);
+    return { client, server };
+  }
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'manager-open-pr-'));
+    registry = new WorkstreamRegistry(join(dir, 'db.sqlite'));
+    eventStore = new EventStore(join(dir, 'events'));
+    memoryStore = new MemoryStore(join(dir, 'memory'));
+    skillProposalsStore = new SkillProposalsStore(join(dir, 'db.sqlite'));
+    interventionQueue = new InterventionQueue(join(dir, 'db.sqlite'));
+    prevEnvWorkstream = process.env['DISPATCH_WORKSTREAM'];
+    process.env['DISPATCH_WORKSTREAM'] = 'pr_ws';
+  });
+  afterEach(() => {
+    skillProposalsStore.close();
+    interventionQueue.close();
+    registry.close();
+    if (prevEnvWorkstream === undefined) {
+      delete process.env['DISPATCH_WORKSTREAM'];
+    } else {
+      process.env['DISPATCH_WORKSTREAM'] = prevEnvWorkstream;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('refuses to open a PR from main branch', async () => {
+    const { client } = buildClient([() => fakeChild({ stdoutChunks: ['main\n'], exitCode: 0 })]);
+    try {
+      const r = await client.callTool({
+        name: 'open_pr',
+        arguments: { title: 't', body: 'b' },
+      });
+      expect(r.isError).toBe(true);
+      const text = (r.content as Array<{ text: string }>)[0]?.text ?? '';
+      expect(text).toContain('protected branch');
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('refuses on a dirty working tree', async () => {
+    const { client } = buildClient([
+      () => fakeChild({ stdoutChunks: ['feature/foo\n'], exitCode: 0 }),
+      () => fakeChild({ stdoutChunks: [' M src/foo.ts\n'], exitCode: 0 }),
+    ]);
+    try {
+      const r = await client.callTool({
+        name: 'open_pr',
+        arguments: { title: 't', body: 'b' },
+      });
+      expect(r.isError).toBe(true);
+      const text = (r.content as Array<{ text: string }>)[0]?.text ?? '';
+      expect(text).toContain('uncommitted changes');
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('happy path: branch ok, clean tree, push ok, gh prints url', async () => {
+    const { client } = buildClient([
+      () => fakeChild({ stdoutChunks: ['feature/foo\n'], exitCode: 0 }),
+      () => fakeChild({ stdoutChunks: [''], exitCode: 0 }),
+      () => fakeChild({ stdoutChunks: ['Branch pushed.\n'], exitCode: 0 }),
+      () =>
+        fakeChild({
+          stdoutChunks: [
+            'Creating pull request for feature/foo into main\n',
+            'https://github.com/me/repo/pull/42\n',
+          ],
+          exitCode: 0,
+        }),
+    ]);
+    try {
+      const r = await client.callTool({
+        name: 'open_pr',
+        arguments: { title: 'feat: X', body: 'body' },
+      });
+      expect(r.isError).not.toBe(true);
+      const text = (r.content as Array<{ text: string }>)[0]?.text ?? '';
+      expect(text).toContain('https://github.com/me/repo/pull/42');
+      expect(text).toContain('feature/foo');
+      const { events } = await eventStore.readEvents('pr_ws');
+      const decisions = events.filter((e) => e.type === 'decision');
+      expect(decisions[0]!.payload?.['choice']).toBe('open_pr');
+    } finally {
+      await client.close();
+    }
   });
 });
 
