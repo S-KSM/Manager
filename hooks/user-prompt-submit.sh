@@ -31,7 +31,7 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
-workstream="${DISPATCH_WORKSTREAM:-default}"
+workstream=$(derive_workstream)
 
 # Optional debug knob: feed a canned pending-array via env var instead of
 # hitting the daemon. Useful for unit-style smoke tests when Track A's
