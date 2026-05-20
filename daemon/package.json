@@ -1,6 +1,6 @@
 {
   "name": "@dispatch/daemon",
-  "version": "1.4.17",
+  "version": "1.4.18",
   "private": true,
   "description": "Dispatch daemon — local MCP + HTTP/WS brain for supervising AI agents.",
   "type": "module",
