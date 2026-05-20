@@ -134,9 +134,10 @@ struct HomeView: View {
             )
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
-            .background(.thinMaterial)
+            .background(Resona.Palette.parchment.opacity(0.85))
 
             Divider()
+                .overlay(Resona.Palette.stone)
 
             HStack(alignment: .top, spacing: 0) {
                 Group {
@@ -167,6 +168,7 @@ struct HomeView: View {
 
                 if floorState == .cards {
                     Divider()
+                        .overlay(Resona.Palette.stone)
                     LiveTickerView(client: client, workstreams: workstreams)
                         .frame(minWidth: 240, idealWidth: 320, maxWidth: 380)
                 }
@@ -191,13 +193,13 @@ private struct MockModeBanner: View {
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: iconName)
-                .foregroundStyle(.yellow)
+                .foregroundStyle(Resona.Palette.butter)
             VStack(alignment: .leading, spacing: 1) {
                 Text(headline)
                     .font(.callout.weight(.semibold))
                 Text(subhead)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.inkSoft)
             }
             Spacer(minLength: 12)
             if showsRetry {
@@ -226,11 +228,11 @@ private struct MockModeBanner: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color.yellow.opacity(0.10))
+        .background(Resona.Palette.butter.opacity(0.18))
         .overlay(
             Rectangle()
                 .frame(height: 1)
-                .foregroundStyle(Color.yellow.opacity(0.35)),
+                .foregroundStyle(Resona.Palette.butter.opacity(0.45)),
             alignment: .bottom
         )
     }
@@ -314,7 +316,7 @@ private struct RadarEmptyStateView: View {
             }
             .frame(maxWidth: .infinity)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Resona.Palette.cream)
     }
 
     private var card: some View {
@@ -322,24 +324,25 @@ private struct RadarEmptyStateView: View {
             HStack(spacing: 10) {
                 Image(systemName: "dot.radiowaves.left.and.right")
                     .imageScale(.large)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Resona.Palette.success)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Radar is clear")
-                        .font(.title2.weight(.semibold))
+                        .font(Resona.Typography.headline)
                     Text("No workstreams yet — let's get one on screen.")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                 }
             }
 
             Divider()
+                .overlay(Resona.Palette.stone)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("How to start a workstream")
-                    .font(.headline)
+                    .font(Resona.Typography.headline)
                 Text("`cd` into any project directory and run `claude`. Dispatch's hooks register the session automatically and a card will appear here within a few seconds.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -348,21 +351,13 @@ private struct RadarEmptyStateView: View {
             HStack(spacing: 6) {
                 Image(systemName: "info.circle")
                     .imageScale(.small)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Resona.Palette.inkFaint)
                 Text("See `docs/TUTORIAL.md` for the full walk-through.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.inkSoft)
             }
         }
-        .padding(24)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.gray.opacity(0.25), lineWidth: 1)
-        )
+        .resonaCard(tint: Resona.Palette.parchment, corner: 18, padding: 24)
     }
 
     private var codeBlock: some View {
@@ -375,11 +370,11 @@ private struct RadarEmptyStateView: View {
                 .padding(.trailing, 64) // leave room for the copy button
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.black.opacity(0.06))
+                        .fill(Resona.Palette.mist)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color.gray.opacity(0.18), lineWidth: 1)
+                        .stroke(Resona.Palette.stone, lineWidth: 1)
                 )
 
             Button {
@@ -436,10 +431,7 @@ struct DigestRailView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Today")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
+                    ResonaEyebrow(text: "Today")
                     Text(headline)
                         .font(.title3.weight(.semibold))
                         .lineLimit(2)
@@ -456,7 +448,7 @@ struct DigestRailView: View {
                                 label: "Shipped",
                                 value: "\(totals.shipped)",
                                 systemImage: "checkmark.seal",
-                                tint: .blue,
+                                tint: Resona.Palette.sky,
                                 isSelected: filter == .shipped,
                                 onTap: { toggle(.shipped) }
                             )
@@ -464,7 +456,7 @@ struct DigestRailView: View {
                                 label: "Blocked",
                                 value: "\(totals.blocked)",
                                 systemImage: "exclamationmark.octagon.fill",
-                                tint: .red,
+                                tint: Resona.Palette.coral,
                                 isSelected: filter == .blocked,
                                 onTap: { toggle(.blocked) }
                             )
@@ -472,7 +464,7 @@ struct DigestRailView: View {
                                 label: "Needs you",
                                 value: "\(totals.needsAttention)",
                                 systemImage: "exclamationmark.bubble.fill",
-                                tint: .orange,
+                                tint: Resona.Palette.apricot,
                                 isSelected: filter == .needsYou,
                                 onTap: { toggle(.needsYou) }
                             )
@@ -480,7 +472,7 @@ struct DigestRailView: View {
                                 label: "Active",
                                 value: "\(totals.active)",
                                 systemImage: "bolt.horizontal.fill",
-                                tint: .green,
+                                tint: Resona.Palette.mint,
                                 isSelected: filter == .active,
                                 onTap: { toggle(.active) }
                             )
@@ -504,14 +496,14 @@ struct DigestRailView: View {
                 }
             } else if !loading && digest != nil {
                 Text("Quiet morning — nothing new to flag.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.inkFaint)
             }
 
             if let lastError {
                 Label(lastError, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption2)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Resona.Palette.coral)
             }
         }
         .task {
@@ -604,19 +596,19 @@ private struct DigestStat: View {
                 }
                 Text(label)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                     .textCase(.uppercase)
             }
             .frame(minWidth: 64)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isSelected ? tint.opacity(0.15) : Color.clear)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isSelected ? tint.opacity(0.45) : Color.white.opacity(0.6))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(isSelected ? tint.opacity(0.55) : Color.clear, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(isSelected ? tint : Color.white.opacity(0.8), lineWidth: 1)
             )
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
@@ -636,15 +628,15 @@ private struct HighlightRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Image(systemName: "arrow.right.circle.fill")
                     .imageScale(.small)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.lavender)
                 Text(highlight.title)
                     .font(.callout.weight(.medium))
                     .lineLimit(1)
                 Text("·")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Resona.Palette.inkFaint)
                 Text(highlight.summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                     .lineLimit(1)
                 Spacer()
             }
@@ -683,12 +675,12 @@ struct WorkstreamCard: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(workstream.title)
-                        .font(.headline)
+                        .font(Resona.Typography.headline)
                         .lineLimit(1)
                     if workstream.status == .paused {
                         Image(systemName: "pause.fill")
                             .imageScale(.small)
-                            .foregroundStyle(.yellow)
+                            .foregroundStyle(Resona.Palette.butter)
                             .help("Paused")
                     }
                     Spacer()
@@ -696,14 +688,14 @@ struct WorkstreamCard: View {
                 }
 
                 Text(workstream.id)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.inkFaint)
 
                 if let goal = workstream.currentSubgoal {
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: "arrow.turn.down.right")
                             .imageScale(.small)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Resona.Palette.inkFaint)
                         Text(goal)
                             .font(.callout)
                             .lineLimit(2)
@@ -719,10 +711,10 @@ struct WorkstreamCard: View {
                     HStack(alignment: .firstTextBaseline, spacing: 5) {
                         Image(systemName: "hammer.fill")
                             .imageScale(.small)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Resona.Palette.inkFaint)
                         Text(activity)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(Resona.Typography.caption)
+                            .foregroundStyle(Resona.Palette.inkSoft)
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
@@ -737,7 +729,7 @@ struct WorkstreamCard: View {
                         Label("Needs you", systemImage: "exclamationmark.bubble.fill")
                             .font(.caption.weight(.semibold))
                             .labelStyle(.titleAndIcon)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Resona.Palette.coral)
                     }
                 }
             }
@@ -750,14 +742,15 @@ struct WorkstreamCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .opacity(workstream.status == .paused ? 0.6 : 1.0)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Resona.Palette.parchment)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(workstream.needsAttention ? Color.orange.opacity(0.6) : Color.gray.opacity(0.18),
-                        lineWidth: workstream.needsAttention ? 1.5 : 1)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(workstream.needsAttention ? Resona.Palette.coral.opacity(0.6) : Color.white.opacity(0.7),
+                              lineWidth: workstream.needsAttention ? 1.5 : 1)
         )
+        .shadow(color: Resona.Palette.lavender.opacity(0.18), radius: 12, x: 0, y: 6)
     }
 }
 
@@ -766,15 +759,15 @@ private struct StatusPill: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Circle().fill(workstream.statusColor).frame(width: 6, height: 6)
+            Circle().fill(ResonaStatusTint.forWorkstreamStatus(workstream.status.rawValue)).frame(width: 6, height: 6)
             Text(workstream.statusLabel)
                 .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Resona.Palette.inkSoft)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(
-            Capsule().fill(workstream.statusColor.opacity(0.12))
+            Capsule().fill(ResonaStatusTint.forWorkstreamStatus(workstream.status.rawValue).opacity(0.3))
         )
     }
 }
@@ -786,10 +779,10 @@ private struct ConfidenceBar: View {
         VStack(alignment: .leading, spacing: 3) {
             Text("Confidence \(Int((pct * 100).rounded()))%")
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Resona.Palette.inkSoft)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.gray.opacity(0.18))
+                    Capsule().fill(Resona.Palette.stone.opacity(0.5))
                     Capsule()
                         .fill(barTint(for: pct))
                         .frame(width: geo.size.width * pct)
@@ -802,9 +795,9 @@ private struct ConfidenceBar: View {
 
     private func barTint(for v: Double) -> Color {
         switch v {
-        case ..<0.4:  return .red
-        case ..<0.7:  return .yellow
-        default:      return .green
+        case ..<0.4:  return Resona.Palette.coral
+        case ..<0.7:  return Resona.Palette.butter
+        default:      return Resona.Palette.success
         }
     }
 }
@@ -898,14 +891,15 @@ struct LiveTickerView: View {
             HStack {
                 Image(systemName: "dot.radiowaves.left.and.right")
                 Text("Live ticker")
-                    .font(.headline)
+                    .font(Resona.Typography.headline)
                 Spacer()
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(.thinMaterial)
+            .background(Resona.Palette.parchment.opacity(0.85))
 
             Divider()
+                .overlay(Resona.Palette.stone)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
@@ -918,7 +912,7 @@ struct LiveTickerView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .background(Color(nsColor: .underPageBackgroundColor))
+        .background(Resona.Palette.mist.opacity(0.9))
         .task(id: workstreams.map(\.id)) {
             // .task(id:) cancels the previous body task when the id changes,
             // and cancels on view disappear. We chain that into the feeder
@@ -956,15 +950,15 @@ struct LiveTickerView: View {
             HStack(alignment: .top, spacing: 8) {
                 Text(LiveTickerView.timeFormatter.string(from: entry.event.ts))
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                     .frame(width: 38, alignment: .leading)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(entry.workstreamTitle)
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.primary)
                     Text(entry.event.tickerSummary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                         .lineLimit(2)
                 }
             }
@@ -989,7 +983,7 @@ struct LiveTickerView: View {
         }
     }
     .padding(20)
-    .background(Color(nsColor: .windowBackgroundColor))
+    .background(Resona.Palette.cream)
 }
 
 #Preview("HomeView (mock)") {

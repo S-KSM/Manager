@@ -55,15 +55,14 @@ struct UpdatesView: View {
                 }
                 if let loadError {
                     Label(loadError, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.red)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.coral)
                 }
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
         .navigationTitle("Updates")
         .task {
             await reload()
@@ -124,10 +123,10 @@ struct UpdatesView: View {
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Updates")
-                .font(.title2.weight(.semibold))
+                .font(Resona.Typography.title)
             Text("Generate, save, and schedule team summaries.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Resona.Typography.caption)
+                .foregroundStyle(Resona.Palette.inkSoft)
         }
     }
 
@@ -161,13 +160,13 @@ struct UpdatesView: View {
             HStack(spacing: 10) {
                 Image(systemName: "doc.text.image")
                     .font(.title2)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(Resona.Palette.sky)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("No updates yet")
-                        .font(.headline)
+                        .font(Resona.Typography.headline)
                     Text("Generate an LLM-rendered summary across the workstreams you pick. Choose a time window — last 24h, this week, or pick exact dates.")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -189,16 +188,8 @@ struct UpdatesView: View {
                 .buttonStyle(.bordered)
             }
         }
-        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.blue.opacity(0.08))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.blue.opacity(0.25), lineWidth: 1)
-        )
+        .resonaCard(tint: Resona.Palette.sky.opacity(0.18), corner: 18, padding: 18)
     }
 
     @ViewBuilder
@@ -206,20 +197,20 @@ struct UpdatesView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: systemImage)
-                Text(title).font(.headline)
+                Text(title).font(Resona.Typography.headline)
                 if !reports.isEmpty {
                     Text("\(reports.count)")
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Capsule().fill(Color.gray.opacity(0.18)))
+                        .background(Capsule().fill(Resona.Palette.lavender.opacity(0.35)))
                 }
             }
             if reports.isEmpty {
                 Text(empty)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                     .padding(.vertical, 6)
             } else {
                 VStack(spacing: 8) {
@@ -273,29 +264,21 @@ private struct ReportRow: View {
                     AudienceBadge(report: report)
                     Text(Self.dateFmt.string(from: report.generatedAt))
                         .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Resona.Palette.inkFaint)
                     if !report.workstreamIDs.isEmpty {
                         Text("· \(report.workstreamIDs.count) workstream\(report.workstreamIDs.count == 1 ? "" : "s")")
                             .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Resona.Palette.inkFaint)
                     }
                 }
             }
             Spacer()
             Image(systemName: "chevron.right")
                 .imageScale(.small)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Resona.Palette.inkFaint)
         }
-        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.gray.opacity(0.18), lineWidth: 1)
-        )
+        .resonaCard(tint: Resona.Palette.parchment, corner: 14, padding: 12)
         .contentShape(Rectangle())
     }
 }
@@ -317,9 +300,9 @@ struct AudienceBadge: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
         .background(
-            Capsule().fill((isOverride ? Color.purple : Color.blue).opacity(0.12))
+            Capsule().fill((isOverride ? Resona.Palette.lavender : Resona.Palette.sky).opacity(0.35))
         )
-        .foregroundStyle(isOverride ? Color.purple : Color.blue)
+        .foregroundStyle(Resona.Palette.ink)
     }
 
     private var audienceLabel: String {

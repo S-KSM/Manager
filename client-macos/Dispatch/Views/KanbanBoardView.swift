@@ -67,7 +67,6 @@ struct KanbanBoardView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var buckets: [Workstream.Status: [Workstream]] {
@@ -113,13 +112,13 @@ struct KanbanColumnView: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .top)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(columnTint)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(isTargeted ? Color.accentColor : Color.gray.opacity(0.2),
-                        lineWidth: isTargeted ? 2 : 1)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(isTargeted ? Color.accentColor : Color.white.opacity(0.7),
+                              lineWidth: isTargeted ? 2 : 1)
         )
         .dropDestination(for: WorkstreamDragPayload.self) { items, _ in
             guard let payload = items.first else { return false }
@@ -141,15 +140,18 @@ struct KanbanColumnView: View {
                 .fill(headerTint)
                 .frame(width: 8, height: 8)
             Text(headerLabel)
-                .font(.headline)
+                .font(Resona.Typography.headline)
             Spacer()
             Text("\(workstreams.count)")
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Resona.Palette.inkSoft)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(
-                    Capsule().fill(Color.gray.opacity(0.12))
+                    Capsule().fill(Color.white.opacity(0.6))
+                )
+                .overlay(
+                    Capsule().strokeBorder(Color.white.opacity(0.8), lineWidth: 1)
                 )
         }
         .padding(.horizontal, 4)
@@ -164,10 +166,10 @@ struct KanbanColumnView: View {
             HStack(spacing: 6) {
                 Image(systemName: "rectangle.stack.fill")
                     .imageScale(.small)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                 Text("Pod-grouped — \(workstreams.count) workstreams")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
             }
         }
         .padding(.horizontal, 4)
@@ -226,19 +228,19 @@ struct KanbanColumnView: View {
 
     private var headerTint: Color {
         switch status {
-        case .backlog: return .gray.opacity(0.7)
-        case .active:  return .green
-        case .paused:  return .yellow
-        case .retired: return .gray
+        case .backlog: return Resona.Palette.lavender
+        case .active:  return Resona.Palette.mint
+        case .paused:  return Resona.Palette.butter
+        case .retired: return Resona.Palette.stone
         }
     }
 
     private var columnTint: Color {
         switch status {
-        case .backlog: return Color.gray.opacity(0.06)
-        case .active:  return Color.green.opacity(0.06)
-        case .paused:  return Color.yellow.opacity(0.06)
-        case .retired: return Color.gray.opacity(0.04)
+        case .backlog: return Resona.Palette.lilac.opacity(0.35)
+        case .active:  return Resona.Palette.mint.opacity(0.18)
+        case .paused:  return Resona.Palette.butter.opacity(0.22)
+        case .retired: return Resona.Palette.mist
         }
     }
 

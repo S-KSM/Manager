@@ -50,7 +50,7 @@ struct ReportViewer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            Divider()
+            Divider().overlay(Resona.Palette.stone)
             ScrollView {
                 if editing {
                     editView
@@ -60,19 +60,20 @@ struct ReportViewer: View {
             }
             if let actionError {
                 Label(actionError, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.coral)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 6)
             }
             if let savedFlash {
                 Label(savedFlash, systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.success)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 6)
             }
         }
+        .background(Resona.Gradients.appBackground.ignoresSafeArea())
         .frame(minWidth: 560, idealWidth: 760, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
         .onDisappear {
             actionTask?.cancel()
@@ -101,10 +102,10 @@ struct ReportViewer: View {
                 if editing {
                     TextField("Title", text: $editingTitle)
                         .textFieldStyle(.roundedBorder)
-                        .font(.title3.weight(.semibold))
+                        .font(Resona.Typography.title)
                 } else {
                     Text(localReport.title)
-                        .font(.title3.weight(.semibold))
+                        .font(Resona.Typography.title)
                 }
                 Spacer()
                 Button("Done", action: onDismiss)
@@ -116,17 +117,17 @@ struct ReportViewer: View {
                 AudienceBadge(report: localReport)
                 Text(Self.dateFmt.string(from: localReport.generatedAt))
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Resona.Palette.inkFaint)
                 Text(periodSummary)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                 Text(localReport.provider.capitalized)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                 if let model = localReport.model {
                     Text(model)
                         .font(.caption2.monospaced())
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Resona.Palette.inkFaint)
                 }
                 Spacer()
                 statusBadge
@@ -149,9 +150,9 @@ struct ReportViewer: View {
 
     private var statusTint: Color {
         switch localReport.status {
-        case .draft:    return .orange
-        case .saved:    return .green
-        case .archived: return .gray
+        case .draft:    return Resona.Palette.coral
+        case .saved:    return Resona.Palette.success
+        case .archived: return Resona.Palette.stone
         }
     }
 
@@ -261,8 +262,12 @@ struct ReportViewer: View {
             .padding(8)
             .scrollContentBackground(.hidden)
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(Color.gray.opacity(0.25), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Resona.Palette.parchment)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Resona.Palette.stone, lineWidth: 1)
             )
             .padding(18)
     }

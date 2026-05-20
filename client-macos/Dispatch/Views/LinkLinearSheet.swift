@@ -20,33 +20,31 @@ struct LinkLinearSheet: View {
             HStack(spacing: 8) {
                 Image(systemName: "link")
                     .imageScale(.large)
-                    .foregroundStyle(.purple)
+                    .foregroundStyle(Resona.Palette.lavender)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Link to a Linear issue")
-                        .font(.title3.weight(.semibold))
+                        .font(Resona.Typography.title)
                     Text("Workstream: \(workstream.title)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                         .lineLimit(1)
                 }
             }
-            Divider()
+            Divider().overlay(Resona.Palette.stone)
             VStack(alignment: .leading, spacing: 6) {
-                Text("Issue identifier")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                ResonaEyebrow(text: "Issue identifier")
                 TextField("ENG-123", text: $identifier)
                     .textFieldStyle(.roundedBorder)
                     .disableAutocorrection(true)
                     .onSubmit { Task { await submit() } }
                 Text("Use the identifier shown on the Linear issue page (project key + number).")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Resona.Palette.inkFaint)
             }
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.coral)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -71,6 +69,7 @@ struct LinkLinearSheet: View {
             }
         }
         .padding(20)
+        .background(Resona.Gradients.appBackground.ignoresSafeArea())
         .frame(width: 460)
     }
 

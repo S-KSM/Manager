@@ -30,26 +30,17 @@ struct WelcomeView: View {
             }
             .frame(maxWidth: .infinity)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var card: some View {
         VStack(alignment: .leading, spacing: 18) {
             header
-            Divider()
+            Divider().overlay(Resona.Palette.stone)
             body(for: mode)
-            Divider()
+            Divider().overlay(Resona.Palette.stone)
             footerLinks
         }
-        .padding(28)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.gray.opacity(0.22), lineWidth: 1)
-        )
+        .resonaCard(tint: Resona.Palette.parchment, corner: 18, padding: 28)
     }
 
     @ViewBuilder
@@ -59,13 +50,13 @@ struct WelcomeView: View {
             HStack(spacing: 12) {
                 Image(systemName: "dot.radiowaves.left.and.right")
                     .imageScale(.large)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Resona.Palette.success)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Welcome to Dispatch")
-                        .font(.title2.weight(.semibold))
+                        .font(Resona.Typography.title)
                     Text("Mission control for AI agents — open a terminal in any project and run `claude`. This window is the Radar.")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -73,13 +64,13 @@ struct WelcomeView: View {
             HStack(spacing: 12) {
                 Image(systemName: "antenna.radiowaves.left.and.right.slash")
                     .imageScale(.large)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Resona.Palette.coral)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Daemon not running")
-                        .font(.title2.weight(.semibold))
+                        .font(Resona.Typography.title)
                     Text("Dispatch couldn't reach the brain on localhost:9876. Run `dispatch start` in a terminal, or check Settings → Daemon.")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -105,14 +96,14 @@ struct WelcomeView: View {
         case .daemonDown(let retry):
             VStack(alignment: .leading, spacing: 12) {
                 Text("Common causes")
-                    .font(.headline)
+                    .font(Resona.Typography.headline)
                 VStack(alignment: .leading, spacing: 6) {
                     bullet("First launch — the launchd agent is still starting. Click Start daemon below.")
                     bullet("Node 20+ not on PATH. The daemon shells out to `node`; install via `brew install node`.")
                     bullet("Port 9876 occupied by something else.")
                 }
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Resona.Palette.inkSoft)
 
                 HStack {
                     Button {
@@ -142,7 +133,7 @@ struct WelcomeView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: "book")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Resona.Palette.inkFaint)
                 Button("Tutorial") {
                     if let url = bundledDoc("TUTORIAL.md") {
                         NSWorkspace.shared.open(url)
@@ -151,14 +142,14 @@ struct WelcomeView: View {
                 .buttonStyle(.link)
                 .help("Open the bundled tutorial — also available under Help → Tutorial.")
                 Text("·")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Resona.Palette.inkFaint)
                 Button("Providers (local model)") {
                     NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                 }
                 .buttonStyle(.link)
                 .help("Open Settings → Providers (⌘,) to pick a local model or set ANTHROPIC_API_KEY.")
                 Text("·")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Resona.Palette.inkFaint)
                 Button("Architecture") {
                     if let url = bundledDoc("ARCHITECTURE.md") {
                         NSWorkspace.shared.open(url)
@@ -192,7 +183,7 @@ struct WelcomeView: View {
                     .font(.callout.weight(.semibold))
                 Text(.init(detail))
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -208,11 +199,11 @@ struct WelcomeView: View {
                 .padding(.trailing, 64)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.black.opacity(0.06))
+                        .fill(Resona.Palette.mist)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color.gray.opacity(0.18), lineWidth: 1)
+                        .stroke(Resona.Palette.stone, lineWidth: 1)
                 )
 
             Button {

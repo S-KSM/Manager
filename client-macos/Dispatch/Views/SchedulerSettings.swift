@@ -20,8 +20,8 @@ struct SchedulerSettings: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 6) {
                     Image(systemName: "calendar.badge.clock")
-                        .foregroundStyle(.blue)
-                    Text("Scheduled drafts").font(.headline)
+                        .foregroundStyle(Resona.Palette.sky)
+                    Text("Scheduled drafts").font(Resona.Typography.headline)
                     Spacer()
                     Button("Done", action: onDismiss)
                         .keyboardShortcut(.cancelAction)
@@ -29,8 +29,8 @@ struct SchedulerSettings: View {
                         .help("Close the scheduler settings")
                 }
                 Text("Each fire generates a draft and drops it into the Drafts inbox for review. Both jobs are off by default — flip the switch to start. You can still hit “New update” at any time to generate one on demand.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                     .fixedSize(horizontal: false, vertical: true)
                 if loading && jobs.isEmpty {
                     HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }
@@ -49,12 +49,13 @@ struct SchedulerSettings: View {
                 }
                 if let loadError {
                     Label(loadError, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.red)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.coral)
                 }
             }
             .padding(20)
         }
+        .background(Resona.Gradients.appBackground.ignoresSafeArea())
         .frame(minWidth: 520, idealWidth: 580, maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
         .task {
             await reload()
@@ -139,12 +140,12 @@ private struct JobRow: View {
                 Text(label)
                     .font(.callout.weight(.semibold))
                 Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                 if let next = job.nextFireAt {
                     Text("Next: \(next.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Resona.Palette.inkFaint)
                 }
             }
             Spacer()
@@ -153,16 +154,8 @@ private struct JobRow: View {
                 .controlSize(.small)
                 .help("Edit cron schedule, audience, and provider for this job")
         }
-        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.gray.opacity(0.18), lineWidth: 1)
-        )
+        .resonaCard(tint: Resona.Palette.parchment, corner: 14, padding: 12)
     }
 
     private var label: String {
@@ -226,17 +219,17 @@ private struct JobEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Configure \(job.id)").font(.headline)
+                Text("Configure \(job.id)").font(Resona.Typography.headline)
                 Spacer()
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text("Cron").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+                ResonaEyebrow(text: "Cron")
                 TextField("0 8 * * 1", text: $cron)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.callout, design: .monospaced))
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text("Audience").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+                ResonaEyebrow(text: "Audience")
                 Picker("Audience", selection: $audiencePresetID) {
                     ForEach(presets) { p in
                         Text(p.name).tag(Optional(p.id))
@@ -249,7 +242,7 @@ private struct JobEditor: View {
                 .labelsHidden()
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text("Provider").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+                ResonaEyebrow(text: "Provider")
                 Picker("Provider", selection: $provider) {
                     Text("Claude").tag("claude")
                     Text("Local (Ollama)").tag("ollama")
@@ -258,7 +251,7 @@ private struct JobEditor: View {
                 .labelsHidden()
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text("Model").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+                ResonaEyebrow(text: "Model")
                 TextField(provider == "claude" ? "claude-sonnet-4-7" : "qwen3:8b", text: $model)
                     .textFieldStyle(.roundedBorder)
             }
@@ -297,6 +290,7 @@ private struct JobEditor: View {
             }
         }
         .padding(20)
+        .background(Resona.Gradients.appBackground.ignoresSafeArea())
         .frame(minWidth: 460, idealWidth: 520, maxWidth: .infinity, minHeight: 380, maxHeight: .infinity)
     }
 }

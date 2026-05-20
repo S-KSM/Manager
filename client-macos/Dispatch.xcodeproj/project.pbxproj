@@ -56,6 +56,7 @@
 		A100000000000000000006AA /* DispatchURLParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006BA /* DispatchURLParserTests.swift */; };
 		A100000000000000000006AB /* DaemonResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006BB /* DaemonResolverTests.swift */; };
 		A100000000000000000006AC /* LaunchctlController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006BC /* LaunchctlController.swift */; };
+		A1000000000000000000F0A1 /* ResonaTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F0B1 /* ResonaTheme.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -104,6 +105,7 @@
 		A100000000000000000005B1 /* LaunchdInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchdInstaller.swift; sourceTree = "<group>"; };
 		A100000000000000000005B2 /* PreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesView.swift; sourceTree = "<group>"; };
 		A1000000000000000000ABB1 /* LLMErrorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMErrorView.swift; sourceTree = "<group>"; };
+		A1000000000000000000F0B1 /* ResonaTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResonaTheme.swift; sourceTree = "<group>"; };
 		A100000000000000000005B3 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		A100000000000000000005B4 /* AppRelocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRelocator.swift; sourceTree = "<group>"; };
 		A100000000000000000006B1 /* WorkstreamCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkstreamCodableTests.swift; sourceTree = "<group>"; };
@@ -243,6 +245,7 @@
 				A100000000000000000006B3 /* KanbanBoardView.swift */,
 				A100000000000000000006B7 /* LinkLinearSheet.swift */,
 				A1000000000000000000ABB1 /* LLMErrorView.swift */,
+				A1000000000000000000F0B1 /* ResonaTheme.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -443,6 +446,7 @@
 				A100000000000000000006A5 /* WorkstreamLink.swift in Sources */,
 				A100000000000000000006A7 /* LinkLinearSheet.swift in Sources */,
 				A100000000000000000006AC /* LaunchctlController.swift in Sources */,
+				A1000000000000000000F0A1 /* ResonaTheme.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -615,7 +619,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.4.18;
+				MARKETING_VERSION = 1.4.19;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dispatch.app;
 				PRODUCT_MODULE_NAME = DispatchApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -645,7 +649,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.4.18;
+				MARKETING_VERSION = 1.4.19;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dispatch.app;
 				PRODUCT_MODULE_NAME = DispatchApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -663,7 +667,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.4.18;
+				MARKETING_VERSION = 1.4.19;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dispatch.app.DispatchTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -681,7 +685,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.4.18;
+				MARKETING_VERSION = 1.4.19;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dispatch.app.DispatchTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;

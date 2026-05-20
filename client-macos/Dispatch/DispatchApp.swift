@@ -21,7 +21,9 @@ struct DispatchApp: App {
             ContentView()
                 .environmentObject(resolver)
                 .environmentObject(router)
+                .preferredColorScheme(.light)
                 .frame(minWidth: 820, idealWidth: 1280, minHeight: 560, idealHeight: 800)
+                .resonaBackground()
                 .task {
                     // Self-install the bundled daemon's launchd agent before
                     // probing /health, so a freshly-installed .app comes up

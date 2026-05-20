@@ -32,7 +32,6 @@ struct HandbookView: View {
             .padding(.vertical, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
         .navigationTitle("Team handbook")
         .task {
             await reload()
@@ -47,14 +46,14 @@ struct HandbookView: View {
             HStack(spacing: 6) {
                 Image(systemName: "tray.full")
                 Text("Pending proposals")
-                    .font(.headline)
+                    .font(Resona.Typography.headline)
                 if !proposals.isEmpty {
                     Text("\(proposals.count)")
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Capsule().fill(Color.gray.opacity(0.18)))
+                        .background(Capsule().fill(Resona.Palette.lavender.opacity(0.35)))
                 }
                 Spacer()
                 Button {
@@ -70,7 +69,7 @@ struct HandbookView: View {
                 ProgressView().controlSize(.small).padding(.vertical, 8)
             } else if proposals.isEmpty {
                 Text("No pending proposals. Agents will surface skills here as they discover them.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                     .font(.callout)
                     .padding(.vertical, 8)
             } else {
@@ -88,8 +87,8 @@ struct HandbookView: View {
 
             if let actionError {
                 Label(actionError, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.coral)
             }
         }
     }
@@ -100,18 +99,18 @@ struct HandbookView: View {
             HStack(spacing: 6) {
                 Image(systemName: "book")
                 Text("Team handbook")
-                    .font(.headline)
+                    .font(Resona.Typography.headline)
                 Spacer()
                 Text("read-only")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Resona.Palette.inkFaint)
             }
 
             if loadingHandbook && handbookRaw.isEmpty {
                 ProgressView().controlSize(.small).padding(.vertical, 8)
             } else if handbookRaw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text("The handbook is empty. Promote a skill from the queue above to seed it.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                     .font(.callout)
                     .padding(.vertical, 8)
             } else {
@@ -210,23 +209,23 @@ private struct ProposalRow: View {
                 Spacer(minLength: 8)
                 Text(Self.timeFormatter.string(from: proposal.proposedAt))
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Resona.Palette.inkFaint)
             }
             Text(proposal.body)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Resona.Typography.caption)
+                .foregroundStyle(Resona.Palette.inkSoft)
                 .lineLimit(4)
             HStack(spacing: 8) {
                 Image(systemName: "arrow.up.forward.app")
                     .imageScale(.small)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Resona.Palette.inkFaint)
                 Text("from \(proposal.workstreamID)")
                     .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Resona.Palette.inkFaint)
                 if let dec = proposal.sourceDecisionID {
                     Text("/ \(dec)")
                         .font(.caption2.monospaced())
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Resona.Palette.inkFaint)
                 }
                 Spacer()
                 if isWorking {
@@ -247,16 +246,8 @@ private struct ProposalRow: View {
                 }
             }
         }
-        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.gray.opacity(0.18), lineWidth: 1)
-        )
+        .resonaCard(tint: Resona.Palette.parchment, corner: 14, padding: 12)
     }
 }
 
@@ -311,21 +302,21 @@ struct PromoteSkillSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
                 Image(systemName: "books.vertical.fill")
-                    .foregroundStyle(.purple)
-                Text("Promote to handbook").font(.headline)
+                    .foregroundStyle(Resona.Palette.lavender)
+                Text("Promote to handbook").font(Resona.Typography.headline)
                 Spacer()
                 Text(workstream.id)
                     .font(.caption.monospaced())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Resona.Palette.inkFaint)
             }
             Text("Save this as a team skill. All agents will see it at SessionStart.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Resona.Typography.caption)
+                .foregroundStyle(Resona.Palette.inkSoft)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Title")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                     .textCase(.uppercase)
                 TextField("Skill title", text: $title)
                     .textFieldStyle(.roundedBorder)
@@ -334,34 +325,38 @@ struct PromoteSkillSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Body")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                     .textCase(.uppercase)
                 TextEditor(text: $bodyText)
                     .frame(minHeight: 140)
                     .padding(4)
                     .scrollContentBackground(.hidden)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Resona.Palette.parchment)
+                    )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .stroke(Color.gray.opacity(0.25), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Resona.Palette.stone, lineWidth: 1)
                     )
             }
 
             if let dec = sourceDecisionID {
                 Text("Source: \(workstream.id) / \(dec)")
                     .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Resona.Palette.inkFaint)
             }
 
             if let errorText {
                 Label(errorText, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.coral)
             }
 
             if let savedMessage {
                 Label(savedMessage, systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.success)
             }
 
             HStack {
@@ -387,6 +382,7 @@ struct PromoteSkillSheet: View {
         }
         .padding(20)
         .frame(minWidth: 480, idealWidth: 540, maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
+        .background(Resona.Gradients.appBackground.ignoresSafeArea())
     }
 
     private func save() async {

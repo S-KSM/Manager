@@ -33,24 +33,24 @@ struct InterventionPanel: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
                 Image(systemName: "wand.and.stars")
-                    .foregroundStyle(.purple)
+                    .foregroundStyle(Resona.Palette.lavender)
                 Text("Intervene")
-                    .font(.headline)
+                    .font(Resona.Typography.headline)
                 Spacer()
                 Text(workstream.id)
                     .font(.caption.monospaced())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Resona.Palette.inkFaint)
             }
             Text("Steer this workstream. The agent picks up your message on its next turn.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Resona.Typography.caption)
+                .foregroundStyle(Resona.Palette.inkSoft)
 
             HStack(spacing: 10) {
                 modeButton(
                     mode: .nudge,
                     title: "Nudge",
                     systemImage: "bubble.left",
-                    tint: .blue,
+                    tint: Resona.Palette.sky,
                     help: "Advisory note. Agent may or may not change course.",
                     tooltip: "Send an advisory message to the agent on its next turn (non-blocking)"
                 )
@@ -58,7 +58,7 @@ struct InterventionPanel: View {
                     mode: .redirect,
                     title: "Redirect",
                     systemImage: "arrow.uturn.right",
-                    tint: .orange,
+                    tint: Resona.Palette.coral,
                     help: "Hard course-correct. Agent must respond.",
                     tooltip: "Force the agent to change course on its next turn"
                 )
@@ -66,7 +66,7 @@ struct InterventionPanel: View {
                     mode: .rollback,
                     title: "Rollback",
                     systemImage: "arrow.uturn.backward.circle",
-                    tint: .pink,
+                    tint: Resona.Palette.blush,
                     help: "Re-decide from a prior decision branch.",
                     tooltip: "Replay from a chosen decision with a hint — agent re-considers from that point"
                 )
@@ -74,6 +74,7 @@ struct InterventionPanel: View {
         }
         .padding(20)
         .frame(minWidth: 460, idealWidth: 540, maxWidth: .infinity)
+        .background(Resona.Gradients.appBackground.ignoresSafeArea())
         .sheet(item: $activeMode) { mode in
             switch mode {
             case .nudge:
@@ -134,18 +135,18 @@ struct InterventionPanel: View {
                 }
                 Text(help)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                     .multilineTextAlignment(.leading)
             }
-            .padding(10)
+            .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(tint.opacity(0.10))
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(tint.opacity(0.25))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(tint.opacity(0.25), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.7), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -175,18 +176,18 @@ private struct MessageInterventionSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
                 Image(systemName: kind == .nudge ? "bubble.left" : "arrow.uturn.right")
-                    .foregroundStyle(kind == .nudge ? .blue : .orange)
-                Text(title).font(.headline)
+                    .foregroundStyle(kind == .nudge ? Resona.Palette.sky : Resona.Palette.coral)
+                Text(title).font(Resona.Typography.headline)
                 Spacer()
             }
             Text(subtitle)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Resona.Typography.caption)
+                .foregroundStyle(Resona.Palette.inkSoft)
 
             ZStack(alignment: .topLeading) {
                 if message.isEmpty {
                     Text(placeholder)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Resona.Palette.inkFaint)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 8)
                 }
@@ -195,21 +196,25 @@ private struct MessageInterventionSheet: View {
                     .scrollContentBackground(.hidden)
             }
             .padding(4)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Resona.Palette.parchment)
+            )
             .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(Color.gray.opacity(0.25), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Resona.Palette.stone, lineWidth: 1)
             )
 
             if let errorText {
                 Label(errorText, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.coral)
             }
 
             if let sentMessage {
                 Label(sentMessage, systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.success)
             }
 
             HStack {
@@ -239,6 +244,7 @@ private struct MessageInterventionSheet: View {
         }
         .padding(20)
         .frame(minWidth: 460, idealWidth: 520, maxWidth: .infinity, minHeight: 260, maxHeight: .infinity)
+        .background(Resona.Gradients.appBackground.ignoresSafeArea())
     }
 
     private func send() async {
@@ -282,18 +288,18 @@ private struct RollbackInterventionSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.uturn.backward.circle")
-                    .foregroundStyle(.pink)
+                    .foregroundStyle(Resona.Palette.blush)
                 Text("Roll back to a prior decision")
-                    .font(.headline)
+                    .font(Resona.Typography.headline)
                 Spacer()
             }
             Text("The agent will be told it is back at this decision branch and asked to reconsider.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Resona.Typography.caption)
+                .foregroundStyle(Resona.Palette.inkSoft)
 
             if decisions.isEmpty {
                 Text("No decisions yet on this workstream — nothing to roll back to.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                     .padding(.vertical, 12)
             } else {
                 List(selection: $pickedDecisionID) {
@@ -304,20 +310,24 @@ private struct RollbackInterventionSheet: View {
                 }
                 .listStyle(.plain)
                 .frame(minHeight: 180, maxHeight: 240)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Resona.Palette.parchment)
+                )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(Color.gray.opacity(0.20), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Resona.Palette.stone, lineWidth: 1)
                 )
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Optional hint (what to consider this time around)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                 ZStack(alignment: .topLeading) {
                     if hint.isEmpty {
                         Text("e.g. revisit the offline-cache trade-off; we want SWR after all")
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Resona.Palette.inkFaint)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 8)
                     }
@@ -326,22 +336,26 @@ private struct RollbackInterventionSheet: View {
                         .scrollContentBackground(.hidden)
                 }
                 .padding(4)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Resona.Palette.parchment)
+                )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(Color.gray.opacity(0.25), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Resona.Palette.stone, lineWidth: 1)
                 )
             }
 
             if let errorText {
                 Label(errorText, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.coral)
             }
 
             if let sentMessage {
                 Label(sentMessage, systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.success)
             }
 
             HStack {
@@ -370,6 +384,7 @@ private struct RollbackInterventionSheet: View {
         }
         .padding(20)
         .frame(minWidth: 520, idealWidth: 600, maxWidth: .infinity, minHeight: 440, maxHeight: .infinity)
+        .background(Resona.Gradients.appBackground.ignoresSafeArea())
     }
 
     @ViewBuilder
@@ -382,11 +397,11 @@ private struct RollbackInterventionSheet: View {
                     Spacer(minLength: 8)
                     Text(event.id)
                         .font(.caption2.monospaced())
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Resona.Palette.inkFaint)
                 }
                 Text(d.rationale)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                     .lineLimit(2)
             }
             .padding(.vertical, 2)

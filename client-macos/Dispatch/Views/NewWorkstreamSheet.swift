@@ -37,18 +37,15 @@ struct NewWorkstreamSheet: View {
             HStack(spacing: 6) {
                 Image(systemName: "plus.circle.fill")
                     .foregroundStyle(.accent)
-                Text("New workstream").font(.headline)
+                Text("New workstream").font(Resona.Typography.headline)
                 Spacer()
             }
             Text("Spin up a fresh workstream. The id is a slug used in URLs and on disk; the title is for humans.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Resona.Typography.caption)
+                .foregroundStyle(Resona.Palette.inkSoft)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Id slug")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
+                ResonaEyebrow(text: "Id slug")
                 TextField("e.g. billing-migration", text: $slug)
                     .textFieldStyle(.roundedBorder)
                     .disableAutocorrection(true)
@@ -60,23 +57,20 @@ struct NewWorkstreamSheet: View {
                 if !trimmedSlug.isEmpty && !slugLooksValid {
                     Text("Slug can't contain spaces.")
                         .font(.caption2)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Resona.Palette.coral)
                 }
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Title")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
+                ResonaEyebrow(text: "Title")
                 TextField("e.g. Billing migration to Stripe", text: $title)
                     .textFieldStyle(.roundedBorder)
             }
 
             if let errorText {
                 Label(errorText, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.coral)
             }
 
             HStack {
@@ -100,6 +94,7 @@ struct NewWorkstreamSheet: View {
             }
         }
         .padding(20)
+        .background(Resona.Gradients.appBackground.ignoresSafeArea())
         .frame(minWidth: 420, idealWidth: 480, maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)
     }
 

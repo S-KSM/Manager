@@ -36,7 +36,7 @@ private struct DaemonStatusSettings: View {
                 }
                 LabeledContent("Reason") {
                     Text(reasonText(resolver.modeReason))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                 }
             }
 
@@ -44,15 +44,15 @@ private struct DaemonStatusSettings: View {
                 if let url = LaunchdInstaller.bundledDaemonURL {
                     Text(url.path)
                         .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                         .textSelection(.enabled)
                     Text("First launch writes a launchd agent pointing at this file. Move the .app and the agent rewires itself on next launch.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                 } else {
                     Text("Running a dev build (no daemon embedded). Use bin/install.sh to register the launchd agent against daemon/dist/index.js.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                 }
             }
 
@@ -161,8 +161,8 @@ private struct ProvidersSettings: View {
                         Image(systemName: status.systemImage)
                             .foregroundStyle(status.iconColor)
                         Text(status.line)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(Resona.Typography.caption)
+                            .foregroundStyle(Resona.Palette.inkSoft)
                             .lineLimit(3)
                             .textSelection(.enabled)
                     }
@@ -189,8 +189,8 @@ private struct ProvidersSettings: View {
                     .help("Required only when Provider = Claude. Stored in ~/.claude/dispatch/settings.json with 0600 permissions; never returned by the daemon once saved.")
                 if anthropicConfigured && anthropicAPIKey.isEmpty {
                     Text("A key is on file. Type a new one to replace it; clear and save to remove it.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                 }
             }
 
@@ -201,8 +201,8 @@ private struct ProvidersSettings: View {
                     .help("Required for the Link-to-Linear chip in the agent detail view, plus the bidirectional Linear sync. Same redaction + storage as the Anthropic key.")
                 if linearConfigured && linearAPIKey.isEmpty {
                     Text("A key is on file. Type a new one to replace it; clear and save to remove it.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                 }
             }
 
@@ -224,13 +224,13 @@ private struct ProvidersSettings: View {
             HStack {
                 if let err = loadingError ?? saveError {
                     Text(err)
-                        .font(.caption)
-                        .foregroundStyle(.red)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.coral)
                         .lineLimit(2)
                 } else if let savedAt {
                     Text("Saved \(savedAt.formatted(date: .omitted, time: .standard)).")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                 }
                 Spacer()
                 Button("Save") { Task { await save() } }
@@ -403,18 +403,18 @@ private struct ProvidersSettings: View {
         if probing {
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
-                Text("Checking…").foregroundStyle(.secondary)
+                Text("Checking…").foregroundStyle(Resona.Palette.inkSoft)
             }
         } else if let reachable {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(reachable ? .green : .red)
+                    .fill(reachable ? Resona.Palette.success : Resona.Palette.coral)
                     .frame(width: 8, height: 8)
                 Text(reachable ? okText : failText)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
             }
         } else {
-            Text("Unknown").foregroundStyle(.secondary)
+            Text("Unknown").foregroundStyle(Resona.Palette.inkSoft)
         }
     }
 }
@@ -440,9 +440,9 @@ enum PullStatus: Equatable {
     }
     var iconColor: Color {
         switch self {
-        case .info: return .secondary
-        case .ok: return .green
-        case .error: return .red
+        case .info: return Resona.Palette.inkSoft
+        case .ok: return Resona.Palette.success
+        case .error: return Resona.Palette.coral
         }
     }
 }
@@ -497,8 +497,8 @@ private struct DiagnosticsSettings: View {
                     .help("Find the PID listening on the configured local LLM port and SIGTERM it (with a 3-second grace period before SIGKILL).")
                 if let text = killResultText {
                     Text(text)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                         .lineLimit(3)
                 }
 
@@ -511,8 +511,8 @@ private struct DiagnosticsSettings: View {
                     )
                 if let text = restartLLMResultText {
                     Text(text)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                         .lineLimit(3)
                 }
             }
@@ -523,8 +523,8 @@ private struct DiagnosticsSettings: View {
                     .help("Re-read settings.json and re-instantiate the background tickers (Headliner / SubgoalSynthesizer / LinearCommentSyncer). The daemon process keeps running.")
                 if let text = restartSoftResultText {
                     Text(text)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                         .lineLimit(3)
                 }
 
@@ -532,8 +532,8 @@ private struct DiagnosticsSettings: View {
                     .help("Run launchctl kickstart -k. Daemon process exits and launchd brings it back. The Radar reconnects automatically.")
                 if let text = restartHardResultText {
                     Text(text)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                         .lineLimit(3)
                 }
             }
