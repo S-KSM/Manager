@@ -98,11 +98,12 @@ struct GenerateReportSheet: View {
                 }
             }
             .padding(20)
-            Divider()
+            Divider().overlay(Resona.Palette.stone)
             footer
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
         }
+        .background(Resona.Gradients.appBackground.ignoresSafeArea())
         .frame(
             minWidth: generatedReport == nil ? 540 : 720,
             idealWidth: generatedReport == nil ? 600 : 800,
@@ -125,22 +126,22 @@ struct GenerateReportSheet: View {
     private var header: some View {
         HStack(spacing: 6) {
             Image(systemName: "doc.text.image")
-                .foregroundStyle(.blue)
+                .foregroundStyle(Resona.Palette.sky)
             Text(generatedReport == nil ? "Generate update" : "Preview update")
-                .font(.headline)
+                .font(Resona.Typography.headline)
             Spacer()
             if let preset = selectedPresetID, freetextOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(preset.replacingOccurrences(of: "_", with: " ").capitalized)
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
             }
             if !freetextOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text("Override")
                     .font(.caption2.weight(.semibold))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.purple.opacity(0.18)))
-                    .foregroundStyle(.purple)
+                    .background(Capsule().fill(Resona.Palette.lavender.opacity(0.4)))
+                    .foregroundStyle(Resona.Palette.ink)
             }
         }
     }
@@ -171,13 +172,7 @@ struct GenerateReportSheet: View {
                     period = p
                 } label: {
                     Text(p.rawValue)
-                        .font(.caption)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule().fill((active ? Color.accentColor : Color.gray).opacity(0.15))
-                        )
-                        .foregroundStyle(active ? Color.accentColor : Color.primary)
+                        .resonaPill(active: active, tint: Resona.Palette.lavender)
                 }
                 .buttonStyle(.plain)
                 .help("Set the report window to \(p.rawValue.lowercased())")
@@ -200,8 +195,8 @@ struct GenerateReportSheet: View {
         sectionLabel("Workstreams")
         if workstreams.isEmpty {
             Text("No active workstreams.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Resona.Typography.caption)
+                .foregroundStyle(Resona.Palette.inkSoft)
         } else {
             FlowLayout(spacing: 6) {
                 ForEach(workstreams) { ws in
@@ -217,15 +212,9 @@ struct GenerateReportSheet: View {
                             Image(systemName: active ? "checkmark.circle.fill" : "circle")
                                 .imageScale(.small)
                             Text(ws.title)
-                                .font(.caption)
                                 .lineLimit(1)
                         }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule().fill((active ? Color.accentColor : Color.gray).opacity(0.15))
-                        )
-                        .foregroundStyle(active ? Color.accentColor : Color.primary)
+                        .resonaPill(active: active, tint: Resona.Palette.mint)
                     }
                     .buttonStyle(.plain)
                     .help(active
@@ -268,7 +257,7 @@ struct GenerateReportSheet: View {
             ZStack(alignment: .topLeading) {
                 if freetextOverride.isEmpty {
                     Text("e.g. Series A investors, focus on traction metrics")
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Resona.Palette.inkFaint)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 8)
                 }
@@ -277,13 +266,17 @@ struct GenerateReportSheet: View {
                     .scrollContentBackground(.hidden)
             }
             .padding(4)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Resona.Palette.parchment)
+            )
             .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(Color.gray.opacity(0.25), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Resona.Palette.stone, lineWidth: 1)
             )
             Text("If non-empty, overrides the audience preset's tone.")
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Resona.Palette.inkFaint)
         }
     }
 
@@ -303,7 +296,7 @@ struct GenerateReportSheet: View {
             .textFieldStyle(.roundedBorder)
         Text("Leave blank to use the default for the chosen provider.")
             .font(.caption2)
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(Resona.Palette.inkFaint)
     }
 
     // MARK: - Preview
@@ -313,19 +306,19 @@ struct GenerateReportSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 Text(report.title)
-                    .font(.title3.weight(.semibold))
+                    .font(Resona.Typography.title)
                 HStack(spacing: 8) {
                     AudienceBadge(report: report)
                     Text(report.provider.capitalized)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                     if let m = report.model {
                         Text(m)
                             .font(.caption2.monospaced())
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Resona.Palette.inkFaint)
                     }
                 }
-                Divider()
+                Divider().overlay(Resona.Palette.stone)
                 Text(renderMarkdownLines(report.bodyMD))
                     .textSelection(.enabled)
                     .font(.callout)
@@ -400,10 +393,7 @@ struct GenerateReportSheet: View {
 
     @ViewBuilder
     private func sectionLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .textCase(.uppercase)
+        ResonaEyebrow(text: text)
     }
 
     private func loadPresets() async {

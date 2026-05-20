@@ -24,8 +24,8 @@ struct LLMErrorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(message, systemImage: "exclamationmark.triangle.fill")
-                .font(.caption)
-                .foregroundStyle(.red)
+                .font(Resona.Typography.caption)
+                .foregroundStyle(Resona.Palette.coral)
                 .textSelection(.enabled)
             if let modelName = LLMErrorView.extractMissingModelName(from: message) {
                 HStack(spacing: 8) {
@@ -48,8 +48,8 @@ struct LLMErrorView: View {
                         Image(systemName: status.systemImage)
                             .foregroundStyle(status.iconColor)
                         Text(status.line)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(Resona.Typography.caption)
+                            .foregroundStyle(Resona.Palette.inkSoft)
                             .lineLimit(2)
                             .textSelection(.enabled)
                     }

@@ -34,17 +34,17 @@ struct ContentView: View {
                 if let missing = unknownWorkstreamFromURL {
                     HStack {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Resona.Palette.coral)
                         Text("workstream `\(missing)` not found — open `claude` here to register")
                             .font(.callout)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Resona.Palette.inkSoft)
                         Spacer()
                         Button("Dismiss") { unknownWorkstreamFromURL = nil }
                             .buttonStyle(.borderless)
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(.orange.opacity(0.12))
+                    .background(Resona.Palette.coral.opacity(0.12))
                 }
                 detail
             }
@@ -178,8 +178,8 @@ struct ContentView: View {
                         }
                     } label: {
                         Text("\(retired.count) retired")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(Resona.Typography.caption)
+                            .foregroundStyle(Resona.Palette.inkSoft)
                     }
                 }
             }
@@ -387,19 +387,19 @@ private struct WorkstreamRow: View {
                     .font(.callout)
                     .lineLimit(1)
                 Text(workstream.id)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(Resona.Typography.caption)
+                    .foregroundStyle(Resona.Palette.inkFaint)
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
             if workstream.needsAttention {
                 Image(systemName: "exclamationmark.bubble.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Resona.Palette.coral)
                     .imageScale(.small)
             }
             if workstream.status == .paused {
                 Image(systemName: "pause.fill")
-                    .foregroundStyle(.yellow)
+                    .foregroundStyle(Resona.Palette.butter)
                     .imageScale(.small)
             }
         }
@@ -415,11 +415,11 @@ private struct ModeBadge: View {
     var body: some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(mode == .live ? Color.green : Color.yellow)
+                .fill(mode == .live ? Resona.Palette.success : Resona.Palette.butter)
                 .frame(width: 8, height: 8)
             Text(mode == .live ? "Live daemon" : "Mock data")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Resona.Typography.caption)
+                .foregroundStyle(Resona.Palette.inkSoft)
         }
     }
 }

@@ -206,23 +206,23 @@ struct AgentDetailView: View {
             RobotMascot(workstream: workstream, size: 56)
             VStack(alignment: .leading, spacing: 2) {
                 Text(workstream.title)
-                    .font(.title2.weight(.semibold))
+                    .font(Resona.Typography.title)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 HStack(spacing: 6) {
                     Text(workstream.id)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     if let activity = currentActivityLine {
-                        Text("·").foregroundStyle(.tertiary)
+                        Text("·").foregroundStyle(Resona.Palette.inkFaint)
                         Image(systemName: "hammer")
                             .imageScale(.small)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Resona.Palette.inkFaint)
                         Text(activity)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(Resona.Typography.caption)
+                            .foregroundStyle(Resona.Palette.inkSoft)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
@@ -231,16 +231,16 @@ struct AgentDetailView: View {
             .layoutPriority(1)
             Spacer(minLength: 8)
             HStack(spacing: 6) {
-                Circle().fill(workstream.statusColor).frame(width: 8, height: 8)
+                Circle().fill(ResonaStatusTint.forWorkstreamStatus(workstream.status.rawValue)).frame(width: 8, height: 8)
                 Text(workstream.statusLabel)
-                    .font(.caption)
+                    .font(Resona.Typography.caption)
                     .lineLimit(1)
                     .fixedSize()
             }
             if workstream.needsAttention {
                 Label("Needs you", systemImage: "exclamationmark.bubble.fill")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Resona.Palette.coral)
                     .labelStyle(.titleAndIcon)
                     .lineLimit(1)
                     .fixedSize()
@@ -257,7 +257,7 @@ struct AgentDetailView: View {
                 Label("Intervene", systemImage: "wand.and.stars")
             }
             .buttonStyle(.borderedProminent)
-            .tint(.purple)
+            .tint(Resona.Palette.lavender)
             .controlSize(.small)
             .help("Send a nudge, redirect, or rollback to this workstream.")
         }
@@ -269,15 +269,15 @@ struct AgentDetailView: View {
         HStack {
             Image(systemName: "doc.text")
             Text("Memory")
-                .font(.headline)
+                .font(Resona.Typography.headline)
             Spacer()
             Text("read-only — v0")
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Resona.Palette.inkFaint)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.thinMaterial)
+        .background(Resona.Palette.parchment.opacity(0.85))
     }
 
     /// Header status line, in priority order:
@@ -382,12 +382,12 @@ struct LinearChip: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(
-                    Capsule().fill(Color.purple.opacity(0.15))
+                    Capsule().fill(Resona.Palette.lavender.opacity(0.45))
                 )
                 .overlay(
-                    Capsule().stroke(Color.purple.opacity(0.45), lineWidth: 1)
+                    Capsule().strokeBorder(Resona.Palette.lavender, lineWidth: 1)
                 )
-                .foregroundStyle(.purple)
+                .foregroundStyle(Resona.Palette.ink)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -420,7 +420,7 @@ struct ApprovalStrip: View {
             ForEach(pending) { intv in
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Image(systemName: "hand.raised.fill")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Resona.Palette.coral)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(intv.payload.approvalRequest?.summary
                              ?? intv.payload.message
@@ -428,8 +428,8 @@ struct ApprovalStrip: View {
                             .font(.body.weight(.semibold))
                         if let detail = intv.payload.approvalRequest?.detail, !detail.isEmpty {
                             Text(detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(Resona.Typography.caption)
+                                .foregroundStyle(Resona.Palette.inkSoft)
                                 .lineLimit(2)
                         }
                     }
@@ -448,7 +448,7 @@ struct ApprovalStrip: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(Color.orange.opacity(0.08))
+        .background(Resona.Palette.coral.opacity(0.12))
     }
 }
 
@@ -473,7 +473,7 @@ struct QuestionStrip: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(Color.blue.opacity(0.08))
+        .background(Resona.Palette.sky.opacity(0.18))
     }
 }
 
@@ -501,12 +501,12 @@ private struct QuestionRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Image(systemName: "questionmark.bubble.fill")
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(Resona.Palette.sky)
                 VStack(alignment: .leading, spacing: 2) {
                     if let contextLine, !contextLine.isEmpty {
                         Text(contextLine)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(Resona.Typography.caption)
+                            .foregroundStyle(Resona.Palette.inkSoft)
                             .lineLimit(1)
                     }
                     Text(question)
@@ -577,7 +577,7 @@ struct MethodologyTimelineView: View {
                             ProgressView().controlSize(.small)
                         } else {
                             Text("No events yet for this workstream.")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Resona.Palette.inkSoft)
                         }
                     }
                     .padding(20)
@@ -689,7 +689,7 @@ private struct TimelineRow: View {
                 Color.clear.frame(width: CGFloat(indent) * 18, height: 1)
                 Image(systemName: "arrow.turn.down.right")
                     .imageScale(.small)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Resona.Palette.inkFaint)
                     .padding(.top, 4)
             }
             iconBubble
@@ -711,12 +711,12 @@ private struct TimelineRow: View {
                     }
                     Text(Self.timeFormatter.string(from: event.ts))
                         .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Resona.Palette.inkFaint)
                 }
                 if let sub = subline {
                     Text(sub)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                         .lineLimit(isExpanded ? nil : 2)
                 }
                 if isExpanded, case .decision(let d) = event.payload {
@@ -773,14 +773,14 @@ private struct TimelineRow: View {
 
     private var iconTint: Color {
         switch event.payload {
-        case .decision:               return .accentColor
-        case .blocked:                return .orange
-        case .confidence:             return .blue
-        case .memoryUpdate:           return .purple
-        case .interventionDelivered:  return .pink
+        case .decision:               return Resona.Palette.lavender
+        case .blocked:                return Resona.Palette.coral
+        case .confidence:             return Resona.Palette.sky
+        case .memoryUpdate:           return Resona.Palette.lavender
+        case .interventionDelivered:  return Resona.Palette.blush
         case .toolUse(let t):
-            return t.phase == "user-prompt-submit" ? .accentColor : .secondary
-        default:                      return .secondary
+            return t.phase == "user-prompt-submit" ? Resona.Palette.lavender : Resona.Palette.inkSoft
+        default:                      return Resona.Palette.inkSoft
         }
     }
 
@@ -876,13 +876,13 @@ private struct ToolRunPill: View {
                 HStack(spacing: 8) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .imageScale(.small)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Resona.Palette.inkFaint)
                     Image(systemName: "wrench.adjustable")
                         .imageScale(.small)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                     Text("\(runEvents.count) action\(runEvents.count == 1 ? "" : "s")")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                     Spacer()
                 }
                 .padding(.vertical, 4)
@@ -919,15 +919,15 @@ private struct DecisionDetail: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Considered")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Resona.Palette.inkSoft)
                         .textCase(.uppercase)
                     ForEach(decision.considered, id: \.self) { c in
                         HStack(alignment: .top, spacing: 4) {
                             Text(c == decision.choice ? "✓" : "•")
-                                .foregroundStyle(c == decision.choice ? Color.green : Color.gray.opacity(0.6))
+                                .foregroundStyle(c == decision.choice ? Resona.Palette.success : Resona.Palette.stone)
                             Text(c)
-                                .font(.caption)
-                                .foregroundStyle(c == decision.choice ? .primary : .secondary)
+                                .font(Resona.Typography.caption)
+                                .foregroundStyle(c == decision.choice ? .primary : Resona.Palette.inkSoft)
                         }
                     }
                 }
@@ -935,7 +935,7 @@ private struct DecisionDetail: View {
             HStack(spacing: 4) {
                 Text("Confidence")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                     .textCase(.uppercase)
                 Text("\(Int((decision.confidence * 100).rounded()))%")
                     .font(.caption.monospacedDigit())
@@ -944,8 +944,8 @@ private struct DecisionDetail: View {
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.gray.opacity(0.08))
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Resona.Palette.mist)
         )
         .padding(.top, 2)
     }
@@ -968,13 +968,13 @@ private struct PlanSection: View {
             HStack(spacing: 6) {
                 Image(systemName: "checklist")
                     .imageScale(.small)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Resona.Palette.inkSoft)
                 Text("Plan")
-                    .font(.headline)
+                    .font(Resona.Typography.headline)
                 Spacer()
                 Text("\(completedCount)/\(todos.count)")
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Resona.Palette.inkFaint)
             }
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(todos) { todo in
@@ -1028,17 +1028,17 @@ private struct PlanRow: View {
 
     private var markerTint: Color {
         switch todo.status {
-        case .pending:    return .secondary
-        case .inProgress: return .accentColor
-        case .completed:  return .green
+        case .pending:    return Resona.Palette.inkSoft
+        case .inProgress: return Resona.Palette.lavender
+        case .completed:  return Resona.Palette.success
         }
     }
 
     private var textTint: Color {
         switch todo.status {
-        case .pending:    return .secondary
+        case .pending:    return Resona.Palette.inkSoft
         case .inProgress: return .primary
-        case .completed:  return .secondary
+        case .completed:  return Resona.Palette.inkSoft
         }
     }
 }
@@ -1064,7 +1064,7 @@ struct MemoryPaneView: View {
                     ForEach(memory.sections) { section in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(section.heading)
-                                .font(.headline)
+                                .font(Resona.Typography.headline)
                             Text(renderMarkdown(section.body))
                                 .textSelection(.enabled)
                                 .font(.callout)

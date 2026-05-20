@@ -146,7 +146,7 @@ private struct RobotShapes: View {
                     .shadow(color: accent.opacity(state == .working && !isAsleep ? 0.9 : 0.0),
                             radius: 4 * unit)
                 Rectangle()
-                    .fill(Color.gray.opacity(0.55))
+                    .fill(Resona.Palette.stone.opacity(0.85))
                     .frame(width: 2 * unit, height: 8 * unit)
                 Spacer()
             }
@@ -157,11 +157,17 @@ private struct RobotShapes: View {
                 // Head
                 ZStack {
                     RoundedRectangle(cornerRadius: 8 * unit, style: .continuous)
-                        .fill(Color(nsColor: .controlBackgroundColor))
+                        .fill(
+                            LinearGradient(
+                                colors: [Resona.Palette.parchment, Resona.Palette.cream],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
                         .overlay(
                             RoundedRectangle(cornerRadius: 8 * unit, style: .continuous)
-                                .stroke(Color.gray.opacity(0.5), lineWidth: 1)
+                                .stroke(accent.opacity(0.45), lineWidth: 1.2)
                         )
+                        .shadow(color: accent.opacity(0.25), radius: 4 * unit, x: 0, y: 1.5 * unit)
                         .frame(width: 36 * unit, height: 28 * unit)
                     HStack(spacing: 8 * unit) {
                         Eye(state: state, presence: presence, blink: blink, accent: accent, unit: unit)
@@ -170,7 +176,7 @@ private struct RobotShapes: View {
                     // Mouth — small line, smiles a bit when working;
                     // sleeping faces get a flat neutral mouth.
                     Capsule()
-                        .fill(Color.gray.opacity(0.7))
+                        .fill(Resona.Palette.ink.opacity(0.75))
                         .frame(width: 10 * unit, height: 2 * unit)
                         .offset(y: 8 * unit)
                         .rotationEffect(.degrees(
@@ -187,10 +193,15 @@ private struct RobotShapes: View {
                         .offset(x: 22 * unit, y: -2 * unit)
                     // Torso
                     RoundedRectangle(cornerRadius: 6 * unit, style: .continuous)
-                        .fill(Color(nsColor: .controlBackgroundColor))
+                        .fill(
+                            LinearGradient(
+                                colors: [Resona.Palette.parchment, Resona.Palette.mist],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
                         .overlay(
                             RoundedRectangle(cornerRadius: 6 * unit, style: .continuous)
-                                .stroke(Color.gray.opacity(0.5), lineWidth: 1)
+                                .stroke(accent.opacity(0.40), lineWidth: 1.1)
                         )
                         .frame(width: 28 * unit, height: 22 * unit)
                     // Chest light — dim and steady when asleep
@@ -201,9 +212,9 @@ private struct RobotShapes: View {
 
                 // Tiny feet
                 HStack(spacing: 6 * unit) {
-                    Capsule().fill(Color.gray.opacity(0.55))
+                    Capsule().fill(Resona.Palette.lavender.opacity(0.6))
                         .frame(width: 8 * unit, height: 4 * unit)
-                    Capsule().fill(Color.gray.opacity(0.55))
+                    Capsule().fill(Resona.Palette.lavender.opacity(0.6))
                         .frame(width: 8 * unit, height: 4 * unit)
                 }
             }
@@ -222,19 +233,19 @@ private struct RobotShapes: View {
         case .blocked:
             Text("!")
                 .font(.system(size: 18 * unit, weight: .black, design: .rounded))
-                .foregroundStyle(.orange)
+                .foregroundStyle(Resona.Palette.coral)
                 .offset(y: -size * 0.55 + sin(t * 6) * 2 * unit)
         case .idle:
             let zRise = (t.truncatingRemainder(dividingBy: 2.6)) / 2.6
             Text("z")
                 .font(.system(size: 14 * unit, weight: .semibold, design: .rounded))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Resona.Palette.lavender)
                 .opacity(1 - zRise)
                 .offset(x: 14 * unit, y: -size * 0.55 - CGFloat(zRise) * 18 * unit)
         case .thinking:
             Text("?")
                 .font(.system(size: 12 * unit, weight: .bold, design: .rounded))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Resona.Palette.lavender)
                 .opacity(0.4 + 0.6 * breathe)
                 .offset(x: 14 * unit, y: -size * 0.5)
         case .working:
@@ -243,12 +254,12 @@ private struct RobotShapes: View {
     }
 
     private func antennaColor(blink: Double, breathe: Double) -> Color {
-        if isAsleep { return Color.gray.opacity(0.25) }
+        if isAsleep { return Resona.Palette.stone.opacity(0.45) }
         switch state {
         case .working:  return accent.opacity(0.5 + 0.5 * blink)
         case .thinking: return accent.opacity(0.35 + 0.35 * breathe)
-        case .blocked:  return .orange
-        case .idle:     return Color.gray.opacity(0.4)
+        case .blocked:  return Resona.Palette.coral
+        case .idle:     return Resona.Palette.lavender.opacity(0.6)
         }
     }
 }
@@ -284,7 +295,7 @@ private struct SleepingZees: View {
         let dy = -CGFloat(index) * 9 * unit - CGFloat(phase) * 14 * unit
         Text("Z")
             .font(.system(size: 13 * unit * scale, weight: .heavy, design: .rounded))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Resona.Palette.lavender)
             .opacity(0.85 * (1 - phase))
             .rotationEffect(.degrees(-12 + Double(index) * 4))
             .offset(x: dx, y: dy)
@@ -313,7 +324,7 @@ private struct Eye: View {
                         control: CGPoint(x: 4 * unit, y: 4 * unit)
                     )
                 }
-                .stroke(Color.gray.opacity(0.75),
+                .stroke(Resona.Palette.ink.opacity(0.75),
                         style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
                 .frame(width: 8 * unit, height: 4 * unit)
             } else {
@@ -321,12 +332,12 @@ private struct Eye: View {
                 case .idle:
                     // Closed (line)
                     Capsule()
-                        .fill(Color.gray.opacity(0.7))
+                        .fill(Resona.Palette.ink.opacity(0.7))
                         .frame(width: 8 * unit, height: 2 * unit)
                 case .blocked:
                     // Wide, alarmed
                     Circle()
-                        .fill(.orange)
+                        .fill(Resona.Palette.coral)
                         .frame(width: 8 * unit, height: 8 * unit)
                 default:
                     // Working / thinking — pupil that blinks (heightens occasionally)
@@ -366,7 +377,7 @@ private struct Arm: View {
         let isAsleep = presence == .asleep
 
         return Capsule()
-            .fill(Color.gray.opacity(0.6))
+            .fill(Resona.Palette.lavender.opacity(0.55))
             .frame(width: 5 * unit, height: 18 * unit)
             .overlay(
                 Circle()
