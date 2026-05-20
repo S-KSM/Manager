@@ -9,6 +9,7 @@ import { HeadlineStore } from './headline-store.js';
 import { Headliner } from './headliner.js';
 import { LinearCommentSyncer } from './linear-comment-syncer.js';
 import { TrackerMirror } from './tracker-mirror.js';
+import { SkillDistiller } from './skill-distiller.js';
 import { SubgoalSynthesizer } from './subgoal-synthesizer.js';
 import { buildHttpServer } from './http-server.js';
 import {
@@ -214,6 +215,7 @@ async function runStart(opts: {
   // ticker so the `POST /admin/restart` endpoint can cancel + re-instantiate
   // them in place (re-reading settings.json) without exiting the daemon.
   let subgoalSynth: SubgoalSynthesizer | null = null;
+  let skillDistiller: SkillDistiller | null = null;
   let linearSyncerRef: LinearCommentSyncer | null = null;
   const restartTickers = (): string[] => {
     const restarted: string[] = [];
@@ -228,6 +230,18 @@ async function runStart(opts: {
       subgoalSynth = new SubgoalSynthesizer({ registry, eventStore, settings });
       subgoalSynth.start();
       restarted.push('subgoal_synth');
+    }
+    if (skillDistiller) {
+      skillDistiller.stop();
+      skillDistiller = new SkillDistiller({
+        registry,
+        eventStore,
+        handbookStore,
+        skillProposalsStore,
+        settings,
+      });
+      skillDistiller.start();
+      restarted.push('skill_distiller');
     }
     if (linearSyncerRef) {
       linearSyncerRef.stop();
@@ -305,6 +319,18 @@ async function runStart(opts: {
     subgoalSynth = new SubgoalSynthesizer({ registry, eventStore, settings });
     subgoalSynth.start();
     process.stderr.write('[dispatch] subgoal synthesizer started\n');
+  }
+
+  if (process.env['DISPATCH_SKILL_DISTILLER_ENABLED'] !== '0') {
+    skillDistiller = new SkillDistiller({
+      registry,
+      eventStore,
+      handbookStore,
+      skillProposalsStore,
+      settings,
+    });
+    skillDistiller.start();
+    process.stderr.write('[dispatch] skill distiller started\n');
   }
 
   let linearSyncer: LinearCommentSyncer | null = null;
@@ -631,6 +657,7 @@ async function runStart(opts: {
       // generation, not whatever was constructed at boot.
       linearSyncerRef?.stop();
       subgoalSynth?.stop();
+      skillDistiller?.stop();
       headliner.stop();
       scheduler.stop();
       await http.close();
