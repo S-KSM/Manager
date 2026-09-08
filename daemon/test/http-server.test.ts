@@ -34,13 +34,14 @@ describe('HTTP server', () => {
   let workstreamLinks: WorkstreamLinksStore;
   let handle: HttpServerHandle;
   let providerCalls: { name: LLMProviderName; system: string; user: string }[];
+  let memoryStore: MemoryStore;
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'manager-http-'));
     registry = new WorkstreamRegistry(join(dir, 'db.sqlite'));
     interventionQueue = new InterventionQueue(join(dir, 'db.sqlite'));
     eventStore = new EventStore(join(dir, 'events'));
-    const memoryStore = new MemoryStore(join(dir, 'memory'));
+    memoryStore = new MemoryStore(join(dir, 'memory'));
     handbookStore = new HandbookStore(join(dir, 'handbook.md'));
     skillProposalsStore = new SkillProposalsStore(join(dir, 'db.sqlite'));
     reportStore = new ReportStore(join(dir, 'db.sqlite'));
@@ -469,6 +470,193 @@ describe('HTTP server', () => {
     expect(r.status).toBe(404);
   });
 
+  it('GET /workstreams/:id/adr-material returns decisions ≥0.8 confidence plus memory Markdown', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'adr1', title: 'ADR1' });
+    await eventStore.appendEvent('adr1', {
+      ts: '2026-05-02T10:00:00Z',
+      workstream_id: 'adr1',
+      session_id: 's1',
+      type: 'decision',
+      id: 'dec_high',
+      payload: { considered: ['A', 'B'], choice: 'B', rationale: 'because Y', confidence: 0.9 },
+    });
+    await eventStore.appendEvent('adr1', {
+      ts: '2026-05-02T10:05:00Z',
+      workstream_id: 'adr1',
+      session_id: 's1',
+      type: 'decision',
+      id: 'dec_low',
+      payload: { considered: ['A'], choice: 'A', rationale: 'because X', confidence: 0.4 },
+    });
+    await memoryStore.updateSection('adr1', 'Current state', 'Migration in progress.');
+
+    const r = await request(handle.app).get('/workstreams/adr1/adr-material');
+    expect(r.status).toBe(200);
+    expect(r.body.workstream_id).toBe('adr1');
+    expect(r.body.min_confidence).toBe(0.8);
+    expect(r.body.decisions).toHaveLength(1);
+    expect(r.body.decisions[0]).toMatchObject({
+      id: 'dec_high',
+      choice: 'B',
+      rationale: 'because Y',
+      confidence: 0.9,
+    });
+    expect(r.body.memory).toContain('Migration in progress.');
+  });
+
+  it('GET /workstreams/:id/adr-material honors a ?min_confidence= override', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'adr2', title: 'ADR2' });
+    await eventStore.appendEvent('adr2', {
+      ts: '2026-05-02T10:00:00Z',
+      workstream_id: 'adr2',
+      type: 'decision',
+      id: 'dec_mid',
+      payload: { considered: [], choice: 'C', rationale: 'r', confidence: 0.5 },
+    });
+    const r = await request(handle.app).get('/workstreams/adr2/adr-material?min_confidence=0.3');
+    expect(r.status).toBe(200);
+    expect(r.body.min_confidence).toBe(0.3);
+    expect(r.body.decisions).toHaveLength(1);
+  });
+
+  it('GET /workstreams/:id/adr-material → 404 for unknown workstream', async () => {
+    const r = await request(handle.app).get('/workstreams/missing/adr-material');
+    expect(r.status).toBe(404);
+  });
+
+  // ---- v1.4.20 orchestrator state enrichment + late binding ---------------
+
+  function fakeOrchestrator(running: Array<{ issue_id: string; identifier: string }>) {
+    return {
+      snapshot: () => ({
+        poll_interval_ms: 5000,
+        max_concurrent_agents: 3,
+        stall_timeout_ms: 1000,
+        counts: { running: running.length, retrying: 0, claimed: 0, completed: 0 },
+        running: running.map((r) => ({
+          ...r,
+          workspace_path: null,
+          started_at: '2026-05-02T10:00:00Z',
+          attempt: null,
+        })),
+        retrying: [],
+      }),
+    };
+  }
+
+  it('GET /orchestrator/state is late-bound: a getter that becomes non-null after build is honored', async () => {
+    const holder: { current: ReturnType<typeof fakeOrchestrator> | null } = { current: null };
+    const h2 = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory-orch1')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      get orchestrator() {
+        return holder.current ?? undefined;
+      },
+    } as unknown as Parameters<typeof buildHttpServer>[0]);
+    try {
+      expect((await request(h2.app).get('/orchestrator/state')).status).toBe(404);
+      holder.current = fakeOrchestrator([]);
+      const r = await request(h2.app).get('/orchestrator/state');
+      expect(r.status).toBe(200);
+      expect(r.body.counts.running).toBe(0);
+    } finally {
+      await h2.close();
+    }
+  });
+
+  it('GET /orchestrator/state merges tracker/runtime/workflow meta, workstream ids and tmux attach', async () => {
+    const h2 = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory-orch2')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      orchestrator: fakeOrchestrator([
+        { issue_id: 'proj/feat/phase-1', identifier: 'proj/feat/phase-1' },
+        { issue_id: 'ENG-2', identifier: 'ENG-2' },
+      ]),
+      orchestratorMeta: {
+        tracker_kind: 'team-brain',
+        agent_runtime: 'claude-code-tmux',
+        workflow_path: '/repo/WORKFLOW.fleet.md',
+      },
+      agentRunner: {
+        activeTmuxSessions: () => [
+          {
+            workstream_id: 'proj_feat_phase-1',
+            issue_identifier: 'proj/feat/phase-1',
+            session_id: 'sess_abc',
+            tmux_session: 'dispatch-proj_feat_phase-1-sess_abc',
+            attach_command: 'tmux attach -t dispatch-proj_feat_phase-1-sess_abc',
+            started_at: '2026-05-02T10:00:00Z',
+          },
+        ],
+      },
+    } as unknown as Parameters<typeof buildHttpServer>[0]);
+    try {
+      const r = await request(h2.app).get('/orchestrator/state');
+      expect(r.status).toBe(200);
+      expect(r.body.tracker_kind).toBe('team-brain');
+      expect(r.body.agent_runtime).toBe('claude-code-tmux');
+      expect(r.body.workflow_path).toBe('/repo/WORKFLOW.fleet.md');
+      const byId = Object.fromEntries(
+        (r.body.running as Array<{ identifier: string }>).map((e) => [e.identifier, e]),
+      );
+      expect(byId['proj/feat/phase-1']).toMatchObject({
+        workstream_id: 'proj_feat_phase-1',
+        attach: { command: 'tmux attach -t dispatch-proj_feat_phase-1-sess_abc' },
+      });
+      expect(byId['ENG-2']).toMatchObject({ workstream_id: 'eng-2', attach: null });
+    } finally {
+      await h2.close();
+    }
+  });
+
+  it('workstream wire format carries autonomous_running derived from the orchestrator running set', async () => {
+    const h2 = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory-orch3')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      orchestrator: fakeOrchestrator([{ issue_id: 'ENG-7', identifier: 'ENG-7' }]),
+    } as unknown as Parameters<typeof buildHttpServer>[0]);
+    try {
+      await request(h2.app).post('/workstreams').send({ id: 'eng-7', title: 'Seven' });
+      await request(h2.app).post('/workstreams').send({ id: 'manual', title: 'Manual' });
+      const auto = await request(h2.app).get('/workstreams/eng-7');
+      expect(auto.body.autonomous_running).toBe(true);
+      const manual = await request(h2.app).get('/workstreams/manual');
+      expect(manual.body.autonomous_running).toBe(false);
+    } finally {
+      await h2.close();
+    }
+  });
+
+  it('workstream wire format reports autonomous_running=false when no orchestrator is wired', async () => {
+    await request(handle.app).post('/workstreams').send({ id: 'plain', title: 'Plain' });
+    const r = await request(handle.app).get('/workstreams/plain');
+    expect(r.body.autonomous_running).toBe(false);
+  });
+
   // ---- Lifecycle: PATCH / DELETE ----------------------------------------
 
   it('PATCH /workstreams/:id sets status (active → paused) and emits workstream_updated', async () => {
@@ -699,6 +887,97 @@ describe('HTTP server', () => {
   it('POST /skills/proposed/:id/promote → 404 for unknown id', async () => {
     const r = await request(handle.app).post('/skills/proposed/prop_nope/promote');
     expect(r.status).toBe(404);
+  });
+
+  it('promote also exports to team-brain when teamBrainSkillsDir is configured', async () => {
+    const exportImpl = vi
+      .fn()
+      .mockResolvedValue({ path: '/fake/team-brain/.agents/skills/x/SKILL.md' });
+    const h2 = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory-tb1')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      teamBrainSkillsDir: '/fake/team-brain',
+      exportSkillToTeamBrainImpl: exportImpl,
+    } as Parameters<typeof buildHttpServer>[0]);
+    try {
+      await request(h2.app).post('/workstreams').send({ id: 'sk-tb', title: 'SK TB' });
+      const proposal = skillProposalsStore.propose({
+        workstream_id: 'sk-tb',
+        title: 'Team Brain Pattern',
+        body: 'do X then Y',
+      });
+      const promote = await request(h2.app).post(`/skills/proposed/${proposal.id}/promote`);
+      expect(promote.status).toBe(200);
+      expect(exportImpl).toHaveBeenCalledWith(
+        '/fake/team-brain',
+        'Team Brain Pattern',
+        'do X then Y',
+      );
+      expect(promote.body.team_brain_path).toBe('/fake/team-brain/.agents/skills/x/SKILL.md');
+
+      const events = await request(h2.app).get('/workstreams/sk-tb/events');
+      const promoted = (
+        events.body as Array<{ type: string; payload?: Record<string, unknown> }>
+      ).find((e) => e.type === 'skill_promoted');
+      expect(promoted?.payload?.['team_brain_path']).toBe(
+        '/fake/team-brain/.agents/skills/x/SKILL.md',
+      );
+    } finally {
+      await h2.close();
+    }
+  });
+
+  it('promote succeeds even when the team-brain export throws (best-effort)', async () => {
+    const exportImpl = vi.fn().mockRejectedValue(new Error('disk full'));
+    const h2 = buildHttpServer({
+      eventStore,
+      memoryStore: new MemoryStore(join(dir, 'memory-tb2')),
+      registry,
+      interventionQueue,
+      handbookStore,
+      skillProposalsStore,
+      reportStore,
+      scheduler,
+      settings,
+      workstreamLinks,
+      teamBrainSkillsDir: '/fake/team-brain',
+      exportSkillToTeamBrainImpl: exportImpl,
+    } as Parameters<typeof buildHttpServer>[0]);
+    try {
+      const proposal = skillProposalsStore.propose({
+        workstream_id: 'sk-tb2',
+        title: 'Flaky Export',
+        body: 'body',
+      });
+      const promote = await request(h2.app).post(`/skills/proposed/${proposal.id}/promote`);
+      expect(promote.status).toBe(200);
+      expect(promote.body.status).toBe('promoted');
+      expect(promote.body.team_brain_path).toBeUndefined();
+
+      const handbook = await request(h2.app).get('/handbook');
+      expect(handbook.text).toContain('## Flaky Export');
+    } finally {
+      await h2.close();
+    }
+  });
+
+  it('promote does not attempt team-brain export when teamBrainSkillsDir is absent', async () => {
+    const proposal = skillProposalsStore.propose({
+      workstream_id: 'sk-tb3',
+      title: 'No Team Brain',
+      body: 'body',
+    });
+    const promote = await request(handle.app).post(`/skills/proposed/${proposal.id}/promote`);
+    expect(promote.status).toBe(200);
+    expect(promote.body.team_brain_path).toBeUndefined();
   });
 
   // ---- Reports + presets + scheduler ------------------------------------

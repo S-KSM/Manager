@@ -15,13 +15,13 @@ import yaml from 'js-yaml';
  * Front matter shape (Symphony §5.3 + Dispatch adaptations):
  *
  *   tracker:
- *     kind: linear | mock
+ *     kind: linear | mock | team-brain
  *     project_slug: foo            # Linear only
  *     api_key: $LINEAR_API_KEY     # Linear only
  *     endpoint: https://api.linear.app/graphql
  *     active_states: [Todo, In Progress]
  *     terminal_states: [Done, Closed, Cancelled]
- *     source: /path/to/file.json   # Mock only
+ *     source: /path/to/file.json   # Mock only, or team-brain's plans/ dir root
  *     # v1.4.7 write-back (all optional, default off):
  *     claim_on_dispatch: true        # daemon writes back to the tracker
  *     assign_to_self: true           # default true when claim is on
@@ -44,7 +44,13 @@ import yaml from 'js-yaml';
  *       npm ci
  *     timeout_ms: 60000
  *   agent:
- *     runtime: claude-code        # Dispatch (replaces Symphony's `codex.command`)
+ *     runtime: claude-code        # claude-code | codex | claude-code-tmux
+ *                                 # claude-code-tmux opens the workspace in a
+ *                                 # tmux pane instead of a headless subprocess —
+ *                                 # a human can attach mid-flight. Completion is
+ *                                 # detected via the Stop hook's session_end
+ *                                 # event, not process exit, so it requires the
+ *                                 # daemon's hooks to be installed in the workspace.
  *     command: claude --print --output-format stream-json
  *     max_concurrent_agents: 5
  *     max_turns: 20
@@ -68,14 +74,18 @@ export interface WorkflowConfig {
 }
 
 export interface TrackerConfig {
-  kind: 'linear' | 'mock';
+  kind: 'linear' | 'mock' | 'team-brain';
   endpoint?: string;
   /** Resolved (env var indirection already applied). Empty string means missing. */
   api_key?: string;
   project_slug?: string;
   active_states: string[];
   terminal_states: string[];
-  /** mock only — absolute path resolved relative to workflow dir. */
+  /**
+   * mock — absolute path to a JSON fixture, resolved relative to workflow dir.
+   * team-brain — absolute path to the team-brain checkout's `plans/` dir root,
+   * resolved relative to workflow dir.
+   */
   source?: string;
   /**
    * v1.4.7 — write-back knobs. When `claim_on_dispatch` is false (default),
@@ -132,7 +142,7 @@ export interface HooksConfig {
 }
 
 export interface AgentConfig {
-  runtime: 'claude-code' | 'codex';
+  runtime: 'claude-code' | 'codex' | 'claude-code-tmux';
   command: string;
   max_concurrent_agents: number;
   max_turns: number;
@@ -241,7 +251,8 @@ function coerceConfig(raw: Record<string, unknown>, workflowDir: string): Workfl
 function coerceTracker(raw: unknown, workflowDir: string): TrackerConfig {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const kindRaw = strOr(r['kind'], 'mock');
-  const kind = kindRaw === 'linear' || kindRaw === 'mock' ? kindRaw : 'mock';
+  const kind: TrackerConfig['kind'] =
+    kindRaw === 'linear' ? 'linear' : kindRaw === 'team-brain' ? 'team-brain' : 'mock';
   const claimOnDispatch = boolOr(r['claim_on_dispatch'], false);
   return {
     kind,
@@ -297,7 +308,12 @@ function coerceHooks(raw: unknown): HooksConfig {
 function coerceAgent(raw: unknown): AgentConfig {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const runtimeRaw = strOr(r['runtime'], 'claude-code');
-  const runtime = runtimeRaw === 'codex' ? 'codex' : 'claude-code';
+  const runtime =
+    runtimeRaw === 'codex'
+      ? 'codex'
+      : runtimeRaw === 'claude-code-tmux'
+        ? 'claude-code-tmux'
+        : 'claude-code';
   const byStateRaw = (r['max_concurrent_agents_by_state'] ?? {}) as Record<string, unknown>;
   const byState: Record<string, number> = {};
   if (byStateRaw && typeof byStateRaw === 'object') {

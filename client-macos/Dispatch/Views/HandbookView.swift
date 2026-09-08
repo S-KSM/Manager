@@ -20,6 +20,15 @@ struct HandbookView: View {
     @State private var loadingProposals = true
     @State private var pendingActionID: String? = nil
     @State private var actionError: String? = nil
+    /// v1.4.20 — post-promotion confirmation. Previously the row just
+    /// vanished with no feedback; now we say where the skill went (handbook,
+    /// and the team-brain SKILL.md path when the daemon mirrored it).
+    @State private var promotedNotice: PromotedNotice? = nil
+
+    struct PromotedNotice: Equatable {
+        let title: String
+        let teamBrainPath: String?
+    }
 
     var body: some View {
         ScrollView {
@@ -85,6 +94,45 @@ struct HandbookView: View {
                 }
             }
 
+            if let notice = promotedNotice {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(Resona.Palette.success)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Promoted “\(notice.title)” to the team handbook.")
+                            .font(Resona.Typography.caption)
+                            .foregroundStyle(Resona.Palette.inkSoft)
+                        if let path = notice.teamBrainPath {
+                            HStack(spacing: 4) {
+                                Image(systemName: "doc.text").imageScale(.small)
+                                Text("Mirrored to team-brain: \(path)")
+                                    .font(.caption2.monospaced())
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .textSelection(.enabled)
+                            }
+                            .foregroundStyle(Resona.Palette.inkFaint)
+                            .help("\(path)\nRun /skills-sync in team-brain to fan it out to every repo and surface.")
+                        } else {
+                            Text("Not mirrored to team-brain — set DISPATCH_TEAM_BRAIN_DIR on the daemon to also write a SKILL.md.")
+                                .font(.caption2)
+                                .foregroundStyle(Resona.Palette.inkFaint)
+                        }
+                    }
+                    Spacer()
+                    Button {
+                        promotedNotice = nil
+                    } label: {
+                        Image(systemName: "xmark").imageScale(.small)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Dismiss")
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Resona.Palette.mint.opacity(0.18)))
+            }
+
             if let actionError {
                 Label(actionError, systemImage: "exclamationmark.triangle.fill")
                     .font(Resona.Typography.caption)
@@ -140,7 +188,8 @@ struct HandbookView: View {
         pendingActionID = proposal.id
         actionError = nil
         do {
-            _ = try await client.promoteSkill(id: proposal.id)
+            let promoted = try await client.promoteSkill(id: proposal.id)
+            promotedNotice = PromotedNotice(title: promoted.title, teamBrainPath: promoted.teamBrainPath)
             await reload()
         } catch {
             actionError = (error as? LocalizedError)?.errorDescription

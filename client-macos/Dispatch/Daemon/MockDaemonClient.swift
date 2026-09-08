@@ -25,6 +25,12 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
     private var _reports: [Report]
     private var _schedulerJobs: [SchedulerJob]
     private let _reportPresets: [ReportPreset]
+    /// v1.4.20 — `nil` models an observation-only daemon (404 on
+    /// `/orchestrator/state`).
+    private var _orchestratorState: OrchestratorState?
+    /// v1.4.20 — when set, `promoteSkill` reports a `teamBrainPath` the way
+    /// the live daemon does with `DISPATCH_TEAM_BRAIN_DIR`.
+    private let teamBrainDir: String?
     private let lock = NSLock()
 
     init(
@@ -36,6 +42,9 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         reports: [Report] = MockData.reports,
         schedulerJobs: [SchedulerJob] = MockData.schedulerJobs,
         reportPresets: [ReportPreset] = MockData.reportPresets,
+        links: [String: WorkstreamLink] = MockData.links,
+        orchestratorState: OrchestratorState? = MockData.orchestratorState,
+        teamBrainDir: String? = MockData.teamBrainDir,
         simulatedLatency: Duration = .milliseconds(50)
     ) {
         self._workstreams = workstreams
@@ -46,7 +55,34 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
         self._reports = reports
         self._schedulerJobs = schedulerJobs
         self._reportPresets = reportPresets
+        self._links = links
+        self._orchestratorState = orchestratorState
+        self.teamBrainDir = teamBrainDir
         self.simulatedLatency = simulatedLatency
+    }
+
+    // MARK: - v1.4.20: orchestrator
+
+    func getOrchestratorState() async throws -> OrchestratorState? {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        defer { lock.unlock() }
+        return _orchestratorState
+    }
+
+    /// Test-only: swap the orchestrator snapshot (e.g. to simulate a run
+    /// starting/ending, or the daemon dropping to observation-only).
+    func setOrchestratorState(_ state: OrchestratorState?) {
+        lock.lock()
+        defer { lock.unlock() }
+        _orchestratorState = state
+    }
+
+    func listLinks() async throws -> [WorkstreamLink] {
+        try? await Task.sleep(for: simulatedLatency)
+        lock.lock()
+        defer { lock.unlock() }
+        return Array(_links.values).sorted { $0.workstreamID < $1.workstreamID }
     }
 
     /// Empty-state factory: mock with no workstreams / events / fixtures.
@@ -63,7 +99,10 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
             handbook: "",
             reports: [],
             schedulerJobs: [],
-            reportPresets: MockData.reportPresets
+            reportPresets: MockData.reportPresets,
+            links: [:],
+            orchestratorState: nil,
+            teamBrainDir: nil
         )
     }
 
@@ -385,6 +424,11 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
             throw DaemonError.badResponse(404)
         }
         let old = _proposedSkills[idx]
+        // Mirrors the daemon's slugify: lowercase, non-alphanumerics → "-".
+        let slug = old.title.lowercased()
+            .map { $0.isLetter || $0.isNumber ? String($0) : "-" }
+            .joined()
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         let updated = SkillProposal(
             id: old.id,
             workstreamID: old.workstreamID,
@@ -392,7 +436,8 @@ final class MockDaemonClient: DaemonClientProtocol, @unchecked Sendable {
             body: old.body,
             sourceDecisionID: old.sourceDecisionID,
             proposedAt: old.proposedAt,
-            status: .promoted
+            status: .promoted,
+            teamBrainPath: teamBrainDir.map { "\($0)/.agents/skills/\(slug.isEmpty ? "promoted-skill" : slug)/SKILL.md" }
         )
         _proposedSkills[idx] = updated
         // Append into the handbook so the mock matches the live daemon's

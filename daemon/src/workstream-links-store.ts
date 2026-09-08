@@ -17,7 +17,17 @@ import { getConfig } from './config.js';
  *     stay idempotent across daemon restarts without re-walking Linear's
  *     comment list.
  */
-export type TrackerKind = 'linear';
+/**
+ * `'linear'` since v1.2. `'team-brain'` (v1.4.20) — links created by the
+ * orchestrator at dispatch for `tracker.kind: team-brain` workflows; `issue_url`
+ * is a `file://` path to the plan. Consumers that talk to Linear
+ * (`LinearCommentSyncer`) filter on `tracker_kind === 'linear'` and ignore the rest.
+ */
+export type TrackerKind = 'linear' | 'team-brain';
+
+export function toTrackerKind(kind: string): TrackerKind | null {
+  return kind === 'linear' || kind === 'team-brain' ? kind : null;
+}
 
 export interface WorkstreamLink {
   workstream_id: string;

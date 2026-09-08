@@ -43,21 +43,25 @@ workspace:
   # Each ticket gets its own clone under here. Hooks below run inside
   # the per-ticket workspace.
   root: ~/code/dispatch-build
-  hooks:
-    # Clone fresh per ticket so the agent works in isolation. Use a
-    # sparse / shallow clone if your repo is huge.
-    after_create: |
-      set -euo pipefail
-      git clone --depth 50 git@github.com:YOU/YOUR_REPO.git .
-      git checkout -b "dispatch/$DISPATCH_WORKSTREAM"
-    # before_run keeps the workspace fresh between continuation turns —
-    # rebases on top of main so the agent doesn't merge stale code.
-    before_run: |
-      set -euo pipefail
-      git fetch origin main
-      git rebase origin/main || true
-    # 5 min for clone, plenty for rebase.
-    timeout_ms: 300000
+
+# hooks: is a top-level key (a sibling of workspace:, not nested under it —
+# the loader reads raw['hooks'] at the top level; a nested copy is silently
+# ignored).
+hooks:
+  # Clone fresh per ticket so the agent works in isolation. Use a
+  # sparse / shallow clone if your repo is huge.
+  after_create: |
+    set -euo pipefail
+    git clone --depth 50 git@github.com:YOU/YOUR_REPO.git .
+    git checkout -b "dispatch/$DISPATCH_WORKSTREAM"
+  # before_run keeps the workspace fresh between continuation turns —
+  # rebases on top of main so the agent doesn't merge stale code.
+  before_run: |
+    set -euo pipefail
+    git fetch origin main
+    git rebase origin/main || true
+  # 5 min for clone, plenty for rebase.
+  timeout_ms: 300000
 
 agent:
   runtime: claude-code

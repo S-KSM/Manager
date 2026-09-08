@@ -57,6 +57,20 @@ struct HomeView: View {
     @State private var filter: RadarFilter = .all
     @State private var lastBuckets: DigestBuckets = DigestBuckets()
 
+    /// v1.4.20 — autonomous-mode snapshot. `nil` = observation-only daemon
+    /// (404) → the fleet strip stays hidden and cards show no run info.
+    @State private var orchestrator: OrchestratorState?
+    /// v1.4.20 — tracker links keyed by workstream id, fetched once per poll
+    /// (`GET /links`) so every card can render its tracker chip.
+    @State private var links: [String: WorkstreamLink] = [:]
+
+    private func refreshFleetState() async {
+        orchestrator = (try? await client.getOrchestratorState()) ?? nil
+        if let fetched = try? await client.listLinks() {
+            links = Dictionary(fetched.map { ($0.workstreamID, $0) }, uniquingKeysWith: { _, b in b })
+        }
+    }
+
     /// What occupies the team-floor area. Three exclusive states:
     /// - `.cards`: render the workstream grid.
     /// - `.welcome`: live daemon up, zero workstreams — onboarding card.
@@ -139,6 +153,16 @@ struct HomeView: View {
             Divider()
                 .overlay(Resona.Palette.stone)
 
+            // v1.4.20 — autonomous-mode strip. Only when the daemon runs a
+            // WORKFLOW.md loop; observation-only daemons never see it.
+            if let orchestrator, floorState == .cards {
+                FleetStripView(state: orchestrator) { wsID in
+                    if let ws = workstreams.first(where: { $0.id == wsID }) { onSelect(ws) }
+                }
+                Divider()
+                    .overlay(Resona.Palette.stone)
+            }
+
             HStack(alignment: .top, spacing: 0) {
                 Group {
                     switch floorState {
@@ -160,7 +184,9 @@ struct HomeView: View {
                             onCardTap: onSelect,
                             onLifecycleAction: onLifecycleAction,
                             activeFilter: filter,
-                            filteredIDs: filteredIDs
+                            filteredIDs: filteredIDs,
+                            links: links,
+                            orchestrator: orchestrator
                         )
                     }
                 }
@@ -175,6 +201,17 @@ struct HomeView: View {
             }
         }
         .navigationTitle("Dispatch")
+        // v1.4.20 — poll the orchestrator snapshot + links alongside the
+        // existing workstream refresh cadence. Cheap (two small GETs), and
+        // it's what turns "Autonomous" badges on/off as runs start and end.
+        .task(id: workstreams.map(\.id)) {
+            await refreshFleetState()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(10))
+                if Task.isCancelled { break }
+                await refreshFleetState()
+            }
+        }
     }
 }
 
@@ -652,6 +689,13 @@ private struct HighlightRow: View {
 
 struct WorkstreamCard: View {
     let workstream: Workstream
+    /// v1.4.20 — tracker link for the chip (Linear issue or team-brain plan).
+    var link: WorkstreamLink? = nil
+    /// v1.4.20 — the orchestrator's in-flight entry, when this workstream is
+    /// being driven autonomously right now. Carries the tmux attach info.
+    var run: OrchestratorState.RunningEntry? = nil
+
+    private var isAutonomous: Bool { workstream.autonomousRunning || run != nil }
 
     /// What to render in the "Currently:" line. Resolution order:
     ///  1. LLM-generated `activityHeadline` from the daemon (best — full sentence).
@@ -684,12 +728,22 @@ struct WorkstreamCard: View {
                             .help("Paused")
                     }
                     Spacer()
+                    if isAutonomous {
+                        AutonomousBadge(attachable: run?.attach != nil)
+                    }
                     StatusPill(workstream: workstream)
                 }
 
-                Text(workstream.id)
-                    .font(Resona.Typography.caption)
-                    .foregroundStyle(Resona.Palette.inkFaint)
+                HStack(spacing: 6) {
+                    Text(workstream.id)
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.inkFaint)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let link {
+                        TrackerChip(link: link, compact: true)
+                    }
+                }
 
                 if let goal = workstream.currentSubgoal {
                     HStack(alignment: .top, spacing: 6) {

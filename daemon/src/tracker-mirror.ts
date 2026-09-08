@@ -1,7 +1,7 @@
 import type { Issue, Tracker } from './trackers/index.js';
 import { TrackerError } from './trackers/index.js';
 import type { WorkstreamRegistry } from './workstream.js';
-import type { WorkstreamLinksStore } from './workstream-links-store.js';
+import { type WorkstreamLinksStore, toTrackerKind } from './workstream-links-store.js';
 
 /**
  * TrackerMirror — v1.4.12. Background ticker that surfaces every Linear (or
@@ -130,7 +130,7 @@ export class TrackerMirror {
         }
         this.links.link({
           workstreamId,
-          trackerKind: 'linear',
+          trackerKind: toTrackerKind(this.tracker.kind) ?? 'linear',
           issueId: issue.id,
           issueIdentifier: issue.identifier,
           issueUrl: issue.url ?? null,

@@ -60,6 +60,11 @@ struct Workstream: Identifiable, Codable, Hashable, Sendable {
     /// (awake) when the daemon doesn't ship the field yet, so a pre-feature
     /// daemon doesn't make every robot look dead.
     let liveSession: Bool
+    /// v1.4.20 — "the orchestrator has a turn in flight for this workstream
+    /// right now". Drives the "Autonomous" badge on the Radar card and the
+    /// attach affordance in AgentDetailView. Defaults to `false` when the
+    /// daemon doesn't ship the field (observation-only / older daemon).
+    let autonomousRunning: Bool
 
     init(
         id: String,
@@ -76,7 +81,8 @@ struct Workstream: Identifiable, Codable, Hashable, Sendable {
         activityHeadline: String? = nil,
         activityHeadlineAt: Date? = nil,
         lastEventAt: Date? = nil,
-        liveSession: Bool = true
+        liveSession: Bool = true,
+        autonomousRunning: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -93,6 +99,7 @@ struct Workstream: Identifiable, Codable, Hashable, Sendable {
         self.activityHeadlineAt = activityHeadlineAt
         self.lastEventAt = lastEventAt
         self.liveSession = liveSession
+        self.autonomousRunning = autonomousRunning
     }
 
     enum CodingKeys: String, CodingKey {
@@ -111,6 +118,7 @@ struct Workstream: Identifiable, Codable, Hashable, Sendable {
         case activityHeadlineAt = "activity_headline_at"
         case lastEventAt = "last_event_at"
         case liveSession = "live_session"
+        case autonomousRunning = "autonomous_running"
     }
 
     init(from decoder: Decoder) throws {
@@ -133,6 +141,7 @@ struct Workstream: Identifiable, Codable, Hashable, Sendable {
         // we don't falsely accuse robots of sleeping during boot or against
         // an older daemon.
         self.liveSession = try c.decodeIfPresent(Bool.self, forKey: .liveSession) ?? true
+        self.autonomousRunning = try c.decodeIfPresent(Bool.self, forKey: .autonomousRunning) ?? false
     }
 }
 
@@ -158,13 +167,12 @@ struct Todo: Codable, Hashable, Identifiable, Sendable {
 }
 
 extension Workstream {
+    /// Single source of truth for status tinting — routes through the Resona
+    /// palette so cards, columns, pills and the detail header all agree.
+    /// (Previously this returned raw system `.green`/`.yellow`/`.gray` while
+    /// the views hand-rolled two other mappings.)
     var statusColor: Color {
-        switch status {
-        case .backlog: return .gray.opacity(0.7)
-        case .active:  return .green
-        case .paused:  return .yellow
-        case .retired: return .gray
-        }
+        ResonaStatusTint.forWorkstreamStatus(status.rawValue)
     }
 
     var statusLabel: String {

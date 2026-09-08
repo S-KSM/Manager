@@ -102,17 +102,20 @@ enum MockData {
         ),
         Workstream(
             id: "search-rerank",
-            title: "Search reranker experiment",
+            title: "Phase 2: Search reranker experiment",
             createdAt: daysAgo(7),
-            status: .retired,
-            sessions: ["sess_01J9R..."],
-            currentSubgoal: nil,
+            status: .active,
+            sessions: ["sess_9f3a1c2b"],
+            currentSubgoal: "Wire the reranker behind a feature flag",
             latestConfidence: 0.92,
             needsAttention: false,
             todos: nil,
-            latestActivity: nil,
-            lastEventAt: daysAgo(1),
-            liveSession: false
+            latestActivity: "Running vitest on search/rerank.test.ts",
+            lastEventAt: minutesAgo(1),
+            liveSession: true,
+            // v1.4.20 — driven by the orchestrator (team-brain plan, tmux
+            // runtime); pairs with `MockData.orchestratorState` + `links`.
+            autonomousRunning: true
         ),
         // Two backlog demo workstreams so the kanban Backlog column has data
         // out of the box (shipped in v1.2 alongside the kanban swap).
@@ -702,4 +705,53 @@ Prototype a learned reranker on top of the existing BM25 retrieval.
             nextFireAt: nil
         )
     ]
+
+    // MARK: - v1.4.20 autonomous mode fixtures
+
+    /// A team-brain plan link (created by the orchestrator at dispatch) so
+    /// previews exercise the non-Linear chip variant. Linear links are
+    /// created on demand through `linkWorkstream` (existing tests rely on
+    /// `frontend-refactor` starting unlinked).
+    static let links: [String: WorkstreamLink] = [
+        "search-rerank": WorkstreamLink(
+            workstreamID: "search-rerank",
+            trackerKind: "team-brain",
+            issueID: "search/mvp/phase-2-rerank",
+            issueIdentifier: "search/mvp/phase-2-rerank",
+            issueURL: "file:///Users/you/Code/team-brain/plans/search/mvp/phase-2-rerank.md",
+            lastSeenState: "implemented-pending-pr",
+            lastSyncedAt: nil,
+            createdAt: hoursAgo(5)
+        ),
+    ]
+
+    /// Snapshot of a fleet-style daemon: team-brain tracker, tmux runtime,
+    /// one run in flight with an attachable pane.
+    static let orchestratorState: OrchestratorState = OrchestratorState(
+        pollIntervalMs: 30_000,
+        maxConcurrentAgents: 3,
+        counts: .init(running: 1, retrying: 0, claimed: 1, completed: 4),
+        running: [
+            .init(
+                issueID: "search/mvp/phase-2-rerank",
+                identifier: "search/mvp/phase-2-rerank",
+                workspacePath: "/Users/you/Code/search/.worktrees/search_mvp_phase-2-rerank",
+                startedAt: hoursAgo(5),
+                attempt: nil,
+                workstreamID: "search-rerank",
+                attach: .init(
+                    tmuxSession: "dispatch-search-rerank-sess_9f3a1c2b",
+                    command: "tmux attach -t dispatch-search-rerank-sess_9f3a1c2b"
+                )
+            ),
+        ],
+        retrying: [],
+        trackerKind: "team-brain",
+        agentRuntime: "claude-code-tmux",
+        workflowPath: "/Users/you/Code/search/WORKFLOW.fleet.md"
+    )
+
+    /// Simulated `DISPATCH_TEAM_BRAIN_DIR` so the Promote tray can show the
+    /// "mirrored to team-brain" confirmation in previews.
+    static let teamBrainDir: String? = "/Users/you/Code/team-brain"
 }
