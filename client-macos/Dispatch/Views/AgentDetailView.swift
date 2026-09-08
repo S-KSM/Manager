@@ -32,6 +32,10 @@ struct AgentDetailView: View {
     /// every workstream change + after Link/Unlink operations.
     @State private var linearLink: WorkstreamLink? = nil
     @State private var showLinkSheet = false
+    /// v1.4.20 — the orchestrator's in-flight entry for this workstream
+    /// (`nil` when observation-only or not currently running). Drives the
+    /// Autonomous badge + tmux Attach action in the header.
+    @State private var autonomousRun: OrchestratorState.RunningEntry? = nil
 
     /// Live copy of the workstream record. Seeded from the parent's snapshot
     /// at view-task time; refreshed on every WS event arrival so daemon-side
@@ -183,6 +187,11 @@ struct AgentDetailView: View {
 
     private func refreshLinearLink() async {
         linearLink = (try? await client.getWorkstreamLink(workstreamID: workstream.id)) ?? nil
+        // v1.4.20 — piggyback the orchestrator snapshot on the same refresh
+        // cadence (initial load + every streamed event) so the Autonomous
+        // badge / Attach action track the run starting and ending.
+        let state = (try? await client.getOrchestratorState()) ?? nil
+        autonomousRun = state?.running(for: workstream.id)
     }
 
     private func unlink() async {
@@ -245,7 +254,32 @@ struct AgentDetailView: View {
                     .lineLimit(1)
                     .fixedSize()
             }
-            LinearChip(
+            if let run = autonomousRun {
+                // v1.4.20 — autonomous badge + Attach menu (tmux runtime only).
+                if let attach = run.attach {
+                    Menu {
+                        AttachMenuItems(attach: attach)
+                        if let path = run.workspacePath {
+                            Divider()
+                            Button {
+                                NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                            } label: {
+                                Label("Reveal workspace", systemImage: "folder")
+                            }
+                        }
+                    } label: {
+                        AutonomousBadge(attachable: true)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                } else {
+                    AutonomousBadge(attachable: false)
+                }
+            } else if currentWorkstream.autonomousRunning {
+                AutonomousBadge(attachable: false)
+            }
+            TrackerChip(
                 link: linearLink,
                 onLink: { showLinkSheet = true },
                 onUnlink: { Task { await unlink() } }
@@ -344,66 +378,12 @@ struct AgentDetailView: View {
     }
 }
 
-// MARK: - v1.2 Linear chip
+// MARK: - Tracker chip
 
-/// Tracker-link chip rendered in the AgentDetail header. Two states:
-///
-/// - **Linked**: link icon + identifier + a Menu offering "Open in Linear"
-///   and "Unlink" actions. Truncates the identifier so a long custom prefix
-///   doesn't push the rest of the header off-screen.
-/// - **Unlinked**: a small "Link…" button that opens `LinkLinearSheet`.
-struct LinearChip: View {
-    let link: WorkstreamLink?
-    let onLink: () -> Void
-    let onUnlink: () -> Void
-
-    var body: some View {
-        if let link {
-            Menu {
-                if let urlString = link.issueURL,
-                   let url = URL(string: urlString) {
-                    Link(destination: url) {
-                        Label("Open in Linear", systemImage: "arrow.up.right.square")
-                    }
-                }
-                Divider()
-                Button(role: .destructive, action: onUnlink) {
-                    Label("Unlink", systemImage: "link.badge.plus")
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "link")
-                        .imageScale(.small)
-                    Text(link.issueIdentifier)
-                        .font(.caption.weight(.medium))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule().fill(Resona.Palette.lavender.opacity(0.45))
-                )
-                .overlay(
-                    Capsule().strokeBorder(Resona.Palette.lavender, lineWidth: 1)
-                )
-                .foregroundStyle(Resona.Palette.ink)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Linked to Linear issue \(link.issueIdentifier)")
-        } else {
-            Button(action: onLink) {
-                Label("Link…", systemImage: "link")
-                    .labelStyle(.titleAndIcon)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .help("Link this workstream to a Linear issue")
-        }
-    }
-}
+// v1.2's Linear-only `LinearChip` was replaced in v1.4.20 by the
+// tracker-aware `TrackerChip` (see FleetStripView.swift) — same header slot,
+// but copy/icon/open-action follow `WorkstreamLink.trackerKind` so team-brain
+// plan links render as plans, not as mislabeled Linear issues.
 
 // MARK: - v1.4.4 Approval strip
 

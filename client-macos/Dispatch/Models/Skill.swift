@@ -21,6 +21,10 @@ struct SkillProposal: Codable, Identifiable, Sendable, Hashable {
     let sourceDecisionID: String?
     let proposedAt: Date
     let status: SkillStatus
+    /// v1.4.20 — set on the `POST /skills/proposed/:id/promote` response when
+    /// the daemon also mirrored the skill into a team-brain checkout
+    /// (`DISPATCH_TEAM_BRAIN_DIR`). Absent otherwise; never on list responses.
+    let teamBrainPath: String?
 
     init(
         id: String,
@@ -29,7 +33,8 @@ struct SkillProposal: Codable, Identifiable, Sendable, Hashable {
         body: String,
         sourceDecisionID: String? = nil,
         proposedAt: Date,
-        status: SkillStatus
+        status: SkillStatus,
+        teamBrainPath: String? = nil
     ) {
         self.id = id
         self.workstreamID = workstreamID
@@ -38,6 +43,7 @@ struct SkillProposal: Codable, Identifiable, Sendable, Hashable {
         self.sourceDecisionID = sourceDecisionID
         self.proposedAt = proposedAt
         self.status = status
+        self.teamBrainPath = teamBrainPath
     }
 
     enum CodingKeys: String, CodingKey {
@@ -48,5 +54,6 @@ struct SkillProposal: Codable, Identifiable, Sendable, Hashable {
         case sourceDecisionID = "source_decision_id"
         case proposedAt = "proposed_at"
         case status
+        case teamBrainPath = "team_brain_path"
     }
 }

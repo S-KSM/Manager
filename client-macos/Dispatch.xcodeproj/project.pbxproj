@@ -49,7 +49,10 @@
 		A100000000000000000006A3 /* KanbanBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006B3 /* KanbanBoardView.swift */; };
 		A100000000000000000006A4 /* KanbanLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006B4 /* KanbanLogicTests.swift */; };
 		A100000000000000000006A5 /* WorkstreamLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006B5 /* WorkstreamLink.swift */; };
+		A10000000000000000000F01 /* OrchestratorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000F11 /* OrchestratorState.swift */; };
+		A10000000000000000000F02 /* FleetStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000F12 /* FleetStripView.swift */; };
 		A100000000000000000006A6 /* WorkstreamLinkCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006B6 /* WorkstreamLinkCodableTests.swift */; };
+		A10000000000000000000F03 /* FleetIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000F13 /* FleetIntegrationTests.swift */; };
 		A100000000000000000006A7 /* LinkLinearSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006B7 /* LinkLinearSheet.swift */; };
 		A100000000000000000006A8 /* DispatchURLParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006B8 /* DispatchURLParser.swift */; };
 		A100000000000000000006A9 /* URLRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000006B9 /* URLRouter.swift */; };
@@ -113,7 +116,10 @@
 		A100000000000000000006B3 /* KanbanBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanBoardView.swift; sourceTree = "<group>"; };
 		A100000000000000000006B4 /* KanbanLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanLogicTests.swift; sourceTree = "<group>"; };
 		A100000000000000000006B5 /* WorkstreamLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkstreamLink.swift; sourceTree = "<group>"; };
+		A10000000000000000000F11 /* OrchestratorState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrchestratorState.swift; sourceTree = "<group>"; };
+		A10000000000000000000F12 /* FleetStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FleetStripView.swift; sourceTree = "<group>"; };
 		A100000000000000000006B6 /* WorkstreamLinkCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkstreamLinkCodableTests.swift; sourceTree = "<group>"; };
+		A10000000000000000000F13 /* FleetIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FleetIntegrationTests.swift; sourceTree = "<group>"; };
 		A100000000000000000006B7 /* LinkLinearSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkLinearSheet.swift; sourceTree = "<group>"; };
 		A100000000000000000006B8 /* DispatchURLParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DispatchURLParser.swift; sourceTree = "<group>"; };
 		A100000000000000000006B9 /* URLRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLRouter.swift; sourceTree = "<group>"; };
@@ -180,6 +186,7 @@
 				A100000000000000000006B1 /* WorkstreamCodableTests.swift */,
 				A100000000000000000006B4 /* KanbanLogicTests.swift */,
 				A100000000000000000006B6 /* WorkstreamLinkCodableTests.swift */,
+				A10000000000000000000F13 /* FleetIntegrationTests.swift */,
 				A100000000000000000006BA /* DispatchURLParserTests.swift */,
 				A100000000000000000006BB /* DaemonResolverTests.swift */,
 				A1000000000000000000ABB2 /* LLMErrorViewTests.swift */,
@@ -208,6 +215,7 @@
 				A100000000000000000003B1 /* Report.swift */,
 				A100000000000000000006B2 /* WorkstreamDragPayload.swift */,
 				A100000000000000000006B5 /* WorkstreamLink.swift */,
+				A10000000000000000000F11 /* OrchestratorState.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -244,6 +252,7 @@
 				A100000000000000000005B3 /* WelcomeView.swift */,
 				A100000000000000000006B3 /* KanbanBoardView.swift */,
 				A100000000000000000006B7 /* LinkLinearSheet.swift */,
+				A10000000000000000000F12 /* FleetStripView.swift */,
 				A1000000000000000000ABB1 /* LLMErrorView.swift */,
 				A1000000000000000000F0B1 /* ResonaTheme.swift */,
 			);
@@ -444,6 +453,8 @@
 				A100000000000000000006A2 /* WorkstreamDragPayload.swift in Sources */,
 				A100000000000000000006A3 /* KanbanBoardView.swift in Sources */,
 				A100000000000000000006A5 /* WorkstreamLink.swift in Sources */,
+				A10000000000000000000F01 /* OrchestratorState.swift in Sources */,
+				A10000000000000000000F02 /* FleetStripView.swift in Sources */,
 				A100000000000000000006A7 /* LinkLinearSheet.swift in Sources */,
 				A100000000000000000006AC /* LaunchctlController.swift in Sources */,
 				A1000000000000000000F0A1 /* ResonaTheme.swift in Sources */,
@@ -463,6 +474,7 @@
 				A100000000000000000006A1 /* WorkstreamCodableTests.swift in Sources */,
 				A100000000000000000006A4 /* KanbanLogicTests.swift in Sources */,
 				A100000000000000000006A6 /* WorkstreamLinkCodableTests.swift in Sources */,
+				A10000000000000000000F03 /* FleetIntegrationTests.swift in Sources */,
 				A100000000000000000006AA /* DispatchURLParserTests.swift in Sources */,
 				A100000000000000000006AB /* DaemonResolverTests.swift in Sources */,
 				A1000000000000000000ABA2 /* LLMErrorViewTests.swift in Sources */,

@@ -126,6 +126,20 @@ protocol DaemonClientProtocol: Sendable {
     /// (same as GET).
     func patchSettings(_ patch: ProviderSettingsPatch) async throws -> ProviderSettings
 
+    // MARK: - v1.4.20: orchestrator (autonomous mode)
+
+    /// `GET /orchestrator/state` — snapshot of the autonomous loop: tracker
+    /// kind, agent runtime, workflow file, counts, and per-run entries (with
+    /// a tmux attach command when the runtime is `claude-code-tmux`).
+    /// Returns `nil` when the daemon is observation-only (404).
+    func getOrchestratorState() async throws -> OrchestratorState?
+
+    /// `GET /links` — every persisted tracker link, keyed client-side by
+    /// workstream id so the Radar can render a tracker chip per card with
+    /// one request instead of N. Empty (not an error) when links aren't
+    /// enabled on the daemon.
+    func listLinks() async throws -> [WorkstreamLink]
+
     // MARK: - v1.2: Linear-link UI
 
     /// `GET /workstreams/:id/link` — current link for the workstream, or
@@ -670,6 +684,26 @@ final class LiveDaemonClient: DaemonClientProtocol, @unchecked Sendable {
 
     func patchSettings(_ patch: ProviderSettingsPatch) async throws -> ProviderSettings {
         try await sendJSON(method: "PATCH", path: "settings", body: patch)
+    }
+
+    // MARK: - v1.4.20: orchestrator (autonomous mode)
+
+    func getOrchestratorState() async throws -> OrchestratorState? {
+        do {
+            return try await getJSON(path: "orchestrator/state")
+        } catch DaemonError.badResponse(404, _) {
+            // Observation-only daemon (no --workflow / --mock-tracker).
+            return nil
+        }
+    }
+
+    func listLinks() async throws -> [WorkstreamLink] {
+        do {
+            return try await getJSON(path: "links")
+        } catch DaemonError.badResponse(404, _) {
+            // Daemon built without a links store.
+            return []
+        }
     }
 
     // MARK: - v1.2: Linear-link UI

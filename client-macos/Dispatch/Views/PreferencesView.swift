@@ -14,7 +14,7 @@ struct PreferencesView: View {
 
     var body: some View {
         TabView {
-            DaemonStatusSettings()
+            DaemonStatusSettings(client: client)
                 .tabItem { Label("Daemon", systemImage: "gearshape") }
             ProvidersSettings(client: client)
                 .tabItem { Label("Providers", systemImage: "cpu") }
@@ -26,7 +26,12 @@ struct PreferencesView: View {
 }
 
 private struct DaemonStatusSettings: View {
+    let client: DaemonClientProtocol
     @EnvironmentObject private var resolver: DaemonResolver
+    /// v1.4.20 — `nil` = observation-only (404). Loaded once when the tab
+    /// appears; the Refresh button re-probes.
+    @State private var orchestrator: OrchestratorState?
+    @State private var orchestratorLoaded = false
 
     var body: some View {
         Form {
@@ -37,6 +42,42 @@ private struct DaemonStatusSettings: View {
                 LabeledContent("Reason") {
                     Text(reasonText(resolver.modeReason))
                         .foregroundStyle(Resona.Palette.inkSoft)
+                }
+            }
+
+            // v1.4.20 — what the daemon's WORKFLOW.md loop is wired to, so
+            // "why is this card marked Autonomous?" is answerable from
+            // Settings without reading daemon logs.
+            Section("Autonomous mode") {
+                if let o = orchestrator {
+                    LabeledContent("Tracker") { Text(o.trackerDisplayName) }
+                    LabeledContent("Runtime") { Text(o.runtimeDisplayName) }
+                    if let path = o.workflowPath {
+                        LabeledContent("Workflow") {
+                            Text(path)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(Resona.Palette.inkSoft)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                                .help(path)
+                        }
+                    }
+                    LabeledContent("Agents") {
+                        Text("\(o.counts.running) running of \(o.maxConcurrentAgents) · \(o.counts.retrying) retrying · \(o.counts.completed) completed")
+                            .foregroundStyle(Resona.Palette.inkSoft)
+                    }
+                    if o.isTmuxRuntime {
+                        Text("Runs open in tmux panes — use Attach from a card's menu to take over an agent mid-flight.")
+                            .font(Resona.Typography.caption)
+                            .foregroundStyle(Resona.Palette.inkSoft)
+                    }
+                } else if orchestratorLoaded {
+                    Text("Off — the daemon is observing sessions you launch yourself. Start it with `dispatch start --workflow ./WORKFLOW.md` (see examples/WORKFLOW.fleet.md) to have it claim tickets and spawn agents.")
+                        .font(Resona.Typography.caption)
+                        .foregroundStyle(Resona.Palette.inkSoft)
+                } else {
+                    ProgressView().controlSize(.small)
                 }
             }
 
@@ -63,6 +104,10 @@ private struct DaemonStatusSettings: View {
             }
         }
         .padding(20)
+        .task(id: resolver.mode) {
+            orchestrator = (try? await client.getOrchestratorState()) ?? nil
+            orchestratorLoaded = true
+        }
     }
 
     private func reasonText(_ r: DaemonResolver.ModeReason) -> String {

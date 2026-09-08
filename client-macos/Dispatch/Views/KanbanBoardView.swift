@@ -47,6 +47,10 @@ struct KanbanBoardView: View {
     /// Membership lookups so the filter can match the daemon's bucket
     /// projections (preferred) before falling back to model-level predicates.
     var filteredIDs: Set<String> = []
+    /// v1.4.20 — tracker links keyed by workstream id (cards render a chip).
+    var links: [String: WorkstreamLink] = [:]
+    /// v1.4.20 — autonomous-mode snapshot; `nil` = observation-only daemon.
+    var orchestrator: OrchestratorState? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -56,6 +60,8 @@ struct KanbanBoardView: View {
                     workstreams: buckets[status] ?? [],
                     activeFilter: activeFilter,
                     filteredIDs: filteredIDs,
+                    links: links,
+                    orchestrator: orchestrator,
                     onCardTap: onCardTap,
                     onLifecycleAction: onLifecycleAction,
                     onDrop: { payload in
@@ -92,6 +98,8 @@ struct KanbanColumnView: View {
     let workstreams: [Workstream]
     let activeFilter: HomeView.RadarFilter
     let filteredIDs: Set<String>
+    var links: [String: WorkstreamLink] = [:]
+    var orchestrator: OrchestratorState? = nil
     let onCardTap: (Workstream) -> Void
     let onLifecycleAction: (Workstream, HomeView.LifecycleAction) -> Void
     let onDrop: (WorkstreamDragPayload) -> Void
@@ -181,7 +189,11 @@ struct KanbanColumnView: View {
             LazyVStack(alignment: .leading, spacing: 8) {
                 ForEach(list) { ws in
                     Button { onCardTap(ws) } label: {
-                        WorkstreamCard(workstream: ws)
+                        WorkstreamCard(
+                            workstream: ws,
+                            link: links[ws.id],
+                            run: orchestrator?.running(for: ws.id)
+                        )
                     }
                     .buttonStyle(.plain)
                     .opacity(dim(ws) ? 0.35 : 1.0)
@@ -226,20 +238,17 @@ struct KanbanColumnView: View {
         }
     }
 
+    /// Same source as `Workstream.statusColor` / `StatusPill` so a column
+    /// header, its cards' pills and the detail header never disagree.
     private var headerTint: Color {
-        switch status {
-        case .backlog: return Resona.Palette.lavender
-        case .active:  return Resona.Palette.mint
-        case .paused:  return Resona.Palette.butter
-        case .retired: return Resona.Palette.stone
-        }
+        ResonaStatusTint.forWorkstreamStatus(status.rawValue)
     }
 
     private var columnTint: Color {
         switch status {
-        case .backlog: return Resona.Palette.lilac.opacity(0.35)
-        case .active:  return Resona.Palette.mint.opacity(0.18)
-        case .paused:  return Resona.Palette.butter.opacity(0.22)
+        case .backlog: return headerTint.opacity(0.28)
+        case .active:  return headerTint.opacity(0.18)
+        case .paused:  return headerTint.opacity(0.22)
         case .retired: return Resona.Palette.mist
         }
     }
@@ -282,6 +291,30 @@ struct KanbanColumnView: View {
             Label("Edit title…", systemImage: "pencil")
         }
         .help("Rename this workstream")
+        // v1.4.20 — tracker + autonomous-run actions, only when they apply.
+        if let link = links[ws.id], let url = link.openURL {
+            Divider()
+            Button {
+                NSWorkspace.shared.open(url)
+            } label: {
+                Label(link.openLabel, systemImage: "arrow.up.right.square")
+            }
+            .help("Linked to \(link.trackerDisplayName) \(link.noun) \(link.issueIdentifier)")
+        }
+        if let run = orchestrator?.running(for: ws.id) {
+            Divider()
+            if let attach = run.attach {
+                AttachMenuItems(attach: attach)
+            }
+            if let path = run.workspacePath {
+                Button {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                } label: {
+                    Label("Reveal workspace", systemImage: "folder")
+                }
+                .help(path)
+            }
+        }
         Divider()
         Button(role: .destructive) {
             onLifecycleAction(ws, .retire)

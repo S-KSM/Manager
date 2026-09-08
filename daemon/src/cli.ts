@@ -11,7 +11,8 @@ import { LinearCommentSyncer } from './linear-comment-syncer.js';
 import { TrackerMirror } from './tracker-mirror.js';
 import { SkillDistiller } from './skill-distiller.js';
 import { SubgoalSynthesizer } from './subgoal-synthesizer.js';
-import { buildHttpServer } from './http-server.js';
+import { buildHttpServer, type OrchestratorMeta } from './http-server.js';
+import { toTrackerKind } from './workstream-links-store.js';
 import {
   Orchestrator,
   type ClaimHook,
@@ -21,7 +22,8 @@ import {
 } from './orchestrator.js';
 import { MockTracker } from './trackers/mock.js';
 import { LinearTracker } from './trackers/linear.js';
-import { type AssigneeFilter, type Tracker, TrackerError } from './trackers/index.js';
+import { TeamBrainTracker } from './trackers/team-brain.js';
+import { type AssigneeFilter, type Issue, type Tracker, TrackerError } from './trackers/index.js';
 import { loadWorkflow, watchWorkflow, WorkflowError } from './workflow-loader.js';
 import { WorkspaceManager } from './workspaces.js';
 import { AgentRunner } from './agent-runner.js';
@@ -277,6 +279,10 @@ async function runStart(opts: {
   // so the routes find them after construction.
   const orchestratorHolder: { current: Orchestrator | null } = { current: null };
   const trackerHolder: { current: Tracker | null } = { current: null };
+  // v1.4.20 — same late-binding pattern for the Radar's autonomous-run labels
+  // (tracker kind / runtime / workflow path) and the tmux "Attach" affordance.
+  const orchestratorMetaHolder: { current: OrchestratorMeta | null } = { current: null };
+  const agentRunnerHolder: { current: AgentRunner | null } = { current: null };
   // v1.4.15 — DISPATCH_FILE_TICKET_MAX_PER_HOUR env override. Empty / unset
   // falls through to the http-server default (30/hour). 0 disables.
   const fileTicketEnv = process.env['DISPATCH_FILE_TICKET_MAX_PER_HOUR'];
@@ -284,6 +290,9 @@ async function runStart(opts: {
     fileTicketEnv !== undefined && /^\d+$/.test(fileTicketEnv)
       ? Number.parseInt(fileTicketEnv, 10)
       : undefined;
+  // claude-fleet/team-brain integration — when set, promoted skills also
+  // land in <dir>/.agents/skills/<slug>/SKILL.md for /skills-sync to fan out.
+  const teamBrainSkillsDir = process.env['DISPATCH_TEAM_BRAIN_DIR'];
   const http = buildHttpServer({
     eventStore,
     memoryStore,
@@ -298,11 +307,18 @@ async function runStart(opts: {
     workstreamLinks,
     tickerRestarter: restartTickers,
     ...(fileTicketMaxPerHour !== undefined ? { fileTicketMaxPerHour } : {}),
+    ...(teamBrainSkillsDir ? { teamBrainSkillsDir } : {}),
     get orchestrator() {
       return orchestratorHolder.current ?? undefined;
     },
     get tracker() {
       return trackerHolder.current ?? undefined;
+    },
+    get orchestratorMeta() {
+      return orchestratorMetaHolder.current ?? undefined;
+    },
+    get agentRunner() {
+      return agentRunnerHolder.current ?? undefined;
     },
   } as Parameters<typeof buildHttpServer>[0]);
   const port = await http.listen(cfg.httpPort);
@@ -378,6 +394,11 @@ async function runStart(opts: {
     let terminalStates = ['Done', 'Closed', 'Cancelled', 'Canceled', 'Duplicate'];
     let pollIntervalMs = 5_000;
     let maxConcurrent = 5;
+    // `agent.command`/`turn_timeout_ms`/`runtime` from WORKFLOW.md — undefined
+    // here (mock-tracker shortcut path) preserves AgentRunner's own defaults.
+    let agentCommand: string | undefined;
+    let agentTurnTimeoutMs: number | undefined;
+    let agentRuntime: 'claude-code' | 'codex' | 'claude-code-tmux' = 'claude-code';
     // v1.4.12 — Radar mirror config. Off by default; workflow path
     // overwrites from cfg.tracker. macOS app sees mirrored issues as new
     // backlog workstreams after the first tick.
@@ -414,6 +435,9 @@ async function runStart(opts: {
       terminalStates = cfg.tracker.terminal_states;
       pollIntervalMs = cfg.polling.interval_ms;
       maxConcurrent = cfg.agent.max_concurrent_agents;
+      agentCommand = cfg.agent.command;
+      agentTurnTimeoutMs = cfg.agent.turn_timeout_ms;
+      agentRuntime = cfg.agent.runtime;
       claimConfig = {
         enabled: cfg.tracker.claim_on_dispatch,
         assignToSelf: cfg.tracker.assign_to_self,
@@ -447,6 +471,14 @@ async function runStart(opts: {
           projectSlug: cfg.tracker.project_slug,
           ...(cfg.tracker.endpoint ? { endpoint: cfg.tracker.endpoint } : {}),
         });
+      } else if (cfg.tracker.kind === 'team-brain') {
+        if (!cfg.tracker.source) {
+          process.stderr.write(
+            '[dispatch] team-brain tracker requires tracker.source (plans/ dir)\n',
+          );
+          return;
+        }
+        tracker = new TeamBrainTracker(cfg.tracker.source);
       } else {
         if (!cfg.tracker.source) {
           process.stderr.write('[dispatch] mock tracker requires tracker.source\n');
@@ -454,12 +486,12 @@ async function runStart(opts: {
         }
         tracker = new MockTracker(cfg.tracker.source);
       }
-      agentRunner = new AgentRunner(workspaceMgr);
+      agentRunner = new AgentRunner(workspaceMgr, eventStore);
     } else {
       // --mock-tracker shortcut path.
       tracker = new MockTracker(opts.mockTracker as string);
       workspaceMgr = new WorkspaceManager();
-      agentRunner = new AgentRunner(workspaceMgr);
+      agentRunner = new AgentRunner(workspaceMgr, eventStore);
     }
 
     // v1.4.10.1 — eager-resolve claim_state name → tracker-native stateId.
@@ -478,6 +510,37 @@ async function runStart(opts: {
     // v1.4.9.
     const claimHook = buildClaimHook(tracker, claimConfig);
     const releaseHook = buildReleaseHook(tracker, claimConfig);
+
+    // v1.4.20 — see the call site in dispatchOne. Idempotent: re-dispatch of
+    // the same issue (continuation turns) is a no-op beyond refreshing a
+    // slug-only title. Never throws — a registry/link hiccup must not block
+    // the turn.
+    const registerAutonomousWorkstream = (workstreamId: string, issue: Issue): void => {
+      try {
+        const existing = registry.get(workstreamId);
+        const title = issue.title || issue.identifier;
+        if (!existing) {
+          registry.create(workstreamId, title);
+        } else if (existing.title === workstreamId && title !== workstreamId) {
+          registry.setTitle(workstreamId, title);
+        }
+        const kind = toTrackerKind(tracker.kind);
+        if (workstreamLinks && kind && !workstreamLinks.get(workstreamId)) {
+          workstreamLinks.link({
+            workstreamId,
+            trackerKind: kind,
+            issueId: issue.id,
+            issueIdentifier: issue.identifier,
+            issueUrl: issue.url,
+            lastSeenState: issue.state,
+          });
+        }
+      } catch (err) {
+        process.stderr.write(
+          `[dispatch] register workstream ${workstreamId} failed: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+      }
+    };
 
     orchestrator = new Orchestrator({
       tracker,
@@ -498,12 +561,21 @@ async function runStart(opts: {
         }
         try {
           const ws = await workspaceMgr.prepare(issue.identifier);
+          // v1.4.20 — register the Radar workstream with the issue's real
+          // title and a tracker link BEFORE the first hook fires. Without
+          // this the SessionStart hook's `registry.ensure(id)` creates it
+          // titled with the bare sanitized slug and unlinked, so an
+          // autonomous run is indistinguishable from an ad-hoc session.
+          registerAutonomousWorkstream(ws.workspace_key.toLowerCase(), issue);
           const result = await agentRunner.runTurn({
             workspacePath: ws.path,
             issue,
             attempt,
             prompt: renderPrompt(issue, attempt),
             workstreamId: ws.workspace_key.toLowerCase(),
+            runtime: agentRuntime,
+            ...(agentCommand ? { command: agentCommand } : {}),
+            ...(agentTurnTimeoutMs ? { turnTimeoutMs: agentTurnTimeoutMs } : {}),
             log: (m, c) =>
               process.stderr.write(`[dispatch] ${m}${c ? ' ' + JSON.stringify(c) : ''}\n`),
           });
@@ -525,6 +597,12 @@ async function runStart(opts: {
     // v1.4.11 — also expose the tracker so HTTP /trackers/issues + the
     // file_ticket MCP tool can call createIssue against it.
     trackerHolder.current = tracker;
+    orchestratorMetaHolder.current = {
+      tracker_kind: tracker.kind,
+      agent_runtime: agentRuntime,
+      workflow_path: opts.workflow ? resolve(opts.workflow) : null,
+    };
+    agentRunnerHolder.current = agentRunner;
     // v1.4.12 — Radar mirror. Off by default; opt-in via mirror_to_radar.
     if (mirrorConfig.enabled && workstreamLinks) {
       trackerMirror = new TrackerMirror({
@@ -830,7 +908,10 @@ function buildClaimHook(tracker: Tracker, cfg: ClaimConfig): ClaimHook | null {
       await tracker.claimIssue!(issue.id, opts);
       return { ok: true };
     } catch (err) {
-      if (err instanceof TrackerError && err.code === 'linear_assignee_taken') {
+      if (
+        err instanceof TrackerError &&
+        (err.code === 'linear_assignee_taken' || err.code === 'team_brain_claim_conflict')
+      ) {
         return { ok: false, collided: true };
       }
       return {

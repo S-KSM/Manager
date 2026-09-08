@@ -46,6 +46,9 @@ import type {
 import type { WorkstreamLinksStore } from './workstream-links-store.js';
 import { LinearTracker } from './trackers/linear.js';
 import { type Tracker, TrackerError } from './trackers/index.js';
+import { exportSkillToTeamBrain } from './team-brain-skill-export.js';
+import type { ActiveTmuxSession } from './agent-runner.js';
+import { sanitizeKey } from './workspaces.js';
 
 interface BuildOptions {
   eventStore: EventStore;
@@ -132,6 +135,32 @@ interface BuildOptions {
       model: string,
     ) => Promise<{ ok: boolean; exit_code: number | null; output: string; error?: string }>;
   };
+  /**
+   * claude-fleet/team-brain integration — absolute path to a team-brain
+   * checkout. When present, `POST /skills/proposed/:id/promote` also mirrors
+   * the promoted skill into `<dir>/.agents/skills/<slug>/SKILL.md` (best
+   * effort: failures are logged, never block the promotion). Absent =
+   * unchanged v1.4.18 behavior (handbook-only).
+   */
+  teamBrainSkillsDir?: string;
+  /** Test seam — override the team-brain export so tests don't touch the filesystem. */
+  exportSkillToTeamBrainImpl?: typeof exportSkillToTeamBrain;
+  /**
+   * v1.4.20 — static facts about the active workflow the orchestrator's
+   * snapshot doesn't know (it only sees the tracker as an interface). Merged
+   * into `GET /orchestrator/state` so the Radar can label autonomous runs.
+   * Late-bound like `orchestrator`.
+   */
+  orchestratorMeta?: OrchestratorMeta;
+  /** v1.4.20 — late-bound; exposes in-flight tmux panes for the "Attach" affordance. */
+  agentRunner?: { activeTmuxSessions(): ActiveTmuxSession[] };
+}
+
+/** v1.4.20 — see `BuildOptions.orchestratorMeta`. */
+export interface OrchestratorMeta {
+  tracker_kind: string;
+  agent_runtime: string;
+  workflow_path: string | null;
 }
 
 const VALID_REPORT_STATUSES: ReadonlySet<ReportStatus> = new Set(['draft', 'saved', 'archived']);
@@ -146,6 +175,8 @@ const WORKSTREAM_STATUSES: ReadonlySet<WorkstreamStatus> = new Set([
 ]);
 
 const DIGEST_DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** `GET /workstreams/:id/adr-material` default — matches `LinearCommentSyncer`'s bar. */
+const DEFAULT_ADR_MIN_CONFIDENCE = 0.8;
 
 const INTERVENTION_KINDS: ReadonlySet<InterventionKind> = new Set([
   'nudge',
@@ -195,12 +226,16 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     reportStore,
     scheduler,
     headlineStore,
-    orchestrator,
     settings,
     workstreamLinks,
     tickerRestarter,
-    tracker,
   } = opts;
+  // `orchestrator` / `tracker` / `orchestratorMeta` / `agentRunner` are
+  // late-bound by cli.ts via getters (they're constructed after the HTTP
+  // server). Destructuring them here would snapshot `undefined` once at
+  // build time — read `opts.*` lazily inside each handler instead.
+  const getOrchestrator = () => opts.orchestrator;
+  const getTracker = () => opts.tracker;
   const getProvider = opts.getProvider ?? defaultGetProvider;
   const linearTrackerFactory =
     opts.linearTrackerFactory ??
@@ -212,6 +247,8 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     opts.adminImpls?.spawnDetached ?? ((cmd: string) => defaultSpawnDetached(cmd));
   const adminPullOllamaModel =
     opts.adminImpls?.pullOllamaModel ?? ((model: string) => defaultPullOllamaModel(model));
+  const teamBrainSkillsDir = opts.teamBrainSkillsDir;
+  const exportSkillToTeamBrainImpl = opts.exportSkillToTeamBrainImpl ?? exportSkillToTeamBrain;
   // v1.4.15 — file_ticket rate limiter. Hard-cap 0 disables the check;
   // negative falls through to the default 30/hour.
   const fileTicketMaxPerHour =
@@ -262,7 +299,19 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
       activity_headline: headline?.text ?? null,
       activity_headline_at: headline?.generatedAt ?? null,
       last_event_at: lastEventAt,
+      // v1.4.20 — true while the orchestrator has a turn in flight for this
+      // workstream. Lets the Radar badge autonomous runs (the "autonomous
+      // badge" docs/ARCHITECTURE.md promised for v1.4 but never shipped).
+      autonomous_running: isAutonomousRunning(ws.id),
     };
+  }
+
+  function isAutonomousRunning(workstreamId: string): boolean {
+    const orchestrator = getOrchestrator();
+    if (!orchestrator) return false;
+    return orchestrator
+      .snapshot()
+      .running.some((r) => sanitizeKey(r.identifier).toLowerCase() === workstreamId);
   }
 
   // ---- Health --------------------------------------------------------------
@@ -460,11 +509,35 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
    * when the daemon was started without `--mock-tracker` / a workflow file.
    */
   app.get('/orchestrator/state', (_req: Request, res: Response) => {
+    const orchestrator = getOrchestrator();
     if (!orchestrator) {
       res.status(404).json({ error: 'orchestrator not enabled' });
       return;
     }
-    res.json(orchestrator.snapshot());
+    const snapshot = orchestrator.snapshot();
+    const meta = opts.orchestratorMeta;
+    // v1.4.20 — enrich each running entry with the Radar workstream id it
+    // maps to (same derivation cli.ts uses for DISPATCH_WORKSTREAM) and, for
+    // the tmux runtime, a paste-ready attach command.
+    const tmuxByWorkstream = new Map(
+      (opts.agentRunner?.activeTmuxSessions() ?? []).map((t) => [t.workstream_id, t]),
+    );
+    const running = snapshot.running.map((entry) => {
+      const workstreamId = sanitizeKey(entry.identifier).toLowerCase();
+      const tmux = tmuxByWorkstream.get(workstreamId);
+      return {
+        ...entry,
+        workstream_id: workstreamId,
+        attach: tmux ? { tmux_session: tmux.tmux_session, command: tmux.attach_command } : null,
+      };
+    });
+    res.json({
+      ...snapshot,
+      running,
+      tracker_kind: meta?.tracker_kind ?? null,
+      agent_runtime: meta?.agent_runtime ?? null,
+      workflow_path: meta?.workflow_path ?? null,
+    });
   });
 
   // v1.4.11 — file a new tracker ticket. POST body: { title, description?,
@@ -472,6 +545,7 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
   // setup); 501 when the wired tracker doesn't implement createIssue (e.g.
   // a future read-only adapter); 400 on bad input; 502 on tracker failure.
   app.post('/trackers/issues', async (req: Request, res: Response) => {
+    const tracker = getTracker();
     if (!tracker) {
       res.status(404).json({ error: 'tracker not enabled' });
       return;
@@ -541,6 +615,7 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
   // 404 no tracker / no link / no createIssue support; 400 missing fields;
   // 422 when the state name doesn't resolve; 502 on TrackerError.
   app.post('/trackers/transition', async (req: Request, res: Response) => {
+    const tracker = getTracker();
     if (!tracker) {
       res.status(404).json({ error: 'tracker not enabled' });
       return;
@@ -757,6 +832,47 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     const sinceOffset = typeof since === 'string' ? Number.parseInt(since, 10) : 0;
     const result = await eventStore.readEvents(id, Number.isFinite(sinceOffset) ? sinceOffset : 0);
     res.json(result.events);
+  });
+
+  /**
+   * claude-fleet/team-brain integration — ADR raw material for a workstream:
+   * every `decision` event at/above `min_confidence` (default 0.8, matching
+   * `LinearCommentSyncer`'s bar for "confident enough to surface") plus the
+   * workstream's memory Markdown. A decision's `considered`/`choice`/
+   * `rationale` (from `emit_decision`) already IS an ADR body — `/wiki-sync`
+   * fetches this instead of reconstructing rationale from a merged diff.
+   */
+  app.get('/workstreams/:id/adr-material', async (req: Request, res: Response) => {
+    const id = String(req.params['id']);
+    if (!registry.get(id)) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const minConfidenceRaw = req.query['min_confidence'];
+    const parsedMinConfidence =
+      typeof minConfidenceRaw === 'string' ? Number(minConfidenceRaw) : NaN;
+    const minConfidence = Number.isFinite(parsedMinConfidence)
+      ? parsedMinConfidence
+      : DEFAULT_ADR_MIN_CONFIDENCE;
+    const { events } = await eventStore.readEvents(id);
+    const decisions = events
+      .filter((e) => {
+        const confidence = e.payload?.['confidence'];
+        return (
+          e.type === 'decision' && typeof confidence === 'number' && confidence >= minConfidence
+        );
+      })
+      .map((e) => ({
+        id: e.id,
+        ts: e.ts,
+        session_id: e.session_id,
+        considered: Array.isArray(e.payload?.['considered']) ? e.payload!['considered'] : [],
+        choice: typeof e.payload?.['choice'] === 'string' ? e.payload!['choice'] : '',
+        rationale: typeof e.payload?.['rationale'] === 'string' ? e.payload!['rationale'] : '',
+        confidence: e.payload?.['confidence'],
+      }));
+    const memory = await memoryStore.read(id);
+    res.json({ workstream_id: id, min_confidence: minConfidence, decisions, memory });
   });
 
   /**
@@ -1212,6 +1328,26 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
     const source: SkillSource = { workstream_id: proposal.workstream_id };
     if (proposal.source_decision_id) source.decision_id = proposal.source_decision_id;
     await handbookStore.appendSkill(proposal.title, proposal.body, source);
+    let teamBrainPath: string | undefined;
+    if (teamBrainSkillsDir) {
+      try {
+        const result = await exportSkillToTeamBrainImpl(
+          teamBrainSkillsDir,
+          proposal.title,
+          proposal.body,
+        );
+        teamBrainPath = result.path;
+      } catch (err) {
+        // Best-effort — see BuildOptions.teamBrainSkillsDir doc comment. The
+        // handbook write above already succeeded, so the promotion itself
+        // must not fail just because team-brain is unset/unwritable.
+        process.stderr.write(
+          `[dispatch] team-brain skill export failed for "${proposal.title}": ${
+            err instanceof Error ? err.message : String(err)
+          }\n`,
+        );
+      }
+    }
     const updated = skillProposalsStore.markPromoted(id);
     if (registry.get(proposal.workstream_id)) {
       const event: ManagerEvent = {
@@ -1222,11 +1358,12 @@ export function buildHttpServer(opts: BuildOptions): HttpServerHandle {
         payload: {
           proposal_id: proposal.id,
           title: proposal.title,
+          ...(teamBrainPath ? { team_brain_path: teamBrainPath } : {}),
         },
       };
       await eventStore.appendEvent(proposal.workstream_id, event);
     }
-    res.json(updated);
+    res.json({ ...updated, ...(teamBrainPath ? { team_brain_path: teamBrainPath } : {}) });
   });
 
   app.post('/skills/proposed/:id/dismiss', (req: Request, res: Response) => {

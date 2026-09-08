@@ -173,7 +173,8 @@ export type TrackerErrorCode =
   | 'linear_assignee_taken'
   | 'linear_self_user_failed'
   | 'mock_source_missing'
-  | 'mock_source_invalid';
+  | 'mock_source_invalid'
+  | 'team_brain_claim_conflict';
 
 export class TrackerError extends Error {
   readonly code: TrackerErrorCode;
