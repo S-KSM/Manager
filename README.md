@@ -167,6 +167,7 @@ Daemon binds to `localhost:9876` only. No auth, no remote access in v1. Both arr
 
 ## Where to look next
 
+- [`docs/FLEET_WORKFLOW.md`](docs/FLEET_WORKFLOW.md) — step-by-step: plan in team-brain, run agents in claude-fleet worktrees (batch or autonomous), watch/steer/ship/close the loop in Dispatch.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — components, mermaid diagrams, full HTTP+WebSocket contract, event schema.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — what's shipped vs. what's coming (v1.2 Kanban, v1.5 mobile, v2 ADK / non-coding workflows).
 - [`specs.md`](specs.md) — original vision (now a historical artifact) + a current-state summary.
